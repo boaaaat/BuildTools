@@ -58,6 +58,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             }
             if (slotId >= 0 && slotId < BuildMode.values().length) {
                 BuildToolsState.setMode(serverPlayer, BuildMode.values()[slotId]);
+                populateMenuItems();
                 return;
             }
             if (handleUtilityClick(serverPlayer, slotId)) {
@@ -67,6 +68,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             int shapeIndex = slotId - 9;
             if (shapeIndex >= 0 && shapeIndex < SelectionShape.values().length) {
                 BuildToolsState.setShape(serverPlayer, SelectionShape.values()[shapeIndex]);
+                populateMenuItems();
                 return;
             }
         }
@@ -136,11 +138,22 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(1, modeItem(Items.ORANGE_STAINED_GLASS, BuildMode.REPLACE));
         menuItems.setItem(2, modeItem(Items.RED_STAINED_GLASS, BuildMode.OVERWRITE));
         menuItems.setItem(3, utilityItem(Items.PAPER, "buildtools.menu.materials", "buildtools.menu.materials.description"));
-        menuItems.setItem(4, utilityItem(Items.POWDER_SNOW_BUCKET, "buildtools.menu.gradient", "buildtools.menu.gradient.description"));
+        menuItems.setItem(4, utilityItem(Items.POWDER_SNOW_BUCKET, "buildtools.menu.gradient", "buildtools.menu.gradient.description",
+                owner != null && BuildToolsState.paletteMode(owner) == PaletteMode.GRADIENT));
         menuItems.setItem(5, utilityItem(Items.MAP, "buildtools.menu.save_plan", "buildtools.menu.save_plan.description"));
         menuItems.setItem(6, utilityItem(Items.FILLED_MAP, "buildtools.menu.build_plan", "buildtools.menu.build_plan.description"));
-        menuItems.setItem(7, utilityItem(Items.DISPENSER, "buildtools.menu.random_pattern", "buildtools.menu.random_pattern.description"));
+        menuItems.setItem(7, utilityItem(Items.DISPENSER, "buildtools.menu.random_pattern", "buildtools.menu.random_pattern.description",
+                owner != null && BuildToolsState.paletteMode(owner) == PaletteMode.RANDOM));
         menuItems.setItem(8, utilityItem(Items.HOPPER, "buildtools.menu.return_palette", "buildtools.menu.return_palette.description"));
+        ItemStack gradientDirection = utilityItem(Items.COMPASS, "buildtools.menu.gradient_direction", "buildtools.menu.gradient_direction.description",
+                owner != null && BuildToolsState.paletteMode(owner) == PaletteMode.GRADIENT);
+        if (owner != null) {
+            gradientDirection.set(DataComponents.CUSTOM_NAME, Component.translatable("buildtools.menu.gradient_direction")
+                    .append(": ")
+                    .append(BuildToolsState.gradientDirection(owner).displayName()));
+        }
+        menuItems.setItem(41, gradientDirection);
+        menuItems.setItem(42, utilityItem(Items.BARRIER, "buildtools.menu.clear_advanced_points", "buildtools.menu.clear_advanced_points.description"));
 
         SelectionShape[] shapes = SelectionShape.values();
         ItemStack[] icons = new ItemStack[] {
@@ -161,6 +174,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         for (int i = 0; i < shapes.length; i++) {
             ItemStack stack = icons[i].copy();
             stack.set(DataComponents.CUSTOM_NAME, shapes[i].displayName());
+            setSelected(stack, owner != null && BuildToolsState.selectionShape(owner) == shapes[i]);
             menuItems.setItem(9 + i, stack);
         }
 
@@ -174,18 +188,30 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         return stack;
     }
 
-    private static ItemStack modeItem(net.minecraft.world.item.Item item, BuildMode mode) {
+    private ItemStack modeItem(net.minecraft.world.item.Item item, BuildMode mode) {
         ItemStack stack = named(item, mode.displayName());
         Component description = mode.description().copy().withStyle(ChatFormatting.GRAY);
         stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
+        setSelected(stack, owner != null && BuildToolsState.mode(owner) == mode);
         return stack;
     }
 
     private static ItemStack utilityItem(net.minecraft.world.item.Item item, String nameKey, String descriptionKey) {
+        return utilityItem(item, nameKey, descriptionKey, false);
+    }
+
+    private static ItemStack utilityItem(net.minecraft.world.item.Item item, String nameKey, String descriptionKey, boolean selected) {
         ItemStack stack = named(item, Component.translatable(nameKey));
         Component description = Component.translatable(descriptionKey).withStyle(ChatFormatting.GRAY);
         stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
+        setSelected(stack, selected);
         return stack;
+    }
+
+    private static void setSelected(ItemStack stack, boolean selected) {
+        if (selected) {
+            stack.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true);
+        }
     }
 
     private static boolean handleUtilityClick(ServerPlayer player, int slotId) {
@@ -196,6 +222,8 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             case 6 -> BuildOperationEngine.applyPlan(player);
             case 7 -> BuildToolsState.toggleRandomPattern(player);
             case 8 -> returnPalette(player);
+            case 41 -> BuildToolsState.cycleGradientDirection(player);
+            case 42 -> BuildToolsState.clearAdvancedPoints(player);
             default -> {
                 return false;
             }

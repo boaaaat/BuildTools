@@ -3,6 +3,7 @@ package com.abhil.buildtools.server;
 import com.abhil.buildtools.network.BuildToolsNetworking;
 import com.abhil.buildtools.network.PreviewPayload;
 import com.abhil.buildtools.network.SelectionSyncPayload;
+import com.abhil.buildtools.registry.ModItems;
 import com.abhil.buildtools.shape.BrushMode;
 import com.abhil.buildtools.shape.BuildMode;
 import com.abhil.buildtools.shape.Selection;
@@ -44,10 +45,12 @@ public final class BuildToolsState {
     private static final Map<UUID, EnumMap<ToolProfile, Integer>> BRUSH_RADII = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, Boolean>> GRADIENTS = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, PaletteMode>> PALETTE_MODES = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, GradientDirection>> GRADIENT_DIRECTIONS = new HashMap<>();
     private static final Map<UUID, List<BlockPos>> ADVANCED_POINTS = new HashMap<>();
     private static final int HISTORY_LIMIT = 10;
     private static final int MIN_BRUSH_RADIUS = 1;
     private static final int MAX_BRUSH_RADIUS = 8;
+    private static final int ADVANCED_SELECTION_ACTION_COOLDOWN = 6;
     private static final double ADVANCED_SELECTION_DISTANCE = 100.0D;
     private static final double ADVANCED_POINT_PICK_DISTANCE_SQR = 6.25D;
 
@@ -60,6 +63,10 @@ public final class BuildToolsState {
 
     public static BuildMode mode(ServerPlayer player) {
         return modes(player).getOrDefault(activeProfile(player), BuildMode.FILL);
+    }
+
+    public static SelectionShape selectionShape(ServerPlayer player) {
+        return shape(player);
     }
 
     public static BrushMode brushMode(ServerPlayer player) {
@@ -85,6 +92,10 @@ public final class BuildToolsState {
 
     public static boolean randomPatternEnabled(ServerPlayer player) {
         return paletteMode(player) == PaletteMode.RANDOM;
+    }
+
+    public static GradientDirection gradientDirection(ServerPlayer player) {
+        return gradientDirections(player).getOrDefault(activeProfile(player), GradientDirection.Y);
     }
 
     public static ToolProfile activeToolProfile(ServerPlayer player) {
@@ -231,6 +242,7 @@ public final class BuildToolsState {
         BRUSH_RADII.remove(uuid);
         GRADIENTS.remove(uuid);
         PALETTE_MODES.remove(uuid);
+        GRADIENT_DIRECTIONS.remove(uuid);
         ADVANCED_POINTS.remove(uuid);
     }
 
@@ -431,10 +443,13 @@ public final class BuildToolsState {
     }
 
     public static void cycleBrushMode(ServerPlayer player) {
-        BrushMode next = brushMode(player).next();
-        brushModes(player).put(activeProfile(player), next);
+        setBrushMode(player, brushMode(player).next());
+    }
+
+    public static void setBrushMode(ServerPlayer player, BrushMode mode) {
+        brushModes(player).put(activeProfile(player), mode);
         BuildOperationEngine.clearPendingOperation(player);
-        player.displayClientMessage(Component.translatable("buildtools.message.brush_mode", next.displayName()), true);
+        player.displayClientMessage(Component.translatable("buildtools.message.brush_mode", mode.displayName()), true);
         sendPreview(player);
     }
 
@@ -454,6 +469,14 @@ public final class BuildToolsState {
         setPaletteMode(player, paletteMode(player) == PaletteMode.RANDOM ? PaletteMode.SINGLE : PaletteMode.RANDOM);
     }
 
+    public static void cycleGradientDirection(ServerPlayer player) {
+        GradientDirection next = gradientDirection(player).next();
+        gradientDirections(player).put(activeProfile(player), next);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.gradient_direction", next.displayName()), true);
+        sendPreview(player);
+    }
+
     public static void sendPreview(ServerPlayer player) {
         if (PENDING_PASTE_ORIGINS.containsKey(player.getUUID())) {
             return;
@@ -471,14 +494,32 @@ public final class BuildToolsState {
 
     public static void addAdvancedPoint(ServerPlayer player, BlockPos pos) {
         List<BlockPos> points = new ArrayList<>(ADVANCED_POINTS.getOrDefault(player.getUUID(), List.of()));
-        points.add(pos.immutable());
+        BlockPos point = pos.immutable();
+        if (points.contains(point)) {
+            return;
+        }
+        points.add(point);
         setAdvancedPoints(player, points);
-        player.displayClientMessage(Component.translatable("buildtools.message.advanced_point", points.size(), format(pos)), true);
+        player.displayClientMessage(Component.translatable("buildtools.message.advanced_point", points.size(), format(point)), true);
+    }
+
+    public static boolean beginAdvancedSelectionAction(ServerPlayer player) {
+        if (player.getCooldowns().isOnCooldown(ModItems.ADVANCED_SELECTION_STAFF.get())) {
+            return false;
+        }
+        player.getCooldowns().addCooldown(ModItems.ADVANCED_SELECTION_STAFF.get(), ADVANCED_SELECTION_ACTION_COOLDOWN);
+        return true;
     }
 
     public static void addAdvancedPointAtLook(ServerPlayer player) {
         advancedSelectionTarget(player).ifPresentOrElse(
                 pos -> addAdvancedPoint(player, pos),
+                () -> player.displayClientMessage(Component.translatable("buildtools.error.no_target"), false));
+    }
+
+    public static void addAdvancedPointAdjacentAtLook(ServerPlayer player) {
+        advancedSelectionHit(player).ifPresentOrElse(
+                hit -> addAdvancedPoint(player, hit.getBlockPos().relative(hit.getDirection())),
                 () -> player.displayClientMessage(Component.translatable("buildtools.error.no_target"), false));
     }
 
@@ -533,6 +574,10 @@ public final class BuildToolsState {
     }
 
     public static Optional<BlockPos> advancedSelectionTarget(ServerPlayer player) {
+        return advancedSelectionHit(player).map(BlockHitResult::getBlockPos);
+    }
+
+    private static Optional<BlockHitResult> advancedSelectionHit(ServerPlayer player) {
         Vec3 start = player.getEyePosition();
         Vec3 end = start.add(player.getViewVector(1.0F).scale(ADVANCED_SELECTION_DISTANCE));
         BlockHitResult hit = player.level().clip(new ClipContext(
@@ -541,7 +586,7 @@ public final class BuildToolsState {
                 ClipContext.Block.OUTLINE,
                 ClipContext.Fluid.NONE,
                 player));
-        return hit.getType() == HitResult.Type.BLOCK ? Optional.of(hit.getBlockPos()) : Optional.empty();
+        return hit.getType() == HitResult.Type.BLOCK ? Optional.of(hit) : Optional.empty();
     }
 
     public static void rotateSelection(ServerPlayer player) {
@@ -693,6 +738,10 @@ public final class BuildToolsState {
 
     private static EnumMap<ToolProfile, PaletteMode> paletteModes(ServerPlayer player) {
         return PALETTE_MODES.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, GradientDirection> gradientDirections(ServerPlayer player) {
+        return GRADIENT_DIRECTIONS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
     }
 
     private static void transformBlueprint(ServerPlayer player, String messageKey, java.util.function.Function<BlockPos, BlockPos> transform) {

@@ -1,6 +1,7 @@
 package com.abhil.buildtools.server;
 
 import com.abhil.buildtools.registry.ModMenus;
+import com.abhil.buildtools.shape.BrushMode;
 import com.abhil.buildtools.shape.BuildMode;
 import com.abhil.buildtools.shape.SelectionShape;
 import java.util.ArrayList;
@@ -121,11 +122,10 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(0, modeItem(Items.LIME_STAINED_GLASS, BuildMode.FILL));
         menuItems.setItem(1, modeItem(Items.ORANGE_STAINED_GLASS, BuildMode.REPLACE));
         menuItems.setItem(2, modeItem(Items.RED_STAINED_GLASS, BuildMode.OVERWRITE));
-        menuItems.setItem(3, utilityItem(Items.POWDER_SNOW_BUCKET, "buildtools.menu.gradient", "buildtools.menu.gradient.description"));
-        menuItems.setItem(4, utilityItem(Items.BARRIER, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
-        menuItems.setItem(5, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.save_preset", "buildtools.menu.save_preset.description"));
-        menuItems.setItem(6, utilityItem(Items.BOOK, "buildtools.menu.load_preset", "buildtools.menu.load_preset.description"));
-        populateShapes(4);
+        menuItems.setItem(3, utilityItem(Items.BARRIER, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
+        menuItems.setItem(4, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.save_preset", "buildtools.menu.save_preset.description"));
+        menuItems.setItem(5, utilityItem(Items.BOOK, "buildtools.menu.load_preset", "buildtools.menu.load_preset.description"));
+        populateShapes(9);
     }
 
     private void populateSelectionMenu() {
@@ -143,11 +143,15 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
     }
 
     private void populateBrushMenu() {
-        menuItems.setItem(0, utilityItem(Items.PAINTING, "buildtools.menu.brush_mode", "buildtools.menu.brush_mode.description"));
-        menuItems.setItem(1, utilityItem(Items.LIGHT_BLUE_DYE, "buildtools.menu.brush_smaller", "buildtools.menu.brush_radius.description"));
-        menuItems.setItem(2, utilityItem(Items.BLUE_DYE, "buildtools.menu.brush_larger", "buildtools.menu.brush_radius.description"));
-        menuItems.setItem(3, modeItem(Items.LIME_STAINED_GLASS, BuildMode.FILL));
-        menuItems.setItem(4, modeItem(Items.ORANGE_STAINED_GLASS, BuildMode.REPLACE));
+        BrushMode brushMode = owner == null ? BrushMode.SPHERE : BuildToolsState.brushMode(owner);
+        int radius = owner == null ? 2 : BuildToolsState.brushRadius(owner);
+        menuItems.setItem(0, brushModeItem(Items.SLIME_BALL, BrushMode.SPHERE, brushMode));
+        menuItems.setItem(1, brushModeItem(Items.SCAFFOLDING, BrushMode.CYLINDER, brushMode));
+        menuItems.setItem(2, brushModeItem(Items.GRASS_BLOCK, BrushMode.SMOOTH, brushMode));
+        menuItems.setItem(3, brushModeItem(Items.ORANGE_DYE, BrushMode.REPLACE, brushMode));
+        menuItems.setItem(9, utilityItem(Items.LIGHT_BLUE_DYE, "buildtools.menu.brush_smaller", "buildtools.menu.brush_radius.description"));
+        menuItems.setItem(10, named(Items.PAINTING, Component.translatable("buildtools.menu.brush_radius", radius)));
+        menuItems.setItem(11, utilityItem(Items.BLUE_DYE, "buildtools.menu.brush_larger", "buildtools.menu.brush_radius.description"));
     }
 
     private void populateBreakerMenu() {
@@ -157,10 +161,20 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
 
     private void populateTrowelMenu() {
         menuItems.setItem(0, utilityItem(Items.PAPER, "buildtools.menu.copy_blueprint", "buildtools.menu.copy_blueprint.description"));
-        menuItems.setItem(1, utilityItem(Items.CLOCK, "buildtools.menu.rotate_blueprint", "buildtools.menu.rotate_blueprint.description"));
-        menuItems.setItem(2, utilityItem(Items.IRON_BARS, "buildtools.menu.mirror_blueprint_x", "buildtools.menu.mirror_blueprint.description"));
-        menuItems.setItem(3, utilityItem(Items.CHAIN, "buildtools.menu.mirror_blueprint_z", "buildtools.menu.mirror_blueprint.description"));
-        menuItems.setItem(4, utilityItem(Items.BARRIER, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
+        menuItems.setItem(1, utilityItem(Items.ENDER_PEARL, "buildtools.menu.paste_blueprint_here", "buildtools.menu.paste_blueprint_here.description"));
+        menuItems.setItem(2, utilityItem(Items.ENDER_EYE, "buildtools.menu.paste_blueprint_selection", "buildtools.menu.paste_blueprint_selection.description"));
+        menuItems.setItem(3, utilityItem(Items.LIME_DYE, "buildtools.menu.confirm_paste", "buildtools.menu.confirm_paste.description"));
+        menuItems.setItem(4, utilityItem(Items.BARRIER, "buildtools.menu.cancel_paste", "buildtools.menu.cancel_paste.description"));
+        menuItems.setItem(5, utilityItem(Items.CLOCK, "buildtools.menu.rotate_blueprint", "buildtools.menu.rotate_blueprint.description"));
+        menuItems.setItem(6, utilityItem(Items.IRON_BARS, "buildtools.menu.mirror_blueprint_x", "buildtools.menu.mirror_blueprint.description"));
+        menuItems.setItem(7, utilityItem(Items.CHAIN, "buildtools.menu.mirror_blueprint_z", "buildtools.menu.mirror_blueprint.description"));
+        menuItems.setItem(8, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
+        menuItems.setItem(18, utilityItem(Items.ARROW, "buildtools.menu.nudge_west", "buildtools.menu.nudge_paste.description"));
+        menuItems.setItem(19, utilityItem(Items.ARROW, "buildtools.menu.nudge_east", "buildtools.menu.nudge_paste.description"));
+        menuItems.setItem(20, utilityItem(Items.ARROW, "buildtools.menu.nudge_down", "buildtools.menu.nudge_paste.description"));
+        menuItems.setItem(21, utilityItem(Items.ARROW, "buildtools.menu.nudge_up", "buildtools.menu.nudge_paste.description"));
+        menuItems.setItem(22, utilityItem(Items.ARROW, "buildtools.menu.nudge_north", "buildtools.menu.nudge_paste.description"));
+        menuItems.setItem(23, utilityItem(Items.ARROW, "buildtools.menu.nudge_south", "buildtools.menu.nudge_paste.description"));
     }
 
     private void populateShapes(int startSlot) {
@@ -183,6 +197,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         for (int i = 0; i < shapes.length; i++) {
             ItemStack stack = icons[i].copy();
             stack.set(DataComponents.CUSTOM_NAME, shapes[i].displayName());
+            setSelected(stack, owner != null && BuildToolsState.selectionShape(owner) == shapes[i]);
             menuItems.setItem(startSlot + i, stack);
         }
     }
@@ -217,12 +232,11 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             return true;
         }
         switch (slotId) {
-            case 3 -> BuildToolsState.toggleGradient(player);
-            case 4 -> BuildToolsState.clearSelection(player);
-            case 5 -> BuildToolsState.savePreset(player);
-            case 6 -> BuildToolsState.loadPreset(player);
+            case 3 -> BuildToolsState.clearSelection(player);
+            case 4 -> BuildToolsState.savePreset(player);
+            case 5 -> BuildToolsState.loadPreset(player);
             default -> {
-                return handleShapeClick(player, slotId, 4);
+                return handleShapeClick(player, slotId, 9);
             }
         }
         return true;
@@ -249,11 +263,12 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
 
     private boolean handleBrushClick(ServerPlayer player, int slotId) {
         switch (slotId) {
-            case 0 -> BuildToolsState.cycleBrushMode(player);
-            case 1 -> BuildToolsState.changeBrushRadius(player, -1);
-            case 2 -> BuildToolsState.changeBrushRadius(player, 1);
-            case 3 -> BuildToolsState.setMode(player, BuildMode.FILL);
-            case 4 -> BuildToolsState.setMode(player, BuildMode.REPLACE);
+            case 0 -> BuildToolsState.setBrushMode(player, BrushMode.SPHERE);
+            case 1 -> BuildToolsState.setBrushMode(player, BrushMode.CYLINDER);
+            case 2 -> BuildToolsState.setBrushMode(player, BrushMode.SMOOTH);
+            case 3 -> BuildToolsState.setBrushMode(player, BrushMode.REPLACE);
+            case 9 -> BuildToolsState.changeBrushRadius(player, -1);
+            case 11 -> BuildToolsState.changeBrushRadius(player, 1);
             default -> {
                 return false;
             }
@@ -272,10 +287,20 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
     private boolean handleTrowelClick(ServerPlayer player, int slotId) {
         switch (slotId) {
             case 0 -> BuildOperationEngine.copySelection(player);
-            case 1 -> BuildToolsState.rotateBlueprint(player);
-            case 2 -> BuildToolsState.mirrorBlueprintX(player);
-            case 3 -> BuildToolsState.mirrorBlueprintZ(player);
-            case 4 -> BuildToolsState.clearSelection(player);
+            case 1 -> BuildOperationEngine.previewBlueprintPasteAtPlayer(player);
+            case 2 -> BuildOperationEngine.previewBlueprintPasteAtSelection(player);
+            case 3 -> BuildOperationEngine.confirmPendingBlueprintPaste(player);
+            case 4 -> BuildToolsState.clearPendingPaste(player);
+            case 5 -> BuildToolsState.rotateBlueprint(player);
+            case 6 -> BuildToolsState.mirrorBlueprintX(player);
+            case 7 -> BuildToolsState.mirrorBlueprintZ(player);
+            case 8 -> BuildToolsState.clearSelection(player);
+            case 18 -> BuildOperationEngine.nudgePendingBlueprintPaste(player, net.minecraft.core.Direction.WEST);
+            case 19 -> BuildOperationEngine.nudgePendingBlueprintPaste(player, net.minecraft.core.Direction.EAST);
+            case 20 -> BuildOperationEngine.nudgePendingBlueprintPaste(player, net.minecraft.core.Direction.DOWN);
+            case 21 -> BuildOperationEngine.nudgePendingBlueprintPaste(player, net.minecraft.core.Direction.UP);
+            case 22 -> BuildOperationEngine.nudgePendingBlueprintPaste(player, net.minecraft.core.Direction.NORTH);
+            case 23 -> BuildOperationEngine.nudgePendingBlueprintPaste(player, net.minecraft.core.Direction.SOUTH);
             default -> {
                 return false;
             }
@@ -298,18 +323,39 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         return stack;
     }
 
-    private static ItemStack modeItem(net.minecraft.world.item.Item item, BuildMode mode) {
+    private ItemStack modeItem(net.minecraft.world.item.Item item, BuildMode mode) {
         ItemStack stack = named(item, mode.displayName());
         Component description = mode.description().copy().withStyle(ChatFormatting.GRAY);
         stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
+        setSelected(stack, owner != null && BuildToolsState.mode(owner) == mode);
         return stack;
     }
 
     private static ItemStack utilityItem(net.minecraft.world.item.Item item, String nameKey, String descriptionKey) {
+        return utilityItem(item, nameKey, descriptionKey, false);
+    }
+
+    private static ItemStack utilityItem(net.minecraft.world.item.Item item, String nameKey, String descriptionKey, boolean selected) {
         ItemStack stack = named(item, Component.translatable(nameKey));
         Component description = Component.translatable(descriptionKey).withStyle(ChatFormatting.GRAY);
         stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
+        setSelected(stack, selected);
         return stack;
+    }
+
+    private static ItemStack brushModeItem(net.minecraft.world.item.Item item, BrushMode mode, BrushMode selectedMode) {
+        ItemStack stack = named(item, mode.displayName());
+        Component description = Component.translatable("buildtools.brush." + mode.name().toLowerCase(java.util.Locale.ROOT) + ".description")
+                .withStyle(ChatFormatting.GRAY);
+        stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
+        setSelected(stack, mode == selectedMode);
+        return stack;
+    }
+
+    private static void setSelected(ItemStack stack, boolean selected) {
+        if (selected) {
+            stack.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true);
+        }
     }
 
     private static ItemStack emptyHistoryItem(boolean undo) {

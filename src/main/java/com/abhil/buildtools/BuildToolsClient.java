@@ -19,6 +19,7 @@ import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.client.event.InputEvent;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import net.neoforged.neoforge.client.event.RegisterMenuScreensEvent;
@@ -29,6 +30,8 @@ import net.neoforged.neoforge.network.PacketDistributor;
 @Mod(value = BuildTools.MOD_ID, dist = Dist.CLIENT)
 @EventBusSubscriber(modid = BuildTools.MOD_ID, value = Dist.CLIENT)
 public final class BuildToolsClient {
+    private static boolean advancedSelectionAttackDown;
+
     public BuildToolsClient(IEventBus modEventBus, ModContainer container) {
         modEventBus.addListener(this::registerScreens);
         container.registerExtensionPoint(IConfigScreenFactory.class, ConfigurationScreen::new);
@@ -47,6 +50,14 @@ public final class BuildToolsClient {
     @SubscribeEvent
     static void renderGui(RenderGuiEvent.Post event) {
         BuildToolStatusOverlay.render(event);
+    }
+
+    @SubscribeEvent
+    static void clientTick(ClientTickEvent.Post event) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (!minecraft.options.keyAttack.isDown()) {
+            advancedSelectionAttackDown = false;
+        }
     }
 
     @SubscribeEvent
@@ -70,15 +81,23 @@ public final class BuildToolsClient {
         if (!event.isAttack()
                 || minecraft.player == null
                 || minecraft.screen != null
-                || minecraft.hitResult == null
-                || minecraft.hitResult.getType() != HitResult.Type.MISS) {
+                || minecraft.hitResult == null) {
             return;
         }
         ItemStack held = minecraft.player.getMainHandItem();
         if (held.is(ModItems.ADVANCED_SELECTION_STAFF.get())) {
-            PacketDistributor.sendToServer(new AdvancedSelectionActionPayload());
+            if (advancedSelectionAttackDown) {
+                event.setSwingHand(false);
+                event.setCanceled(true);
+                return;
+            }
+            advancedSelectionAttackDown = true;
+            PacketDistributor.sendToServer(new AdvancedSelectionActionPayload(minecraft.player.isShiftKeyDown()));
             event.setSwingHand(false);
             event.setCanceled(true);
+            return;
+        }
+        if (minecraft.hitResult.getType() != HitResult.Type.MISS) {
             return;
         }
         if (!isAirMenuTool(held)) {

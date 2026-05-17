@@ -9,27 +9,31 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
-public record AdvancedSelectionActionPayload() implements CustomPacketPayload {
+public record AdvancedSelectionActionPayload(boolean addAdjacent) implements CustomPacketPayload {
     public static final Type<AdvancedSelectionActionPayload> TYPE = new Type<>(BuildTools.id("advanced_selection_action"));
     public static final StreamCodec<RegistryFriendlyByteBuf, AdvancedSelectionActionPayload> STREAM_CODEC = CustomPacketPayload.codec(
             AdvancedSelectionActionPayload::write,
             AdvancedSelectionActionPayload::read);
 
     private static AdvancedSelectionActionPayload read(RegistryFriendlyByteBuf buffer) {
-        return new AdvancedSelectionActionPayload();
+        return new AdvancedSelectionActionPayload(buffer.readBoolean());
     }
 
     private void write(RegistryFriendlyByteBuf buffer) {
+        buffer.writeBoolean(addAdjacent);
     }
 
     public static void handle(AdvancedSelectionActionPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player) || !player.getMainHandItem().is(ModItems.ADVANCED_SELECTION_STAFF.get())) {
             return;
         }
-        if (player.isShiftKeyDown()) {
-            BuildToolsState.removeAdvancedPointAtLook(player);
+        if (!BuildToolsState.beginAdvancedSelectionAction(player)) {
+            return;
+        }
+        if (payload.addAdjacent()) {
+            BuildToolsState.addAdvancedPointAdjacentAtLook(player);
         } else {
-            BuildToolsState.addAdvancedPointAtLook(player);
+            BuildToolsState.removeAdvancedPointAtLook(player);
         }
     }
 

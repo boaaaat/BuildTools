@@ -13,10 +13,12 @@ import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
+import org.joml.Matrix4f;
 
 public final class ClientSelectionRenderer {
     private ClientSelectionRenderer() {
@@ -37,7 +39,7 @@ public final class ClientSelectionRenderer {
         ClientSelectionData.first().ifPresent(pos -> renderBox(poseStack, lines, new AABB(pos), 0.1F, 0.8F, 1.0F, 1.0F));
         ClientSelectionData.second().ifPresent(pos -> renderBox(poseStack, lines, new AABB(pos), 1.0F, 0.7F, 0.1F, 1.0F));
         renderSelectionHandles(poseStack, lines);
-        renderAdvancedPoints(event, poseStack, buffers, lines);
+        renderAdvancedPointBoxes(poseStack, lines);
 
         List<BlockPos> preview = ClientSelectionData.preview();
         if (!preview.isEmpty()) {
@@ -53,8 +55,10 @@ public final class ClientSelectionRenderer {
             }
         }
 
-        poseStack.popPose();
         buffers.endBatch(RenderType.lines());
+        renderAdvancedPointLabels(event, poseStack, buffers);
+        poseStack.popPose();
+        buffers.endBatch();
     }
 
     private static boolean rendersAffectedBlocks(SelectionShape shape, boolean detailedPreview) {
@@ -94,38 +98,35 @@ public final class ClientSelectionRenderer {
         }
     }
 
-    private static void renderAdvancedPoints(RenderLevelStageEvent event, PoseStack poseStack, MultiBufferSource buffers, VertexConsumer lines) {
+    private static void renderAdvancedPointBoxes(PoseStack poseStack, VertexConsumer lines) {
         List<BlockPos> points = ClientSelectionData.points();
         if (points.isEmpty()) {
             return;
         }
 
-        for (int i = 0; i < points.size(); i++) {
-            BlockPos point = points.get(i);
+        for (BlockPos point : points) {
             renderBox(poseStack, lines, new AABB(point).inflate(0.08D), 1.0F, 0.25F, 0.95F, 1.0F);
-            renderPointLabel(event, poseStack, buffers, point, Integer.toString(i + 1));
         }
     }
 
-    private static void renderPointLabel(RenderLevelStageEvent event, PoseStack poseStack, MultiBufferSource buffers, BlockPos point, String label) {
-        Minecraft minecraft = Minecraft.getInstance();
-        Font font = minecraft.font;
+    private static void renderAdvancedPointLabels(RenderLevelStageEvent event, PoseStack poseStack, MultiBufferSource buffers) {
+        List<BlockPos> points = ClientSelectionData.points();
+        for (int i = 0; i < points.size(); i++) {
+            renderPointLabel(event, poseStack, buffers, points.get(i), Component.literal("#" + (i + 1)));
+        }
+    }
+
+    private static void renderPointLabel(RenderLevelStageEvent event, PoseStack poseStack, MultiBufferSource buffers, BlockPos point, Component label) {
+        Font font = Minecraft.getInstance().font;
         poseStack.pushPose();
-        poseStack.translate(point.getX() + 0.5D, point.getY() + 1.2D, point.getZ() + 0.5D);
+        poseStack.translate(point.getX() + 0.5D, point.getY() + 1.45D, point.getZ() + 0.5D);
         poseStack.mulPose(event.getCamera().rotation());
-        poseStack.scale(-0.03F, -0.03F, 0.03F);
+        poseStack.scale(0.04F, -0.04F, 0.04F);
+        Matrix4f matrix = poseStack.last().pose();
+        int background = (int)(Minecraft.getInstance().options.getBackgroundOpacity(0.35F) * 255.0F) << 24;
         float x = -font.width(label) / 2.0F;
-        font.drawInBatch(
-                label,
-                x,
-                0.0F,
-                0xFFFFFFFF,
-                false,
-                poseStack.last().pose(),
-                buffers,
-                Font.DisplayMode.SEE_THROUGH,
-                0xAA000000,
-                LightTexture.FULL_BRIGHT);
+        font.drawInBatch(label, x, 0.0F, 0x55FFFFFF, false, matrix, buffers, Font.DisplayMode.SEE_THROUGH, background, LightTexture.FULL_BRIGHT);
+        font.drawInBatch(label, x, 0.0F, 0xFFFFFFFF, false, matrix, buffers, Font.DisplayMode.NORMAL, 0, LightTexture.FULL_BRIGHT);
         poseStack.popPose();
     }
 

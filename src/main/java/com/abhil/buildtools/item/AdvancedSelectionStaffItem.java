@@ -22,7 +22,7 @@ public final class AdvancedSelectionStaffItem extends BuildToolItem {
         if (player instanceof ServerPlayer serverPlayer) {
             if (player.isShiftKeyDown()) {
                 AdvancedBuildToolsModeMenu.open(serverPlayer);
-            } else {
+            } else if (BuildToolsState.beginAdvancedSelectionAction(serverPlayer)) {
                 BuildToolsState.addAdvancedPoint(serverPlayer, BuildToolsState.advancedSelectionTarget(serverPlayer).orElse(context.getClickedPos()));
             }
         }
@@ -35,7 +35,7 @@ public final class AdvancedSelectionStaffItem extends BuildToolItem {
         if (player instanceof ServerPlayer serverPlayer) {
             if (player.isShiftKeyDown()) {
                 AdvancedBuildToolsModeMenu.open(serverPlayer);
-            } else {
+            } else if (BuildToolsState.beginAdvancedSelectionAction(serverPlayer)) {
                 BuildToolsState.addAdvancedPointAtLook(serverPlayer);
             }
             return InteractionResultHolder.sidedSuccess(stack, level.isClientSide());

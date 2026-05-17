@@ -88,7 +88,8 @@ public final class BuildOperationEngine {
         }
 
         BuildMode mode = BuildToolsState.mode(player);
-        PaletteMode paletteMode = advanced ? BuildToolsState.paletteMode(player) : (BuildToolsState.gradientEnabled(player) ? PaletteMode.GRADIENT : PaletteMode.SINGLE);
+        PaletteMode paletteMode = advanced ? BuildToolsState.paletteMode(player) : PaletteMode.SINGLE;
+        GradientDirection gradientDirection = advanced ? BuildToolsState.gradientDirection(player) : GradientDirection.Y;
         List<BlockPos> positions = new ArrayList<>();
         List<BlockState> targets = new ArrayList<>();
         List<UndoSnapshot.Entry> undo = new ArrayList<>();
@@ -107,7 +108,7 @@ public final class BuildOperationEngine {
             if (mode == BuildMode.REPLACE && !(advanced ? BuildToolsState.matchesReplaceTargets(player, previous, replaceMatch) : previous.is(replaceMatch.getBlock()))) {
                 continue;
             }
-            BlockState targetState = materialTarget(selection, pos, target, palette, paletteMode);
+            BlockState targetState = materialTarget(selection, pos, target, palette, paletteMode, gradientDirection);
             positions.add(pos.immutable());
             targets.add(targetState);
             boolean restore = previous.isAir() || mode == BuildMode.FILL;
@@ -214,6 +215,7 @@ public final class BuildOperationEngine {
 
         BuildMode mode = BuildToolsState.mode(player);
         PaletteMode paletteMode = BuildToolsState.paletteMode(player);
+        GradientDirection gradientDirection = BuildToolsState.gradientDirection(player);
         BlockState replaceMatch = BuildToolsState.replaceTarget(player);
         List<BuildPlan.Entry> entries = new ArrayList<>();
         ServerLevel level = player.serverLevel();
@@ -225,7 +227,7 @@ public final class BuildOperationEngine {
             if (mode == BuildMode.REPLACE && !BuildToolsState.matchesReplaceTargets(player, previous, replaceMatch)) {
                 continue;
             }
-            entries.add(new BuildPlan.Entry(pos.immutable(), materialTarget(selection, pos, target, palette, paletteMode)));
+            entries.add(new BuildPlan.Entry(pos.immutable(), materialTarget(selection, pos, target, palette, paletteMode, gradientDirection)));
         }
         if (entries.isEmpty()) {
             fail(player, "buildtools.error.no_targets");
@@ -473,6 +475,44 @@ public final class BuildOperationEngine {
         }
         previewBlueprintPaste(player, origin);
         return false;
+    }
+
+    public static boolean previewBlueprintPasteAtPlayer(ServerPlayer player) {
+        previewBlueprintPaste(player, player.blockPosition());
+        return false;
+    }
+
+    public static boolean previewBlueprintPasteAtSelection(ServerPlayer player) {
+        Selection selection = BuildToolsState.selection(player);
+        if (!selection.isComplete() || selection.dimension() == null || !selection.dimension().equals(player.level().dimension())) {
+            fail(player, "buildtools.error.incomplete_selection");
+            return false;
+        }
+        previewBlueprintPaste(player, selection.first());
+        return false;
+    }
+
+    public static boolean confirmPendingBlueprintPaste(ServerPlayer player) {
+        BlockPos origin = BuildToolsState.pendingPasteOrigin(player).orElse(null);
+        if (origin == null) {
+            fail(player, "buildtools.error.no_paste_preview");
+            return false;
+        }
+        boolean success = pasteBlueprint(player, origin);
+        if (success) {
+            BuildToolsState.clearPendingPaste(player);
+        }
+        return success;
+    }
+
+    public static boolean nudgePendingBlueprintPaste(ServerPlayer player, net.minecraft.core.Direction direction) {
+        BlockPos origin = BuildToolsState.pendingPasteOrigin(player).orElse(null);
+        if (origin == null) {
+            fail(player, "buildtools.error.no_paste_preview");
+            return false;
+        }
+        previewBlueprintPaste(player, origin.relative(direction));
+        return true;
     }
 
     private static void previewBlueprintPaste(ServerPlayer player, BlockPos origin) {
@@ -768,12 +808,12 @@ public final class BuildOperationEngine {
         return true;
     }
 
-    private static BlockState materialTarget(Selection selection, BlockPos pos, BlockState fallback, List<PaletteEntry> palette, PaletteMode mode) {
+    private static BlockState materialTarget(Selection selection, BlockPos pos, BlockState fallback, List<PaletteEntry> palette, PaletteMode mode, GradientDirection gradientDirection) {
         if (mode == PaletteMode.RANDOM && !palette.isEmpty()) {
             return randomTarget(pos, palette);
         }
         if (mode == PaletteMode.GRADIENT) {
-            return gradientTarget(selection, pos, fallback, gradientPalette(fallback, palette));
+            return gradientTarget(selection, pos, fallback, gradientPalette(fallback, palette), gradientDirection);
         }
         return fallback;
     }
@@ -817,18 +857,87 @@ public final class BuildOperationEngine {
         return (int) value;
     }
 
-    private static BlockState gradientTarget(Selection selection, BlockPos pos, BlockState fallback, List<BlockState> palette) {
+    private static BlockState gradientTarget(Selection selection, BlockPos pos, BlockState fallback, List<BlockState> palette, GradientDirection direction) {
         if (palette.size() <= 1 || !selection.isComplete()) {
             return fallback;
         }
-        int minY = Math.min(selection.first().getY(), selection.second().getY());
-        int maxY = Math.max(selection.first().getY(), selection.second().getY());
-        if (minY == maxY) {
+        double min = direction == GradientDirection.POINT_ORDER
+                ? 0.0D
+                : Math.min(gradientCoordinate(selection, selection.first(), direction), gradientCoordinate(selection, selection.second(), direction));
+        double max = direction == GradientDirection.POINT_ORDER
+                ? pointOrderLength(selection)
+                : Math.max(gradientCoordinate(selection, selection.first(), direction), gradientCoordinate(selection, selection.second(), direction));
+        if (min == max) {
             return palette.get(0);
         }
-        double ratio = (double) (pos.getY() - minY) / (double) (maxY - minY);
+        double ratio = (gradientCoordinate(selection, pos, direction) - min) / (max - min);
         int index = Mth.clamp((int) Math.round(ratio * (palette.size() - 1)), 0, palette.size() - 1);
         return palette.get(index);
+    }
+
+    private static double gradientCoordinate(Selection selection, BlockPos pos, GradientDirection direction) {
+        return switch (direction) {
+            case X -> pos.getX();
+            case Y -> pos.getY();
+            case Z -> pos.getZ();
+            case POINT_ORDER -> pointOrderCoordinate(selection, pos);
+        };
+    }
+
+    private static double pointOrderCoordinate(Selection selection, BlockPos pos) {
+        List<BlockPos> points = selection.points();
+        if (points.size() < 2) {
+            return pos.distSqr(selection.first());
+        }
+        double bestDistance = Double.MAX_VALUE;
+        double bestCoordinate = 0.0D;
+        double traveled = 0.0D;
+        for (int i = 1; i < points.size(); i++) {
+            BlockPos a = points.get(i - 1);
+            BlockPos b = points.get(i);
+            double segmentLength = Math.sqrt(a.distSqr(b));
+            if (segmentLength <= 0.0D) {
+                continue;
+            }
+            double t = projectionRatio(a, b, pos);
+            double closestX = a.getX() + (b.getX() - a.getX()) * t;
+            double closestY = a.getY() + (b.getY() - a.getY()) * t;
+            double closestZ = a.getZ() + (b.getZ() - a.getZ()) * t;
+            double dx = pos.getX() - closestX;
+            double dy = pos.getY() - closestY;
+            double dz = pos.getZ() - closestZ;
+            double distance = dx * dx + dy * dy + dz * dz;
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestCoordinate = traveled + segmentLength * t;
+            }
+            traveled += segmentLength;
+        }
+        return bestCoordinate;
+    }
+
+    private static double pointOrderLength(Selection selection) {
+        List<BlockPos> points = selection.points();
+        if (points.size() < 2) {
+            return Math.sqrt(selection.first().distSqr(selection.second()));
+        }
+        double length = 0.0D;
+        for (int i = 1; i < points.size(); i++) {
+            length += Math.sqrt(points.get(i - 1).distSqr(points.get(i)));
+        }
+        return length;
+    }
+
+    private static double projectionRatio(BlockPos a, BlockPos b, BlockPos pos) {
+        double dx = b.getX() - a.getX();
+        double dy = b.getY() - a.getY();
+        double dz = b.getZ() - a.getZ();
+        double lengthSqr = dx * dx + dy * dy + dz * dz;
+        if (lengthSqr <= 0.0D) {
+            return 0.0D;
+        }
+        double dot = (pos.getX() - a.getX()) * dx + (pos.getY() - a.getY()) * dy + (pos.getZ() - a.getZ()) * dz;
+        return Mth.clamp(dot / lengthSqr, 0.0D, 1.0D);
     }
 
     private static BlockPos findTopSolid(ServerLevel level, int x, int z, int minY, int maxY) {

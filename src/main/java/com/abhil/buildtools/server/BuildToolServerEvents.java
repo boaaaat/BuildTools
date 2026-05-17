@@ -38,12 +38,12 @@ public final class BuildToolServerEvents {
         if (event.getEntity() instanceof ServerPlayer player) {
             if (selectionStaff) {
                 BuildToolsState.setFirst(player, event.getPos());
-            } else if (advancedSelectionStaff) {
-                net.minecraft.core.BlockPos target = BuildToolsState.advancedSelectionTarget(player).orElse(event.getPos());
+            } else if (advancedSelectionStaff && BuildToolsState.beginAdvancedSelectionAction(player)) {
                 if (player.isShiftKeyDown()) {
-                    BuildToolsState.removeAdvancedPoint(player, target);
+                    BuildToolsState.addAdvancedPoint(player, event.getPos().relative(event.getFace()));
                 } else {
-                    BuildToolsState.addAdvancedPoint(player, target);
+                    net.minecraft.core.BlockPos target = BuildToolsState.advancedSelectionTarget(player).orElse(event.getPos());
+                    BuildToolsState.removeAdvancedPoint(player, target);
                 }
             } else if (event.getItemStack().is(ModItems.ADVANCED_BUILDER_WAND.get())) {
                 AdvancedBuildToolsModeMenu.open(player);

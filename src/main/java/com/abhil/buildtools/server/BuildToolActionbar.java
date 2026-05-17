@@ -181,7 +181,8 @@ public final class BuildToolActionbar {
         Component base = builderMessage(player);
         int paletteSize = BuildToolsState.paletteEntries(player).size();
         String materialMode = BuildToolsState.paletteMode(player).displayName().getString();
-        return Component.literal("Advanced " + base.getString() + " | Palette: " + paletteSize + " | Material mode: " + materialMode + " | Ghost/plan ready in menu");
+        String gradientDirection = BuildToolsState.gradientDirection(player).displayName().getString();
+        return Component.literal("Advanced " + base.getString() + " | Palette: " + paletteSize + " | Material mode: " + materialMode + " | Gradient: " + gradientDirection + " | Ghost/plan ready in menu");
     }
 
     private static Component brushMessage(ServerPlayer player) {
