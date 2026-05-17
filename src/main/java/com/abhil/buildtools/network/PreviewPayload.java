@@ -10,7 +10,7 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
-public record PreviewPayload(List<BlockPos> positions) implements CustomPacketPayload {
+public record PreviewPayload(List<BlockPos> positions, boolean detailed) implements CustomPacketPayload {
     public static final Type<PreviewPayload> TYPE = new Type<>(BuildTools.id("preview"));
     public static final StreamCodec<RegistryFriendlyByteBuf, PreviewPayload> STREAM_CODEC = CustomPacketPayload.codec(
             PreviewPayload::write,
@@ -25,7 +25,8 @@ public record PreviewPayload(List<BlockPos> positions) implements CustomPacketPa
                 positions.add(pos);
             }
         }
-        return new PreviewPayload(positions);
+        boolean detailed = buffer.readBoolean();
+        return new PreviewPayload(positions, detailed);
     }
 
     private void write(RegistryFriendlyByteBuf buffer) {
@@ -33,10 +34,11 @@ public record PreviewPayload(List<BlockPos> positions) implements CustomPacketPa
         for (BlockPos pos : positions) {
             BlockPos.STREAM_CODEC.encode(buffer, pos);
         }
+        buffer.writeBoolean(detailed);
     }
 
     public static void handle(PreviewPayload payload, IPayloadContext context) {
-        ClientSelectionData.setPreview(payload.positions());
+        ClientSelectionData.setPreview(payload.positions(), payload.detailed());
     }
 
     @Override

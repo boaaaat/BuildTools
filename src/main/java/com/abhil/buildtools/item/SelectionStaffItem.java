@@ -1,6 +1,7 @@
 package com.abhil.buildtools.item;
 
 import com.abhil.buildtools.server.BuildToolsState;
+import com.abhil.buildtools.server.BuildToolsModeMenu;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -20,9 +21,9 @@ public final class SelectionStaffItem extends BuildToolItem {
         Player player = context.getPlayer();
         if (player instanceof ServerPlayer serverPlayer) {
             if (player.isShiftKeyDown()) {
-                BuildToolsState.setSecond(serverPlayer, context.getClickedPos());
+                BuildToolsModeMenu.open(serverPlayer);
             } else {
-                BuildToolsState.setFirst(serverPlayer, context.getClickedPos());
+                BuildToolsState.setSecond(serverPlayer, context.getClickedPos());
             }
         }
         return InteractionResult.sidedSuccess(context.getLevel().isClientSide());
@@ -31,9 +32,10 @@ public final class SelectionStaffItem extends BuildToolItem {
     @Override
     public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand usedHand) {
         ItemStack stack = player.getItemInHand(usedHand);
-        if (player instanceof ServerPlayer serverPlayer) {
-            BuildToolsState.cycleShape(serverPlayer);
+        if (player.isShiftKeyDown() && player instanceof ServerPlayer serverPlayer) {
+            BuildToolsModeMenu.open(serverPlayer);
+            return InteractionResultHolder.sidedSuccess(stack, level.isClientSide());
         }
-        return InteractionResultHolder.sidedSuccess(stack, level.isClientSide());
+        return InteractionResultHolder.pass(stack);
     }
 }

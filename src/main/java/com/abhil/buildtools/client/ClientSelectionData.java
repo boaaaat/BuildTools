@@ -12,6 +12,7 @@ public final class ClientSelectionData {
     private static Optional<BlockPos> second = Optional.empty();
     private static SelectionShape shape = SelectionShape.CUBOID;
     private static List<BlockPos> preview = List.of();
+    private static boolean detailedPreview;
 
     private ClientSelectionData() {
     }
@@ -23,8 +24,9 @@ public final class ClientSelectionData {
         shape = syncedShape;
     }
 
-    public static void setPreview(List<BlockPos> positions) {
+    public static void setPreview(List<BlockPos> positions, boolean detailed) {
         preview = List.copyOf(positions);
+        detailedPreview = detailed;
     }
 
     public static Optional<BlockPos> first() {
@@ -37,5 +39,13 @@ public final class ClientSelectionData {
 
     public static List<BlockPos> preview() {
         return preview;
+    }
+
+    public static SelectionShape shape() {
+        return shape;
+    }
+
+    public static boolean detailedPreview() {
+        return detailedPreview;
     }
 }

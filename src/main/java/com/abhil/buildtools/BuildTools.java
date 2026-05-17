@@ -4,6 +4,7 @@ import com.abhil.buildtools.config.BuildToolsConfig;
 import com.abhil.buildtools.network.BuildToolsNetworking;
 import com.abhil.buildtools.registry.ModCreativeTabs;
 import com.abhil.buildtools.registry.ModItems;
+import com.abhil.buildtools.registry.ModMenus;
 import com.abhil.buildtools.server.BuildToolServerEvents;
 import com.mojang.logging.LogUtils;
 import net.minecraft.resources.ResourceLocation;
@@ -21,6 +22,7 @@ public final class BuildTools {
 
     public BuildTools(IEventBus modEventBus, ModContainer modContainer) {
         ModItems.ITEMS.register(modEventBus);
+        ModMenus.MENUS.register(modEventBus);
         ModCreativeTabs.CREATIVE_TABS.register(modEventBus);
         modEventBus.addListener(BuildToolsNetworking::register);
 

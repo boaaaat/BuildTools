@@ -20,9 +20,14 @@ public final class ModCreativeTabs {
                     .icon(() -> ModItems.BUILDER_WAND.get().getDefaultInstance())
                     .displayItems((parameters, output) -> {
                         output.accept(ModItems.SELECTION_STAFF.get());
+                        output.accept(ModItems.ADVANCED_SELECTION_STAFF.get());
                         output.accept(ModItems.BUILDER_WAND.get());
+                        output.accept(ModItems.ADVANCED_BUILDER_WAND.get());
+                        output.accept(ModItems.BUILDER_BRUSH.get());
+                        output.accept(ModItems.AREA_BREAKER.get());
                         output.accept(ModItems.BLUEPRINT_TROWEL.get());
                         output.accept(ModItems.UNDO_TOKEN.get());
+                        output.accept(ModItems.REDO_TOKEN.get());
                     })
                     .build());
 

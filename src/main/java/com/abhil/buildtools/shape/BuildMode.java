@@ -4,7 +4,8 @@ import net.minecraft.network.chat.Component;
 
 public enum BuildMode {
     FILL("fill"),
-    REPLACE("replace");
+    REPLACE("replace"),
+    OVERWRITE("overwrite");
 
     private final String key;
 
@@ -14,6 +15,10 @@ public enum BuildMode {
 
     public Component displayName() {
         return Component.translatable("buildtools.mode." + key);
+    }
+
+    public Component description() {
+        return Component.translatable("buildtools.mode." + key + ".description");
     }
 
     public BuildMode next() {

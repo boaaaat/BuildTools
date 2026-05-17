@@ -55,6 +55,10 @@ public final class BlockCostPlan {
         return required;
     }
 
+    public Map<ItemStackKey, Integer> missing() {
+        return missing;
+    }
+
     public void consume(ServerPlayer player) {
         if (isCreative(player)) {
             return;

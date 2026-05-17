@@ -14,7 +14,9 @@ The Gradle project targets Java 21 through toolchains. The wrapper itself can ru
 
 ## Tools
 
-- Selection Staff: right-click a block for point one, sneak right-click for point two, right-click air to cycle shape.
-- Builder Wand: put the block to place in the offhand, then right-click to build. Sneak or right-click air cycles fill/replace mode.
-- Blueprint Trowel: right-click to copy the current selection, sneak right-click to paste.
+- Selection Staff: left-click a block for point one, right-click a block for point two, sneak right-click to open the mode menu.
+- Builder Wand: put the block to place in the offhand, then right-click to place blocks into the selected area. Sneak right-click opens the mode menu.
+- Area Breaker: right-click to break blocks in the selected area and drop them normally.
+- Blueprint Trowel: right-click to copy the current selection, sneak right-click to preview a paste, then sneak right-click the same spot again to confirm.
 - Undo Token: right-click to undo the most recent BuildTools operation.
+- Redo Token: right-click to redo the most recently undone BuildTools operation.
