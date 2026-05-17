@@ -1410,7 +1410,7 @@ public final class BuildOperationEngine {
     }
 
     private static int durabilityCost(int blockChanges) {
-        return 1 + Math.max(0, blockChanges) / 1000;
+        return 1 + Math.max(0, blockChanges) / 400;
     }
 
     private static boolean hasDurabilityForOperation(ServerPlayer player, int cost) {
