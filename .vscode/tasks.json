@@ -1,0 +1,25 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "NeoForge: Build",
+      "type": "shell",
+      "command": ".\\gradlew.bat build",
+      "group": "build",
+      "problemMatcher": "$javac"
+    },
+    {
+      "label": "NeoForge: Run Client",
+      "type": "shell",
+      "command": ".\\gradlew.bat runClient",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "NeoForge: Run Data",
+      "type": "shell",
+      "command": ".\\gradlew.bat runData",
+      "problemMatcher": []
+    }
+  ]
+}
