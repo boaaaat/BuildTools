@@ -4,6 +4,7 @@ import com.abhil.buildtools.client.AdvancedBuildToolsModeScreen;
 import com.abhil.buildtools.client.BuildToolStatusOverlay;
 import com.abhil.buildtools.client.BuildToolsModeScreen;
 import com.abhil.buildtools.client.ClientSelectionRenderer;
+import com.abhil.buildtools.network.AdvancedSelectionActionPayload;
 import com.abhil.buildtools.network.OpenToolMenuPayload;
 import com.abhil.buildtools.network.ScrollToolPayload;
 import com.abhil.buildtools.registry.ModItems;
@@ -74,6 +75,12 @@ public final class BuildToolsClient {
             return;
         }
         ItemStack held = minecraft.player.getMainHandItem();
+        if (held.is(ModItems.ADVANCED_SELECTION_STAFF.get())) {
+            PacketDistributor.sendToServer(new AdvancedSelectionActionPayload());
+            event.setSwingHand(false);
+            event.setCanceled(true);
+            return;
+        }
         if (!isAirMenuTool(held)) {
             return;
         }

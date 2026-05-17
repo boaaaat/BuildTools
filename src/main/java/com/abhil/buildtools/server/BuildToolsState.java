@@ -22,6 +22,10 @@ import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 public final class BuildToolsState {
@@ -33,16 +37,19 @@ public final class BuildToolsState {
     private static final Map<UUID, Blueprint> BLUEPRINTS = new HashMap<>();
     private static final Map<UUID, BlockPos> PENDING_PASTE_ORIGINS = new HashMap<>();
     private static final Map<UUID, BlockState> REPLACE_TARGETS = new HashMap<>();
-    private static final Map<UUID, EnumMap<ToolProfile, List<BlockState>>> REPLACE_TARGET_ARRAYS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, List<PaletteEntry>>> PALETTES = new HashMap<>();
     private static final Map<UUID, SelectionPreset> PRESETS = new HashMap<>();
     private static final Map<UUID, BuildPlan> PLANS = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, BrushMode>> BRUSH_MODES = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, Integer>> BRUSH_RADII = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, Boolean>> GRADIENTS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, PaletteMode>> PALETTE_MODES = new HashMap<>();
     private static final Map<UUID, List<BlockPos>> ADVANCED_POINTS = new HashMap<>();
     private static final int HISTORY_LIMIT = 10;
     private static final int MIN_BRUSH_RADIUS = 1;
     private static final int MAX_BRUSH_RADIUS = 8;
+    private static final double ADVANCED_SELECTION_DISTANCE = 100.0D;
+    private static final double ADVANCED_POINT_PICK_DISTANCE_SQR = 6.25D;
 
     private BuildToolsState() {
     }
@@ -64,7 +71,20 @@ public final class BuildToolsState {
     }
 
     public static boolean gradientEnabled(ServerPlayer player) {
-        return gradients(player).getOrDefault(activeProfile(player), false);
+        return paletteMode(player) == PaletteMode.GRADIENT || gradients(player).getOrDefault(activeProfile(player), false);
+    }
+
+    public static PaletteMode paletteMode(ServerPlayer player) {
+        ToolProfile profile = activeProfile(player);
+        PaletteMode mode = paletteModes(player).get(profile);
+        if (mode != null) {
+            return mode;
+        }
+        return gradients(player).getOrDefault(profile, false) ? PaletteMode.GRADIENT : PaletteMode.SINGLE;
+    }
+
+    public static boolean randomPatternEnabled(ServerPlayer player) {
+        return paletteMode(player) == PaletteMode.RANDOM;
     }
 
     public static ToolProfile activeToolProfile(ServerPlayer player) {
@@ -205,11 +225,12 @@ public final class BuildToolsState {
         BLUEPRINTS.remove(uuid);
         PENDING_PASTE_ORIGINS.remove(uuid);
         REPLACE_TARGETS.remove(uuid);
-        REPLACE_TARGET_ARRAYS.remove(uuid);
+        PALETTES.remove(uuid);
         PLANS.remove(uuid);
         BRUSH_MODES.remove(uuid);
         BRUSH_RADII.remove(uuid);
         GRADIENTS.remove(uuid);
+        PALETTE_MODES.remove(uuid);
         ADVANCED_POINTS.remove(uuid);
     }
 
@@ -247,7 +268,8 @@ public final class BuildToolsState {
                 selection.dimension() == null ? "" : selection.dimension().location().toString(),
                 selection.firstOptional(),
                 selection.secondOptional(),
-                shape(player)));
+                shape(player),
+                selection.points()));
         sendPreview(player);
     }
 
@@ -336,7 +358,7 @@ public final class BuildToolsState {
 
     public static void setReplaceTarget(ServerPlayer player, BlockState state) {
         REPLACE_TARGETS.put(player.getUUID(), state);
-        replaceTargetArrays(player).put(activeProfile(player), List.of(state));
+        palettes(player).put(activeProfile(player), List.of(new PaletteEntry(state, PaletteEntry.DEFAULT_WEIGHT)));
         BuildOperationEngine.clearPendingOperation(player);
         player.displayClientMessage(Component.translatable("buildtools.message.replace_target", state.getBlock().getName()), true);
         sendPreview(player);
@@ -344,10 +366,12 @@ public final class BuildToolsState {
 
     public static void setReplaceTargets(ServerPlayer player, List<BlockState> states) {
         if (states.isEmpty()) {
-            replaceTargetArrays(player).remove(activeProfile(player));
+            palettes(player).remove(activeProfile(player));
             player.displayClientMessage(Component.translatable("buildtools.message.replace_targets_cleared"), true);
         } else {
-            replaceTargetArrays(player).put(activeProfile(player), List.copyOf(states));
+            palettes(player).put(activeProfile(player), states.stream()
+                    .map(state -> new PaletteEntry(state, PaletteEntry.DEFAULT_WEIGHT))
+                    .toList());
             REPLACE_TARGETS.put(player.getUUID(), states.get(0));
             player.displayClientMessage(Component.translatable("buildtools.message.replace_targets", states.size()), true);
         }
@@ -364,7 +388,7 @@ public final class BuildToolsState {
     }
 
     public static List<BlockState> replaceTargets(ServerPlayer player) {
-        return replaceTargetArrays(player).getOrDefault(activeProfile(player), List.of());
+        return paletteEntries(player).stream().map(PaletteEntry::state).toList();
     }
 
     public static boolean matchesReplaceTargets(ServerPlayer player, BlockState state, BlockState fallback) {
@@ -378,6 +402,32 @@ public final class BuildToolsState {
             }
         }
         return false;
+    }
+
+    public static List<PaletteEntry> paletteEntries(ServerPlayer player) {
+        return palettes(player).getOrDefault(activeProfile(player), List.of());
+    }
+
+    public static void setPaletteEntries(ServerPlayer player, List<PaletteEntry> entries) {
+        if (entries.isEmpty()) {
+            palettes(player).remove(activeProfile(player));
+            player.displayClientMessage(Component.translatable("buildtools.message.palette_cleared"), true);
+        } else {
+            List<PaletteEntry> copy = List.copyOf(entries);
+            palettes(player).put(activeProfile(player), copy);
+            REPLACE_TARGETS.put(player.getUUID(), copy.getFirst().state());
+            player.displayClientMessage(Component.translatable("buildtools.message.palette_saved", copy.size()), true);
+        }
+        BuildOperationEngine.clearPendingOperation(player);
+        sendPreview(player);
+    }
+
+    public static void setPaletteMode(ServerPlayer player, PaletteMode mode) {
+        paletteModes(player).put(activeProfile(player), mode);
+        gradients(player).put(activeProfile(player), mode == PaletteMode.GRADIENT);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.palette_mode", mode.displayName()), true);
+        sendPreview(player);
     }
 
     public static void cycleBrushMode(ServerPlayer player) {
@@ -397,11 +447,11 @@ public final class BuildToolsState {
     }
 
     public static void toggleGradient(ServerPlayer player) {
-        boolean enabled = !gradientEnabled(player);
-        gradients(player).put(activeProfile(player), enabled);
-        BuildOperationEngine.clearPendingOperation(player);
-        player.displayClientMessage(Component.translatable(enabled ? "buildtools.message.gradient_on" : "buildtools.message.gradient_off"), true);
-        sendPreview(player);
+        setPaletteMode(player, paletteMode(player) == PaletteMode.GRADIENT ? PaletteMode.SINGLE : PaletteMode.GRADIENT);
+    }
+
+    public static void toggleRandomPattern(ServerPlayer player) {
+        setPaletteMode(player, paletteMode(player) == PaletteMode.RANDOM ? PaletteMode.SINGLE : PaletteMode.RANDOM);
     }
 
     public static void sendPreview(ServerPlayer player) {
@@ -422,18 +472,76 @@ public final class BuildToolsState {
     public static void addAdvancedPoint(ServerPlayer player, BlockPos pos) {
         List<BlockPos> points = new ArrayList<>(ADVANCED_POINTS.getOrDefault(player.getUUID(), List.of()));
         points.add(pos.immutable());
-        ADVANCED_POINTS.put(player.getUUID(), List.copyOf(points));
-        applyAdvancedPoints(player, points);
+        setAdvancedPoints(player, points);
         player.displayClientMessage(Component.translatable("buildtools.message.advanced_point", points.size(), format(pos)), true);
     }
 
+    public static void addAdvancedPointAtLook(ServerPlayer player) {
+        advancedSelectionTarget(player).ifPresentOrElse(
+                pos -> addAdvancedPoint(player, pos),
+                () -> player.displayClientMessage(Component.translatable("buildtools.error.no_target"), false));
+    }
+
+    public static void removeAdvancedPointAtLook(ServerPlayer player) {
+        advancedSelectionTarget(player).ifPresentOrElse(
+                pos -> removeAdvancedPoint(player, pos),
+                () -> player.displayClientMessage(Component.translatable("buildtools.error.no_target"), false));
+    }
+
+    public static boolean moveAdvancedPointAtLook(ServerPlayer player, int delta) {
+        Optional<BlockPos> target = advancedSelectionTarget(player);
+        return target.isPresent() && moveAdvancedPoint(player, target.get(), delta);
+    }
+
+    public static void removeAdvancedPoint(ServerPlayer player, BlockPos target) {
+        List<BlockPos> points = new ArrayList<>(ADVANCED_POINTS.getOrDefault(player.getUUID(), List.of()));
+        int index = nearestAdvancedPoint(points, target);
+        if (index < 0) {
+            player.displayClientMessage(Component.translatable("buildtools.error.no_advanced_point"), false);
+            return;
+        }
+        BlockPos removed = points.remove(index);
+        setAdvancedPoints(player, points);
+        player.displayClientMessage(Component.translatable("buildtools.message.advanced_point_removed", index + 1, format(removed)), true);
+    }
+
+    public static boolean moveAdvancedPoint(ServerPlayer player, BlockPos target, int delta) {
+        List<BlockPos> points = new ArrayList<>(ADVANCED_POINTS.getOrDefault(player.getUUID(), List.of()));
+        int index = nearestAdvancedPoint(points, target);
+        if (index < 0) {
+            return false;
+        }
+        int newIndex = Math.max(0, Math.min(points.size() - 1, index + delta));
+        if (newIndex == index) {
+            player.displayClientMessage(Component.translatable("buildtools.message.advanced_point_order_unchanged", index + 1), true);
+            return true;
+        }
+        BlockPos point = points.remove(index);
+        points.add(newIndex, point);
+        setAdvancedPoints(player, points);
+        player.displayClientMessage(Component.translatable("buildtools.message.advanced_point_moved", format(point), newIndex + 1), true);
+        return true;
+    }
+
     public static void clearAdvancedPoints(ServerPlayer player) {
-        ADVANCED_POINTS.remove(player.getUUID());
+        setAdvancedPoints(player, List.of());
         player.displayClientMessage(Component.translatable("buildtools.message.advanced_points_cleared"), true);
     }
 
     public static int advancedPointCount(ServerPlayer player) {
         return ADVANCED_POINTS.getOrDefault(player.getUUID(), List.of()).size();
+    }
+
+    public static Optional<BlockPos> advancedSelectionTarget(ServerPlayer player) {
+        Vec3 start = player.getEyePosition();
+        Vec3 end = start.add(player.getViewVector(1.0F).scale(ADVANCED_SELECTION_DISTANCE));
+        BlockHitResult hit = player.level().clip(new ClipContext(
+                start,
+                end,
+                ClipContext.Block.OUTLINE,
+                ClipContext.Fluid.NONE,
+                player));
+        return hit.getType() == HitResult.Type.BLOCK ? Optional.of(hit.getBlockPos()) : Optional.empty();
     }
 
     public static void rotateSelection(ServerPlayer player) {
@@ -479,7 +587,7 @@ public final class BuildToolsState {
             BlockState state = player.level().getBlockState(pos);
             if (mode == BuildMode.FILL && state.canBeReplaced()) {
                 filtered.add(pos);
-            } else if (mode == BuildMode.REPLACE && state.is(replaceMatch.getBlock())) {
+            } else if (mode == BuildMode.REPLACE && matchesReplaceTargets(player, state, replaceMatch)) {
                 filtered.add(pos);
             }
         }
@@ -497,6 +605,19 @@ public final class BuildToolsState {
         }
     }
 
+    private static void setAdvancedPoints(ServerPlayer player, List<BlockPos> points) {
+        if (points.isEmpty()) {
+            ADVANCED_POINTS.remove(player.getUUID());
+            SELECTIONS.put(player.getUUID(), Selection.empty(player.getUUID()).withShape(shape(player)));
+            BuildOperationEngine.clearPendingOperation(player);
+            sync(player);
+            return;
+        }
+        List<BlockPos> immutablePoints = points.stream().map(BlockPos::immutable).toList();
+        ADVANCED_POINTS.put(player.getUUID(), List.copyOf(immutablePoints));
+        applyAdvancedPoints(player, immutablePoints);
+    }
+
     private static void applyAdvancedPoints(ServerPlayer player, List<BlockPos> points) {
         if (points.isEmpty()) {
             return;
@@ -512,8 +633,27 @@ public final class BuildToolsState {
                 player.level().dimension(),
                 new BlockPos(minX, minY, minZ),
                 new BlockPos(maxX, maxY, maxZ),
-                shape(player)));
+                shape(player),
+                points));
+        BuildOperationEngine.clearPendingOperation(player);
         sync(player);
+    }
+
+    private static int nearestAdvancedPoint(List<BlockPos> points, BlockPos target) {
+        int bestIndex = -1;
+        double bestDistance = ADVANCED_POINT_PICK_DISTANCE_SQR;
+        for (int i = 0; i < points.size(); i++) {
+            BlockPos point = points.get(i);
+            double dx = point.getX() - target.getX();
+            double dy = point.getY() - target.getY();
+            double dz = point.getZ() - target.getZ();
+            double distance = dx * dx + dy * dy + dz * dz;
+            if (distance <= bestDistance) {
+                bestDistance = distance;
+                bestIndex = i;
+            }
+        }
+        return bestIndex;
     }
 
     private static SelectionShape shape(ServerPlayer player) {
@@ -547,8 +687,12 @@ public final class BuildToolsState {
         return GRADIENTS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
     }
 
-    private static EnumMap<ToolProfile, List<BlockState>> replaceTargetArrays(ServerPlayer player) {
-        return REPLACE_TARGET_ARRAYS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    private static EnumMap<ToolProfile, List<PaletteEntry>> palettes(ServerPlayer player) {
+        return PALETTES.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, PaletteMode> paletteModes(ServerPlayer player) {
+        return PALETTE_MODES.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
     }
 
     private static void transformBlueprint(ServerPlayer player, String messageKey, java.util.function.Function<BlockPos, BlockPos> transform) {

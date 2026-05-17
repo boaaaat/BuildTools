@@ -7,6 +7,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
@@ -35,6 +37,7 @@ public final class ClientSelectionRenderer {
         ClientSelectionData.first().ifPresent(pos -> renderBox(poseStack, lines, new AABB(pos), 0.1F, 0.8F, 1.0F, 1.0F));
         ClientSelectionData.second().ifPresent(pos -> renderBox(poseStack, lines, new AABB(pos), 1.0F, 0.7F, 0.1F, 1.0F));
         renderSelectionHandles(poseStack, lines);
+        renderAdvancedPoints(event, poseStack, buffers, lines);
 
         List<BlockPos> preview = ClientSelectionData.preview();
         if (!preview.isEmpty()) {
@@ -89,6 +92,41 @@ public final class ClientSelectionRenderer {
                 }
             }
         }
+    }
+
+    private static void renderAdvancedPoints(RenderLevelStageEvent event, PoseStack poseStack, MultiBufferSource buffers, VertexConsumer lines) {
+        List<BlockPos> points = ClientSelectionData.points();
+        if (points.isEmpty()) {
+            return;
+        }
+
+        for (int i = 0; i < points.size(); i++) {
+            BlockPos point = points.get(i);
+            renderBox(poseStack, lines, new AABB(point).inflate(0.08D), 1.0F, 0.25F, 0.95F, 1.0F);
+            renderPointLabel(event, poseStack, buffers, point, Integer.toString(i + 1));
+        }
+    }
+
+    private static void renderPointLabel(RenderLevelStageEvent event, PoseStack poseStack, MultiBufferSource buffers, BlockPos point, String label) {
+        Minecraft minecraft = Minecraft.getInstance();
+        Font font = minecraft.font;
+        poseStack.pushPose();
+        poseStack.translate(point.getX() + 0.5D, point.getY() + 1.2D, point.getZ() + 0.5D);
+        poseStack.mulPose(event.getCamera().rotation());
+        poseStack.scale(-0.03F, -0.03F, 0.03F);
+        float x = -font.width(label) / 2.0F;
+        font.drawInBatch(
+                label,
+                x,
+                0.0F,
+                0xFFFFFFFF,
+                false,
+                poseStack.last().pose(),
+                buffers,
+                Font.DisplayMode.SEE_THROUGH,
+                0xAA000000,
+                LightTexture.FULL_BRIGHT);
+        poseStack.popPose();
     }
 
     private static void renderAffectedEdges(PoseStack poseStack, VertexConsumer lines, List<BlockPos> positions, float red, float green, float blue, float alpha) {

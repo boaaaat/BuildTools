@@ -15,6 +15,9 @@ public final class ShapeGenerator {
         if (!selection.isComplete()) {
             return List.of();
         }
+        if (selection.points().size() > 1 && selection.shape() == SelectionShape.LINE) {
+            return polyline(selection.points());
+        }
         BlockPos a = selection.first();
         BlockPos b = selection.second();
         return switch (selection.shape()) {
@@ -71,6 +74,21 @@ public final class ShapeGenerator {
                     Mth.floor(a.getX() + dx * t + 0.5D),
                     Mth.floor(a.getY() + dy * t + 0.5D),
                     Mth.floor(a.getZ() + dz * t + 0.5D)));
+        }
+        return List.copyOf(positions);
+    }
+
+    public static List<BlockPos> polyline(List<BlockPos> points) {
+        if (points.isEmpty()) {
+            return List.of();
+        }
+        if (points.size() == 1) {
+            return List.of(points.getFirst().immutable());
+        }
+
+        Set<BlockPos> positions = new LinkedHashSet<>();
+        for (int i = 1; i < points.size(); i++) {
+            positions.addAll(line(points.get(i - 1), points.get(i)));
         }
         return List.copyOf(positions);
     }

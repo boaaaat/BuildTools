@@ -3,6 +3,8 @@ package com.abhil.buildtools.network;
 import com.abhil.buildtools.BuildTools;
 import com.abhil.buildtools.client.ClientSelectionData;
 import com.abhil.buildtools.shape.SelectionShape;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.RegistryFriendlyByteBuf;
@@ -10,7 +12,7 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
-public record SelectionSyncPayload(String dimension, Optional<BlockPos> first, Optional<BlockPos> second, SelectionShape shape) implements CustomPacketPayload {
+public record SelectionSyncPayload(String dimension, Optional<BlockPos> first, Optional<BlockPos> second, SelectionShape shape, List<BlockPos> points) implements CustomPacketPayload {
     public static final Type<SelectionSyncPayload> TYPE = new Type<>(BuildTools.id("selection_sync"));
     public static final StreamCodec<RegistryFriendlyByteBuf, SelectionSyncPayload> STREAM_CODEC = CustomPacketPayload.codec(
             SelectionSyncPayload::write,
@@ -21,7 +23,12 @@ public record SelectionSyncPayload(String dimension, Optional<BlockPos> first, O
         Optional<BlockPos> first = buffer.readBoolean() ? Optional.of(BlockPos.STREAM_CODEC.decode(buffer)) : Optional.empty();
         Optional<BlockPos> second = buffer.readBoolean() ? Optional.of(BlockPos.STREAM_CODEC.decode(buffer)) : Optional.empty();
         SelectionShape shape = buffer.readEnum(SelectionShape.class);
-        return new SelectionSyncPayload(dimension, first, second, shape);
+        int count = buffer.readVarInt();
+        List<BlockPos> points = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            points.add(BlockPos.STREAM_CODEC.decode(buffer));
+        }
+        return new SelectionSyncPayload(dimension, first, second, shape, points);
     }
 
     private void write(RegistryFriendlyByteBuf buffer) {
@@ -31,10 +38,14 @@ public record SelectionSyncPayload(String dimension, Optional<BlockPos> first, O
         buffer.writeBoolean(second.isPresent());
         second.ifPresent(pos -> BlockPos.STREAM_CODEC.encode(buffer, pos));
         buffer.writeEnum(shape);
+        buffer.writeVarInt(points.size());
+        for (BlockPos point : points) {
+            BlockPos.STREAM_CODEC.encode(buffer, point);
+        }
     }
 
     public static void handle(SelectionSyncPayload payload, IPayloadContext context) {
-        ClientSelectionData.setSelection(payload.dimension(), payload.first(), payload.second(), payload.shape());
+        ClientSelectionData.setSelection(payload.dimension(), payload.first(), payload.second(), payload.shape(), payload.points());
     }
 
     @Override

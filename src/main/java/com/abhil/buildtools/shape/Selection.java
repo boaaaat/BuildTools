@@ -1,12 +1,21 @@
 package com.abhil.buildtools.shape;
 
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 
-public record Selection(UUID owner, ResourceKey<Level> dimension, BlockPos first, BlockPos second, SelectionShape shape) {
+public record Selection(UUID owner, ResourceKey<Level> dimension, BlockPos first, BlockPos second, SelectionShape shape, List<BlockPos> points) {
+    public Selection {
+        points = points == null ? List.of() : points.stream().map(BlockPos::immutable).toList();
+    }
+
+    public Selection(UUID owner, ResourceKey<Level> dimension, BlockPos first, BlockPos second, SelectionShape shape) {
+        this(owner, dimension, first, second, shape, List.of());
+    }
+
     public Optional<BlockPos> firstOptional() {
         return Optional.ofNullable(first);
     }
@@ -28,7 +37,7 @@ public record Selection(UUID owner, ResourceKey<Level> dimension, BlockPos first
     }
 
     public Selection withShape(SelectionShape newShape) {
-        return new Selection(owner, dimension, first, second, newShape);
+        return new Selection(owner, dimension, first, second, newShape, points);
     }
 
     private boolean sameDimension(ResourceKey<Level> otherDimension) {

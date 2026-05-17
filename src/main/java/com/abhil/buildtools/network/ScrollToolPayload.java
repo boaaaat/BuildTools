@@ -30,7 +30,12 @@ public record ScrollToolPayload(int direction) implements CustomPacketPayload {
         }
         int step = payload.direction() >= 0 ? 1 : -1;
         ItemStack held = player.getMainHandItem();
-        if (held.is(ModItems.SELECTION_STAFF.get()) || held.is(ModItems.ADVANCED_SELECTION_STAFF.get()) || held.is(ModItems.AREA_BREAKER.get())) {
+        if (held.is(ModItems.ADVANCED_SELECTION_STAFF.get())) {
+            int orderDelta = payload.direction() >= 0 ? -1 : 1;
+            if (!BuildToolsState.moveAdvancedPointAtLook(player, orderDelta)) {
+                BuildToolsState.cycleShape(player);
+            }
+        } else if (held.is(ModItems.SELECTION_STAFF.get()) || held.is(ModItems.AREA_BREAKER.get())) {
             BuildToolsState.cycleShape(player);
         } else if (held.is(ModItems.BUILDER_BRUSH.get())) {
             BuildToolsState.changeBrushRadius(player, step);

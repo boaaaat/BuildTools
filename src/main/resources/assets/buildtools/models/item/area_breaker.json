@@ -1,3 +1,6 @@
 {
-  "parent": "minecraft:block/tnt"
+  "parent": "minecraft:item/handheld",
+  "textures": {
+    "layer0": "minecraft:item/diamond_pickaxe"
+  }
 }

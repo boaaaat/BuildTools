@@ -39,10 +39,11 @@ public final class BuildToolServerEvents {
             if (selectionStaff) {
                 BuildToolsState.setFirst(player, event.getPos());
             } else if (advancedSelectionStaff) {
+                net.minecraft.core.BlockPos target = BuildToolsState.advancedSelectionTarget(player).orElse(event.getPos());
                 if (player.isShiftKeyDown()) {
-                    BuildToolsState.clearAdvancedPoints(player);
+                    BuildToolsState.removeAdvancedPoint(player, target);
                 } else {
-                    BuildToolsState.addAdvancedPoint(player, event.getPos());
+                    BuildToolsState.addAdvancedPoint(player, target);
                 }
             } else if (event.getItemStack().is(ModItems.ADVANCED_BUILDER_WAND.get())) {
                 AdvancedBuildToolsModeMenu.open(player);

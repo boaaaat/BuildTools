@@ -1,3 +1,6 @@
 {
-  "parent": "minecraft:block/budding_amethyst"
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "minecraft:item/spyglass"
+  }
 }

@@ -17,11 +17,12 @@ import java.util.Map;
 import java.util.Queue;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
-import net.minecraft.util.Mth;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.Mth;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
@@ -60,12 +61,17 @@ public final class BuildOperationEngine {
             fail(player, "buildtools.error.dimension_mismatch");
             return false;
         }
+        List<PaletteEntry> palette = advanced ? BuildToolsState.paletteEntries(player) : List.of();
         ItemStack source = player.getOffhandItem();
-        if (!(source.getItem() instanceof BlockItem blockItem)) {
+        BlockState target;
+        if (source.getItem() instanceof BlockItem blockItem) {
+            target = blockItem.getBlock().defaultBlockState();
+        } else if (advanced && !palette.isEmpty()) {
+            target = palette.getFirst().state();
+        } else {
             fail(player, "buildtools.error.offhand_block");
             return false;
         }
-        BlockState target = blockItem.getBlock().defaultBlockState();
         if (!isSupportedTarget(target)) {
             fail(player, "buildtools.error.unsupported_block");
             return false;
@@ -82,7 +88,7 @@ public final class BuildOperationEngine {
         }
 
         BuildMode mode = BuildToolsState.mode(player);
-        List<BlockState> gradientPalette = gradientPalette(player, target);
+        PaletteMode paletteMode = advanced ? BuildToolsState.paletteMode(player) : (BuildToolsState.gradientEnabled(player) ? PaletteMode.GRADIENT : PaletteMode.SINGLE);
         List<BlockPos> positions = new ArrayList<>();
         List<BlockState> targets = new ArrayList<>();
         List<UndoSnapshot.Entry> undo = new ArrayList<>();
@@ -101,11 +107,11 @@ public final class BuildOperationEngine {
             if (mode == BuildMode.REPLACE && !(advanced ? BuildToolsState.matchesReplaceTargets(player, previous, replaceMatch) : previous.is(replaceMatch.getBlock()))) {
                 continue;
             }
-            BlockState targetState = gradientTarget(selection, pos, target, gradientPalette);
+            BlockState targetState = materialTarget(selection, pos, target, palette, paletteMode);
             positions.add(pos.immutable());
             targets.add(targetState);
             boolean restore = previous.isAir() || mode == BuildMode.FILL;
-            undo.add(new UndoSnapshot.Entry(pos.immutable(), previous, targetState, restore));
+            undo.add(undoEntry(level, pos, previous, targetState, restore));
             refund.merge(new ItemStackKey(targetState.getBlock().asItem()), 1, Integer::sum);
         }
 
@@ -155,7 +161,7 @@ public final class BuildOperationEngine {
             }
             positions.add(pos.immutable());
             targets.add(Blocks.AIR.defaultBlockState());
-            undo.add(new UndoSnapshot.Entry(pos.immutable(), previous, Blocks.AIR.defaultBlockState(), false));
+            undo.add(undoEntry(level, pos, previous, Blocks.AIR.defaultBlockState(), false));
         }
 
         String label = "area break";
@@ -180,12 +186,17 @@ public final class BuildOperationEngine {
             fail(player, "buildtools.error.dimension_mismatch");
             return false;
         }
+        List<PaletteEntry> palette = BuildToolsState.paletteEntries(player);
         ItemStack source = player.getOffhandItem();
-        if (!(source.getItem() instanceof BlockItem blockItem)) {
+        BlockState target;
+        if (source.getItem() instanceof BlockItem blockItem) {
+            target = blockItem.getBlock().defaultBlockState();
+        } else if (!palette.isEmpty()) {
+            target = palette.getFirst().state();
+        } else {
             fail(player, "buildtools.error.offhand_block");
             return false;
         }
-        BlockState target = blockItem.getBlock().defaultBlockState();
         if (!isSupportedTarget(target)) {
             fail(player, "buildtools.error.unsupported_block");
             return false;
@@ -202,7 +213,7 @@ public final class BuildOperationEngine {
         }
 
         BuildMode mode = BuildToolsState.mode(player);
-        List<BlockState> gradientPalette = gradientPalette(player, target);
+        PaletteMode paletteMode = BuildToolsState.paletteMode(player);
         BlockState replaceMatch = BuildToolsState.replaceTarget(player);
         List<BuildPlan.Entry> entries = new ArrayList<>();
         ServerLevel level = player.serverLevel();
@@ -214,7 +225,7 @@ public final class BuildOperationEngine {
             if (mode == BuildMode.REPLACE && !BuildToolsState.matchesReplaceTargets(player, previous, replaceMatch)) {
                 continue;
             }
-            entries.add(new BuildPlan.Entry(pos.immutable(), gradientTarget(selection, pos, target, gradientPalette)));
+            entries.add(new BuildPlan.Entry(pos.immutable(), materialTarget(selection, pos, target, palette, paletteMode)));
         }
         if (entries.isEmpty()) {
             fail(player, "buildtools.error.no_targets");
@@ -247,7 +258,7 @@ public final class BuildOperationEngine {
             }
             positions.add(entry.pos().immutable());
             targets.add(entry.state());
-            undo.add(new UndoSnapshot.Entry(entry.pos().immutable(), previous, entry.state(), previous.isAir() || previous.canBeReplaced()));
+            undo.add(undoEntry(level, entry.pos(), previous, entry.state(), previous.isAir() || previous.canBeReplaced()));
             refund.merge(new ItemStackKey(entry.state().getBlock().asItem()), 1, Integer::sum);
         }
         String label = "build plan";
@@ -304,7 +315,7 @@ public final class BuildOperationEngine {
             }
             positions.add(pos.immutable());
             targets.add(target);
-            undo.add(new UndoSnapshot.Entry(pos.immutable(), previous, target, previous.isAir() || previous.canBeReplaced()));
+            undo.add(undoEntry(level, pos, previous, target, previous.isAir() || previous.canBeReplaced()));
             refund.merge(new ItemStackKey(target.getBlock().asItem()), 1, Integer::sum);
         }
         String label = "brush";
@@ -357,7 +368,7 @@ public final class BuildOperationEngine {
                         }
                         positions.add(pos);
                         targets.add(Blocks.AIR.defaultBlockState());
-                        undo.add(new UndoSnapshot.Entry(pos, previous, Blocks.AIR.defaultBlockState(), false));
+                        undo.add(undoEntry(level, pos, previous, Blocks.AIR.defaultBlockState(), false));
                     }
                 }
             } else if (topY < average) {
@@ -370,7 +381,7 @@ public final class BuildOperationEngine {
                         }
                         positions.add(pos);
                         targets.add(fillState);
-                        undo.add(new UndoSnapshot.Entry(pos, previous, fillState, true));
+                        undo.add(undoEntry(level, pos, previous, fillState, true));
                         refund.merge(new ItemStackKey(fillState.getBlock().asItem()), 1, Integer::sum);
                     }
                 }
@@ -446,7 +457,7 @@ public final class BuildOperationEngine {
             }
             positions.add(pos.immutable());
             targets.add(entry.state());
-            undo.add(new UndoSnapshot.Entry(pos.immutable(), previous, entry.state(), previous.isAir() || previous.canBeReplaced()));
+            undo.add(undoEntry(level, pos, previous, entry.state(), previous.isAir() || previous.canBeReplaced()));
             refund.merge(new ItemStackKey(entry.state().getBlock().asItem()), 1, Integer::sum);
         }
         return enqueue(player, level, positions, targets, undo, refund);
@@ -489,7 +500,7 @@ public final class BuildOperationEngine {
     }
 
     public static boolean undo(ServerPlayer player) {
-        UndoSnapshot snapshot = BuildToolsState.takeUndo(player).orElse(null);
+        UndoSnapshot snapshot = BuildToolsState.peekUndo(player).orElse(null);
         if (snapshot == null) {
             fail(player, "buildtools.error.no_undo");
             return false;
@@ -500,11 +511,14 @@ public final class BuildOperationEngine {
         }
         ServerLevel level = player.serverLevel();
         for (UndoSnapshot.Entry entry : snapshot.entries()) {
-            if (entry.mayRestorePrevious()) {
-                level.setBlock(entry.pos(), entry.previousState(), 3);
-            } else {
-                level.setBlock(entry.pos(), Blocks.AIR.defaultBlockState(), 3);
+            if (!canRestore(player, level, entry.pos())) {
+                return false;
             }
+        }
+        UndoSnapshot redoSnapshot = new UndoSnapshot(snapshot.dimension(), captureCurrentAsRedone(level, snapshot.entries()), snapshot.refund());
+        BuildToolsState.takeUndo(player);
+        for (UndoSnapshot.Entry entry : snapshot.entries()) {
+            restoreBlock(level, entry.pos(), entry.previousState(), entry.previousBlockEntity());
         }
         if (!player.gameMode.isCreative()) {
             for (Map.Entry<ItemStackKey, Integer> refund : snapshot.refund().entrySet()) {
@@ -514,13 +528,13 @@ public final class BuildOperationEngine {
                 }
             }
         }
-        BuildToolsState.setRedo(player, snapshot);
+        BuildToolsState.setRedo(player, redoSnapshot);
         player.displayClientMessage(Component.translatable("buildtools.message.undo", snapshot.entries().size()), true);
         return true;
     }
 
     public static boolean redo(ServerPlayer player) {
-        UndoSnapshot snapshot = BuildToolsState.takeRedo(player).orElse(null);
+        UndoSnapshot snapshot = BuildToolsState.peekRedo(player).orElse(null);
         if (snapshot == null) {
             fail(player, "buildtools.error.no_redo");
             return false;
@@ -533,16 +547,28 @@ public final class BuildOperationEngine {
         ServerLevel level = player.serverLevel();
         List<BlockPos> positions = new ArrayList<>();
         List<BlockState> targets = new ArrayList<>();
+        List<UndoSnapshot.Entry> undoEntries = new ArrayList<>();
         for (UndoSnapshot.Entry entry : snapshot.entries()) {
-            BlockState previous = level.getBlockState(entry.pos());
-            if (!canTouch(player, level, entry.pos(), previous)) {
+            if (!canRestore(player, level, entry.pos())) {
                 return false;
             }
+            BlockState previous = level.getBlockState(entry.pos());
             positions.add(entry.pos().immutable());
             targets.add(entry.redoneState());
+            undoEntries.add(new UndoSnapshot.Entry(
+                    entry.pos().immutable(),
+                    previous,
+                    captureBlockEntity(level, entry.pos()),
+                    entry.redoneState(),
+                    entry.redoneBlockEntity() == null ? null : entry.redoneBlockEntity().copy(),
+                    true));
         }
 
-        return enqueue(player, level, positions, targets, snapshot.entries(), snapshot.refund());
+        boolean queued = enqueue(player, level, positions, targets, List.copyOf(undoEntries), snapshot.refund());
+        if (queued) {
+            BuildToolsState.takeRedo(player);
+        }
+        return queued;
     }
 
     public static void tick() {
@@ -641,6 +667,8 @@ public final class BuildOperationEngine {
     private static int applyBatch(BuildOperation operation, int budget) {
         int applied = 0;
         while (applied < budget && !operation.positions().isEmpty()) {
+            int entryIndex = operation.undoEntries().size() - operation.positions().size();
+            UndoSnapshot.Entry entry = operation.undoEntries().get(entryIndex);
             BlockPos pos = operation.positions().remove(0);
             BlockState target = operation.targetStates().remove(0);
             BlockState previous = operation.level().getBlockState(pos);
@@ -652,10 +680,72 @@ public final class BuildOperationEngine {
             if (!previous.isAir() && !previous.canBeReplaced()) {
                 operation.level().destroyBlock(pos, true, operation.player());
             }
-            operation.level().setBlock(pos, target, 3);
+            restoreBlock(operation.level(), pos, target, entry.redoneBlockEntity());
             applied++;
         }
         return applied;
+    }
+
+    private static UndoSnapshot.Entry undoEntry(ServerLevel level, BlockPos pos, BlockState previous, BlockState redone, boolean mayRestorePrevious) {
+        return new UndoSnapshot.Entry(pos.immutable(), previous, captureBlockEntity(level, pos), redone, null, mayRestorePrevious);
+    }
+
+    private static List<UndoSnapshot.Entry> captureCurrentAsRedone(ServerLevel level, List<UndoSnapshot.Entry> entries) {
+        List<UndoSnapshot.Entry> captured = new ArrayList<>();
+        for (UndoSnapshot.Entry entry : entries) {
+            captured.add(new UndoSnapshot.Entry(
+                    entry.pos().immutable(),
+                    entry.previousState(),
+                    entry.previousBlockEntity() == null ? null : entry.previousBlockEntity().copy(),
+                    level.getBlockState(entry.pos()),
+                    captureBlockEntity(level, entry.pos()),
+                    true));
+        }
+        return List.copyOf(captured);
+    }
+
+    private static CompoundTag captureBlockEntity(ServerLevel level, BlockPos pos) {
+        BlockEntity blockEntity = level.getBlockEntity(pos);
+        return blockEntity == null ? null : blockEntity.saveWithFullMetadata(level.registryAccess()).copy();
+    }
+
+    private static void restoreBlock(ServerLevel level, BlockPos pos, BlockState state, CompoundTag blockEntityTag) {
+        BlockState previous = level.getBlockState(pos);
+        level.setBlock(pos, state, 3);
+        if (state.isAir()) {
+            level.removeBlockEntity(pos);
+            return;
+        }
+        if (blockEntityTag == null) {
+            return;
+        }
+
+        CompoundTag restoredTag = blockEntityTag.copy();
+        restoredTag.putInt("x", pos.getX());
+        restoredTag.putInt("y", pos.getY());
+        restoredTag.putInt("z", pos.getZ());
+        BlockEntity restored = BlockEntity.loadStatic(pos, state, restoredTag, level.registryAccess());
+        if (restored != null) {
+            level.setBlockEntity(restored);
+            restored.setChanged();
+            level.sendBlockUpdated(pos, previous, state, 3);
+        }
+    }
+
+    private static boolean canRestore(ServerPlayer player, ServerLevel level, BlockPos pos) {
+        if (!Level.isInSpawnableBounds(pos)) {
+            fail(player, "buildtools.error.out_of_world");
+            return false;
+        }
+        if (!level.hasChunk(new ChunkPos(pos).x, new ChunkPos(pos).z)) {
+            fail(player, "buildtools.error.unloaded");
+            return false;
+        }
+        if (player.blockPosition().distSqr(pos) > BuildToolsConfig.MAX_OPERATION_DISTANCE.get() * BuildToolsConfig.MAX_OPERATION_DISTANCE.get()) {
+            fail(player, "buildtools.error.too_far");
+            return false;
+        }
+        return true;
     }
 
     private static boolean canTouch(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState previous) {
@@ -671,26 +761,60 @@ public final class BuildOperationEngine {
             fail(player, "buildtools.error.too_far");
             return false;
         }
-        BlockEntity blockEntity = level.getBlockEntity(pos);
-        if (blockEntity != null || !previous.getFluidState().isEmpty()) {
+        if (!previous.getFluidState().isEmpty()) {
             fail(player, "buildtools.error.protected_state");
             return false;
         }
         return true;
     }
 
-    private static List<BlockState> gradientPalette(ServerPlayer player, BlockState fallback) {
-        if (!BuildToolsState.gradientEnabled(player)) {
+    private static BlockState materialTarget(Selection selection, BlockPos pos, BlockState fallback, List<PaletteEntry> palette, PaletteMode mode) {
+        if (mode == PaletteMode.RANDOM && !palette.isEmpty()) {
+            return randomTarget(pos, palette);
+        }
+        if (mode == PaletteMode.GRADIENT) {
+            return gradientTarget(selection, pos, fallback, gradientPalette(fallback, palette));
+        }
+        return fallback;
+    }
+
+    private static List<BlockState> gradientPalette(BlockState fallback, List<PaletteEntry> entries) {
+        if (entries.isEmpty()) {
             return List.of(fallback);
         }
         List<BlockState> palette = new ArrayList<>();
-        palette.add(fallback);
-        for (BlockState state : BuildToolsState.replaceTargets(player)) {
-            if (!state.is(fallback.getBlock())) {
-                palette.add(state);
+        for (PaletteEntry entry : entries) {
+            if (palette.stream().noneMatch(state -> state.is(entry.state().getBlock()))) {
+                palette.add(entry.state());
             }
         }
         return palette;
+    }
+
+    private static BlockState randomTarget(BlockPos pos, List<PaletteEntry> palette) {
+        int total = palette.stream().mapToInt(PaletteEntry::weight).sum();
+        if (total <= 0) {
+            return palette.getFirst().state();
+        }
+        int roll = Math.floorMod(weightedHash(pos), total);
+        int cursor = 0;
+        for (PaletteEntry entry : palette) {
+            cursor += entry.weight();
+            if (roll < cursor) {
+                return entry.state();
+            }
+        }
+        return palette.getLast().state();
+    }
+
+    private static int weightedHash(BlockPos pos) {
+        long value = pos.asLong();
+        value ^= value >>> 33;
+        value *= 0xff51afd7ed558ccdL;
+        value ^= value >>> 33;
+        value *= 0xc4ceb9fe1a85ec53L;
+        value ^= value >>> 33;
+        return (int) value;
     }
 
     private static BlockState gradientTarget(Selection selection, BlockPos pos, BlockState fallback, List<BlockState> palette) {

@@ -179,8 +179,9 @@ public final class BuildToolActionbar {
 
     private static Component advancedBuilderMessage(ServerPlayer player) {
         Component base = builderMessage(player);
-        int filters = BuildToolsState.replaceTargets(player).size();
-        return Component.literal("Advanced " + base.getString() + " | Replace filters: " + filters + " | Ghost/plan ready in menu");
+        int paletteSize = BuildToolsState.paletteEntries(player).size();
+        String materialMode = BuildToolsState.paletteMode(player).displayName().getString();
+        return Component.literal("Advanced " + base.getString() + " | Palette: " + paletteSize + " | Material mode: " + materialMode + " | Ghost/plan ready in menu");
     }
 
     private static Component brushMessage(ServerPlayer player) {

@@ -350,9 +350,6 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         if (!clearedBlocks.isEmpty()) {
             lore.add(Component.literal("Cleared: " + clearedBlocks).withStyle(ChatFormatting.DARK_AQUA));
         }
-        if (stats.skippedRestore() > 0) {
-            lore.add(Component.literal(stats.skippedRestore() + " positions will stay protected on undo.").withStyle(ChatFormatting.DARK_GRAY));
-        }
         if (!snapshot.refund().isEmpty()) {
             lore.add(Component.literal("Materials: " + materialSummary(snapshot.refund())).withStyle(ChatFormatting.AQUA));
         }
@@ -390,12 +387,11 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         return remaining == 0 ? summary : summary + ", +" + remaining + " more";
     }
 
-    private record HistoryStats(int total, int placed, int removed, int replaced, int skippedRestore) {
+    private record HistoryStats(int total, int placed, int removed, int replaced) {
         private static HistoryStats of(UndoSnapshot snapshot) {
             int placed = 0;
             int removed = 0;
             int replaced = 0;
-            int skippedRestore = 0;
             for (UndoSnapshot.Entry entry : snapshot.entries()) {
                 if (entry.redoneState().isAir()) {
                     removed++;
@@ -404,11 +400,8 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
                 } else {
                     replaced++;
                 }
-                if (!entry.mayRestorePrevious()) {
-                    skippedRestore++;
-                }
             }
-            return new HistoryStats(snapshot.entries().size(), placed, removed, replaced, skippedRestore);
+            return new HistoryStats(snapshot.entries().size(), placed, removed, replaced);
         }
     }
 
