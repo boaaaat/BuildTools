@@ -33,6 +33,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
@@ -61,6 +62,7 @@ public final class BuildToolsState {
     private static final Map<UUID, EnumMap<ToolProfile, PaletteMode>> PALETTE_MODES = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, GradientDirection>> GRADIENT_DIRECTIONS = new HashMap<>();
     private static final Map<UUID, List<BlockPos>> ADVANCED_POINTS = new HashMap<>();
+    private static final Map<UUID, Boolean> SHARED_SELECTION_VISIBILITY = new HashMap<>();
     private static final int HISTORY_LIMIT = 10;
     private static final int MIN_BRUSH_RADIUS = 1;
     private static final int MAX_BRUSH_RADIUS = 8;
@@ -114,6 +116,28 @@ public final class BuildToolsState {
 
     public static ToolProfile activeToolProfile(ServerPlayer player) {
         return activeProfile(player);
+    }
+
+    public static boolean selectionVisibleToOthers(ServerPlayer player) {
+        return SHARED_SELECTION_VISIBILITY.getOrDefault(player.getUUID(), false);
+    }
+
+    public static void toggleSelectionVisibility(ServerPlayer player) {
+        boolean visible = !selectionVisibleToOthers(player);
+        SHARED_SELECTION_VISIBILITY.put(player.getUUID(), visible);
+        persist(player);
+        if (visible) {
+            syncSharedSelectionFrom(player);
+        } else {
+            removeSharedSelectionFrom(player);
+        }
+        player.displayClientMessage(Component.translatable(visible
+                ? "buildtools.message.selection_visible_to_others"
+                : "buildtools.message.selection_hidden_from_others"), true);
+    }
+
+    public static void stopSharingSelection(ServerPlayer player) {
+        removeSharedSelectionFrom(player);
     }
 
     public static void loadPlayer(ServerPlayer player) {
@@ -253,10 +277,21 @@ public final class BuildToolsState {
         Deque<UndoSnapshot> history = UNDO.get(player.getUUID());
         if (history != null) {
             for (UndoSnapshot snapshot : history) {
-                snapshot.producedDrops().forEach((key, count) -> drops.merge(key, count, Integer::sum));
+                StoredItems.toCounts(snapshot.producedDrops()).forEach((key, count) -> drops.merge(key, count, Integer::sum));
             }
         }
         return Map.copyOf(drops);
+    }
+
+    public static List<ItemStack> storedDropStacks(ServerPlayer player) {
+        List<ItemStack> drops = new ArrayList<>();
+        Deque<UndoSnapshot> history = UNDO.get(player.getUUID());
+        if (history != null) {
+            for (UndoSnapshot snapshot : history) {
+                drops.addAll(StoredItems.copyOf(snapshot.producedDrops()));
+            }
+        }
+        return List.copyOf(drops);
     }
 
     public static void setBlueprint(ServerPlayer player, Blueprint blueprint) {
@@ -330,12 +365,19 @@ public final class BuildToolsState {
     public static void sync(ServerPlayer player) {
         Selection selection = selection(player);
         PacketDistributor.sendToPlayer(player, new SelectionSyncPayload(
+                player.getUUID(),
+                false,
+                false,
                 selection.dimension() == null ? "" : selection.dimension().location().toString(),
                 selection.firstOptional(),
                 selection.secondOptional(),
                 shape(player),
-                selection.points()));
+                selection.points(),
+                List.of(),
+                false));
         sendPreview(player);
+        syncSharedSelectionsTo(player);
+        syncSharedSelectionFrom(player);
     }
 
     public static void nudgeSelection(ServerPlayer player, Direction direction) {
@@ -545,6 +587,82 @@ public final class BuildToolsState {
         }
         persist(player);
         PacketDistributor.sendToPlayer(player, new PreviewPayload(preview, false));
+    }
+
+    private static void syncSharedSelectionFrom(ServerPlayer owner) {
+        if (owner.getServer() == null) {
+            return;
+        }
+        for (ServerPlayer viewer : owner.getServer().getPlayerList().getPlayers()) {
+            if (!viewer.getUUID().equals(owner.getUUID())) {
+                sendSharedSelection(owner, viewer);
+            }
+        }
+    }
+
+    private static void removeSharedSelectionFrom(ServerPlayer owner) {
+        if (owner.getServer() == null) {
+            return;
+        }
+        SelectionSyncPayload payload = removeSharedSelectionPayload(owner.getUUID());
+        for (ServerPlayer viewer : owner.getServer().getPlayerList().getPlayers()) {
+            if (!viewer.getUUID().equals(owner.getUUID())) {
+                PacketDistributor.sendToPlayer(viewer, payload);
+            }
+        }
+    }
+
+    private static void syncSharedSelectionsTo(ServerPlayer viewer) {
+        if (viewer.getServer() == null) {
+            return;
+        }
+        for (ServerPlayer owner : viewer.getServer().getPlayerList().getPlayers()) {
+            if (!owner.getUUID().equals(viewer.getUUID())) {
+                sendSharedSelection(owner, viewer);
+            }
+        }
+    }
+
+    private static void sendSharedSelection(ServerPlayer owner, ServerPlayer viewer) {
+        Selection selection = selection(owner);
+        if (!selectionVisibleToOthers(owner)
+                || selection.dimension() == null
+                || !selection.dimension().equals(viewer.level().dimension())) {
+            PacketDistributor.sendToPlayer(viewer, removeSharedSelectionPayload(owner.getUUID()));
+            return;
+        }
+        List<BlockPos> preview = selection.isComplete()
+                && selection.dimension().equals(owner.level().dimension())
+                ? filteredPreview(owner, selection)
+                : List.of();
+        if (preview.size() > BuildToolsNetworking.MAX_PREVIEW_POSITIONS) {
+            preview = preview.subList(0, BuildToolsNetworking.MAX_PREVIEW_POSITIONS);
+        }
+        PacketDistributor.sendToPlayer(viewer, new SelectionSyncPayload(
+                owner.getUUID(),
+                true,
+                false,
+                selection.dimension().location().toString(),
+                selection.firstOptional(),
+                selection.secondOptional(),
+                shape(owner),
+                selection.points(),
+                preview,
+                false));
+    }
+
+    private static SelectionSyncPayload removeSharedSelectionPayload(UUID owner) {
+        return new SelectionSyncPayload(
+                owner,
+                true,
+                true,
+                "",
+                Optional.empty(),
+                Optional.empty(),
+                SelectionShape.CUBOID,
+                List.of(),
+                List.of(),
+                false);
     }
 
     public static void addAdvancedPoint(ServerPlayer player, BlockPos pos) {
@@ -821,6 +939,7 @@ public final class BuildToolsState {
         tag.put("paletteModes", writeEnumMap(PALETTE_MODES.get(uuid)));
         tag.put("gradientDirections", writeEnumMap(GRADIENT_DIRECTIONS.get(uuid)));
         tag.put("palettes", writePaletteMap(PALETTES.get(uuid)));
+        tag.putBoolean("selectionVisibleToOthers", SHARED_SELECTION_VISIBILITY.getOrDefault(uuid, false));
         tag.put("undo", writeUndoSnapshots(UNDO.get(uuid)));
         tag.put("redo", writeUndoSnapshots(REDO.get(uuid)));
         if (BLUEPRINTS.containsKey(uuid)) {
@@ -855,6 +974,9 @@ public final class BuildToolsState {
         readPaletteModes(tag.getList("paletteModes", Tag.TAG_COMPOUND)).ifPresent(map -> PALETTE_MODES.put(uuid, map));
         readGradientDirections(tag.getList("gradientDirections", Tag.TAG_COMPOUND)).ifPresent(map -> GRADIENT_DIRECTIONS.put(uuid, map));
         readPaletteMap(tag.getList("palettes", Tag.TAG_COMPOUND), registries).ifPresent(map -> PALETTES.put(uuid, map));
+        if (tag.contains("selectionVisibleToOthers", Tag.TAG_BYTE)) {
+            SHARED_SELECTION_VISIBILITY.put(uuid, tag.getBoolean("selectionVisibleToOthers"));
+        }
         Deque<UndoSnapshot> undo = readUndoSnapshots(tag.getList("undo", Tag.TAG_COMPOUND), registries);
         if (!undo.isEmpty()) {
             UNDO.put(uuid, undo);
@@ -900,6 +1022,7 @@ public final class BuildToolsState {
         PALETTE_MODES.remove(uuid);
         GRADIENT_DIRECTIONS.remove(uuid);
         ADVANCED_POINTS.remove(uuid);
+        SHARED_SELECTION_VISIBILITY.remove(uuid);
     }
 
     private static CompoundTag writeSelection(Selection selection) {
@@ -1085,9 +1208,13 @@ public final class BuildToolsState {
             CompoundTag entryTag = new CompoundTag();
             entryTag.put("offset", NbtUtils.writeBlockPos(entry.offset()));
             entryTag.put("state", NbtUtils.writeBlockState(entry.state()));
+            if (entry.blockEntity() != null) {
+                entryTag.put("blockEntity", entry.blockEntity().copy());
+            }
             entries.add(entryTag);
         }
         tag.put("entries", entries);
+        tag.put("entities", writeCapturedEntities(blueprint.entities()));
         return tag;
     }
 
@@ -1099,10 +1226,13 @@ public final class BuildToolsState {
             Optional<BlockPos> offset = NbtUtils.readBlockPos(entryTag, "offset");
             BlockState state = readBlockState(entryTag.getCompound("state"), registries);
             if (offset.isPresent() && !state.isAir()) {
-                entries.add(new Blueprint.Entry(offset.get(), state));
+                CompoundTag blockEntity = entryTag.contains("blockEntity", Tag.TAG_COMPOUND)
+                        ? entryTag.getCompound("blockEntity").copy()
+                        : null;
+                entries.add(new Blueprint.Entry(offset.get(), state, blockEntity));
             }
         }
-        return new Blueprint(List.copyOf(entries));
+        return new Blueprint(List.copyOf(entries), readCapturedEntities(tag.getList("entities", Tag.TAG_COMPOUND)));
     }
 
     private static CompoundTag writePlan(BuildPlan plan) {
@@ -1113,6 +1243,9 @@ public final class BuildToolsState {
             CompoundTag entryTag = new CompoundTag();
             entryTag.put("pos", NbtUtils.writeBlockPos(entry.pos()));
             entryTag.put("state", NbtUtils.writeBlockState(entry.state()));
+            if (entry.blockEntity() != null) {
+                entryTag.put("blockEntity", entry.blockEntity().copy());
+            }
             entries.add(entryTag);
         }
         tag.put("entries", entries);
@@ -1128,7 +1261,10 @@ public final class BuildToolsState {
             Optional<BlockPos> pos = NbtUtils.readBlockPos(entryTag, "pos");
             BlockState state = readBlockState(entryTag.getCompound("state"), registries);
             if (pos.isPresent() && !state.isAir()) {
-                entries.add(new BuildPlan.Entry(pos.get(), state));
+                CompoundTag blockEntity = entryTag.contains("blockEntity", Tag.TAG_COMPOUND)
+                        ? entryTag.getCompound("blockEntity").copy()
+                        : null;
+                entries.add(new BuildPlan.Entry(pos.get(), state, blockEntity));
             }
         }
         return new BuildPlan(dimension, List.copyOf(entries));
@@ -1171,8 +1307,10 @@ public final class BuildToolsState {
                 entries.add(entryTag);
             }
             tag.put("entries", entries);
-            tag.put("refund", writeRefund(snapshot.refund()));
-            tag.put("producedDrops", writeRefund(snapshot.producedDrops()));
+            tag.put("refund", writeItemStacks(snapshot.refund()));
+            tag.put("producedDrops", writeItemStacks(snapshot.producedDrops()));
+            tag.put("removedEntities", writeCapturedEntities(snapshot.removedEntities()));
+            tag.put("addedEntities", writeCapturedEntities(snapshot.addedEntities()));
             list.add(tag);
         }
         return list;
@@ -1209,11 +1347,74 @@ public final class BuildToolsState {
                 snapshots.addLast(new UndoSnapshot(
                         dimension,
                         List.copyOf(entries),
-                        readRefund(tag.getList("refund", Tag.TAG_COMPOUND)),
-                        readRefund(tag.getList("producedDrops", Tag.TAG_COMPOUND))));
+                        readItemStacks(tag.getList("refund", Tag.TAG_COMPOUND), registries),
+                        readItemStacks(tag.getList("producedDrops", Tag.TAG_COMPOUND), registries),
+                        readCapturedEntities(tag.getList("removedEntities", Tag.TAG_COMPOUND)),
+                        readCapturedEntities(tag.getList("addedEntities", Tag.TAG_COMPOUND))));
             }
         }
         return snapshots;
+    }
+
+    private static ListTag writeItemStacks(List<ItemStack> stacks) {
+        ListTag list = new ListTag();
+        for (ItemStack stack : stacks) {
+            if (!stack.isEmpty()) {
+                list.add(stack.saveOptional(currentRegistryAccess()));
+            }
+        }
+        return list;
+    }
+
+    private static List<ItemStack> readItemStacks(ListTag list, HolderLookup.Provider registries) {
+        List<ItemStack> stacks = new ArrayList<>();
+        for (int i = 0; i < list.size(); i++) {
+            CompoundTag tag = list.getCompound(i);
+            if (tag.contains("item", Tag.TAG_STRING)) {
+                Item item = BuiltInRegistries.ITEM.getOptional(ResourceLocation.parse(tag.getString("item"))).orElse(Items.AIR);
+                if (item != Items.AIR) {
+                    stacks.add(new ItemStack(item, tag.getInt("count")));
+                }
+                continue;
+            }
+            ItemStack stack = ItemStack.parseOptional(registries, tag);
+            if (!stack.isEmpty()) {
+                stacks.add(stack);
+            }
+        }
+        return List.copyOf(stacks);
+    }
+
+    private static ListTag writeCapturedEntities(List<CapturedEntity> entities) {
+        ListTag list = new ListTag();
+        for (CapturedEntity entity : entities) {
+            CompoundTag tag = new CompoundTag();
+            tag.putDouble("offsetX", entity.offsetX());
+            tag.putDouble("offsetY", entity.offsetY());
+            tag.putDouble("offsetZ", entity.offsetZ());
+            tag.put("entity", entity.tag().copy());
+            list.add(tag);
+        }
+        return list;
+    }
+
+    private static List<CapturedEntity> readCapturedEntities(ListTag list) {
+        List<CapturedEntity> entities = new ArrayList<>();
+        for (int i = 0; i < list.size(); i++) {
+            CompoundTag tag = list.getCompound(i);
+            if (tag.contains("entity", Tag.TAG_COMPOUND)) {
+                entities.add(new CapturedEntity(
+                        tag.getDouble("offsetX"),
+                        tag.getDouble("offsetY"),
+                        tag.getDouble("offsetZ"),
+                        tag.getCompound("entity")));
+            }
+        }
+        return List.copyOf(entities);
+    }
+
+    private static HolderLookup.Provider currentRegistryAccess() {
+        return net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer().registryAccess();
     }
 
     private static ListTag writeRefund(Map<ItemStackKey, Integer> refund) {
@@ -1270,9 +1471,18 @@ public final class BuildToolsState {
             return;
         }
         List<Blueprint.Entry> transformed = blueprint.entries().stream()
-                .map(entry -> new Blueprint.Entry(transform.apply(entry.offset()), entry.state()))
+                .map(entry -> new Blueprint.Entry(transform.apply(entry.offset()), entry.state(), entry.blockEntity()))
                 .toList();
-        BLUEPRINTS.put(player.getUUID(), new Blueprint(transformed));
+        List<CapturedEntity> transformedEntities = blueprint.entities().stream()
+                .map(entity -> {
+                    BlockPos transformedOffset = transform.apply(new BlockPos(
+                            (int) Math.round(entity.offsetX()),
+                            (int) Math.round(entity.offsetY()),
+                            (int) Math.round(entity.offsetZ())));
+                    return entity.withOffset(transformedOffset.getX(), transformedOffset.getY(), transformedOffset.getZ());
+                })
+                .toList();
+        BLUEPRINTS.put(player.getUUID(), new Blueprint(transformed, transformedEntities));
         PENDING_PASTE_ORIGINS.remove(player.getUUID());
         BuildOperationEngine.clearPendingOperation(player);
         player.displayClientMessage(Component.translatable(messageKey), true);

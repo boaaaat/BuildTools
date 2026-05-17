@@ -6,6 +6,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
@@ -73,6 +74,11 @@ public final class BuildToolServerEvents {
     }
 
     @SubscribeEvent
+    public static void entityJoinLevel(EntityJoinLevelEvent event) {
+        BuildOperationEngine.captureToolDrop(event);
+    }
+
+    @SubscribeEvent
     public static void login(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             BuildToolsState.loadPlayer(player);
@@ -82,6 +88,7 @@ public final class BuildToolServerEvents {
     @SubscribeEvent
     public static void logout(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
+            BuildToolsState.stopSharingSelection(player);
             BuildToolsState.savePlayer(player);
             BuildToolsState.discardLoadedPlayer(player);
         }

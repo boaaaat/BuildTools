@@ -14,8 +14,11 @@ public final class StorageLinkItem extends BuildToolItem {
     @Override
     public InteractionResult useOn(UseOnContext context) {
         Player player = context.getPlayer();
-        if (player instanceof ServerPlayer serverPlayer && BuildingStorageManager.mark(serverPlayer, context.getClickedPos())) {
-            context.getItemInHand().shrink(1);
+        if (player instanceof ServerPlayer serverPlayer) {
+            BuildingStorageManager.LinkResult result = BuildingStorageManager.toggle(serverPlayer, context.getClickedPos());
+            if (result.consumeLink()) {
+                context.getItemInHand().shrink(1);
+            }
         }
         return InteractionResult.sidedSuccess(context.getLevel().isClientSide());
     }

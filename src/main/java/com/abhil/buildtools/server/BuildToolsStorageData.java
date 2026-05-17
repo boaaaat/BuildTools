@@ -78,6 +78,14 @@ public final class BuildToolsStorageData extends SavedData {
         return changed;
     }
 
+    public boolean remove(UUID owner, ResourceKey<Level> dimension, BlockPos pos) {
+        boolean changed = storages.remove(new StorageRef(owner, dimension.location(), pos.immutable()));
+        if (changed) {
+            setDirty();
+        }
+        return changed;
+    }
+
     public boolean contains(UUID owner, ResourceKey<Level> dimension, BlockPos pos) {
         return storages.contains(new StorageRef(owner, dimension.location(), pos.immutable()));
     }

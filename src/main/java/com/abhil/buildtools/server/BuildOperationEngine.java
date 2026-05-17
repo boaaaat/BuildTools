@@ -10,39 +10,76 @@ import com.abhil.buildtools.shape.Selection;
 import com.abhil.buildtools.shape.ShapeGenerator;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
+import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.nbt.DoubleTag;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
+import net.minecraft.world.Container;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.decoration.ArmorStand;
+import net.minecraft.world.entity.decoration.GlowItemFrame;
+import net.minecraft.world.entity.decoration.ItemFrame;
+import net.minecraft.world.entity.decoration.LeashFenceKnotEntity;
+import net.minecraft.world.entity.decoration.Painting;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.CustomData;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 public final class BuildOperationEngine {
     private static final Queue<BuildOperation> QUEUE = new ArrayDeque<>();
     private static final Map<UUID, PendingOperation> PENDING_OPERATIONS = new HashMap<>();
+    private static final ThreadLocal<DropCapture> ACTIVE_DROP_CAPTURE = new ThreadLocal<>();
 
     private BuildOperationEngine() {
     }
 
     public static void clearPendingOperation(ServerPlayer player) {
         PENDING_OPERATIONS.remove(player.getUUID());
+    }
+
+    static void captureToolDrop(EntityJoinLevelEvent event) {
+        DropCapture capture = ACTIVE_DROP_CAPTURE.get();
+        if (capture == null || event.getLevel() != capture.level()) {
+            return;
+        }
+        if (!(event.getEntity() instanceof ItemEntity itemEntity)) {
+            return;
+        }
+        ItemStack stack = itemEntity.getItem();
+        if (stack.isEmpty()) {
+            return;
+        }
+        capture.drops().add(stack.copy());
+        event.setCanceled(true);
     }
 
     public static boolean executeBuilder(ServerPlayer player) {
@@ -65,12 +102,11 @@ public final class BuildOperationEngine {
         }
         List<PaletteEntry> palette = advanced ? BuildToolsState.paletteEntries(player) : List.of();
         ItemStack source = player.getOffhandItem();
-        BlockState target;
-        if (source.getItem() instanceof BlockItem blockItem) {
-            target = blockItem.getBlock().defaultBlockState();
-        } else if (advanced && !palette.isEmpty()) {
+        BlockState target = materialState(source);
+        if (target == null && advanced && !palette.isEmpty()) {
             target = palette.getFirst().state();
-        } else {
+        }
+        if (target == null) {
             fail(player, "buildtools.error.offhand_block");
             return false;
         }
@@ -94,8 +130,9 @@ public final class BuildOperationEngine {
         GradientDirection gradientDirection = advanced ? BuildToolsState.gradientDirection(player) : GradientDirection.Y;
         List<BlockPos> positions = new ArrayList<>();
         List<BlockState> targets = new ArrayList<>();
+        List<CompoundTag> targetBlockEntities = new ArrayList<>();
         List<UndoSnapshot.Entry> undo = new ArrayList<>();
-        Map<ItemStackKey, Integer> refund = new LinkedHashMap<>();
+        List<ItemStack> refund = new ArrayList<>();
         ServerLevel level = player.serverLevel();
 
         BlockState replaceMatch = advanced ? BuildToolsState.replaceTarget(player) : level.getBlockState(selection.first());
@@ -113,22 +150,27 @@ public final class BuildOperationEngine {
             BlockState targetState = materialTarget(selection, pos, target, palette, paletteMode, gradientDirection);
             positions.add(pos.immutable());
             targets.add(targetState);
+            targetBlockEntities.add(null);
             boolean restore = previous.isAir() || mode == BuildMode.FILL;
             undo.add(undoEntry(level, pos, previous, targetState, restore));
-            refund.merge(new ItemStackKey(targetState.getBlock().asItem()), 1, Integer::sum);
+            addUndoRefund(refund, targetState);
         }
 
         boolean trackHistory = hasHistoryItems(player);
-        Map<ItemStackKey, Integer> producedDrops = dropsForChanges(player, level, undo);
+        List<CapturedEntity> removedEntities = captureDecorEntities(level, BlockPos.ZERO, positions);
+        List<ItemStack> producedDrops = withEntityDrops(dropsForChanges(player, level, undo), removedEntities);
         String label = advanced ? "advanced builder" : "builder";
         return previewOrConfirm(player, level, new PendingOperation(
                 level.dimension(),
                 label,
                 List.copyOf(positions),
                 List.copyOf(targets),
+                copyBlockEntities(targetBlockEntities),
                 List.copyOf(undo),
-                Map.copyOf(refund),
+                StoredItems.copyOf(refund),
                 producedDrops,
+                removedEntities,
+                List.of(),
                 trackHistory,
                 false,
                 signature(label, level, positions, targets)));
@@ -157,10 +199,11 @@ public final class BuildOperationEngine {
         ServerLevel level = player.serverLevel();
         List<BlockPos> positions = new ArrayList<>();
         List<BlockState> targets = new ArrayList<>();
+        List<CompoundTag> targetBlockEntities = new ArrayList<>();
         List<UndoSnapshot.Entry> undo = new ArrayList<>();
         for (BlockPos pos : generated) {
             BlockState previous = level.getBlockState(pos);
-            if (previous.isAir()) {
+            if (previous.isAir() && previous.getFluidState().isEmpty()) {
                 continue;
             }
             if (!canTouch(player, level, pos, previous)) {
@@ -168,20 +211,25 @@ public final class BuildOperationEngine {
             }
             positions.add(pos.immutable());
             targets.add(Blocks.AIR.defaultBlockState());
+            targetBlockEntities.add(null);
             undo.add(undoEntry(level, pos, previous, Blocks.AIR.defaultBlockState(), false));
         }
 
         boolean trackHistory = hasHistoryItems(player);
-        Map<ItemStackKey, Integer> producedDrops = dropsForChanges(player, level, undo);
+        List<CapturedEntity> removedEntities = captureDecorEntities(level, BlockPos.ZERO, generated);
+        List<ItemStack> producedDrops = withEntityDrops(dropsForChanges(player, level, undo), removedEntities);
         String label = "area break";
         return previewOrConfirm(player, level, new PendingOperation(
                 level.dimension(),
                 label,
                 List.copyOf(positions),
                 List.copyOf(targets),
+                copyBlockEntities(targetBlockEntities),
                 List.copyOf(undo),
-                Map.of(),
+                List.of(),
                 producedDrops,
+                removedEntities,
+                List.of(),
                 trackHistory,
                 true,
                 signature(label, level, positions, targets)));
@@ -199,12 +247,11 @@ public final class BuildOperationEngine {
         }
         List<PaletteEntry> palette = BuildToolsState.paletteEntries(player);
         ItemStack source = player.getOffhandItem();
-        BlockState target;
-        if (source.getItem() instanceof BlockItem blockItem) {
-            target = blockItem.getBlock().defaultBlockState();
-        } else if (!palette.isEmpty()) {
+        BlockState target = materialState(source);
+        if (target == null && !palette.isEmpty()) {
             target = palette.getFirst().state();
-        } else {
+        }
+        if (target == null) {
             fail(player, "buildtools.error.offhand_block");
             return false;
         }
@@ -261,8 +308,9 @@ public final class BuildOperationEngine {
         ServerLevel level = player.serverLevel();
         List<BlockPos> positions = new ArrayList<>();
         List<BlockState> targets = new ArrayList<>();
+        List<CompoundTag> targetBlockEntities = new ArrayList<>();
         List<UndoSnapshot.Entry> undo = new ArrayList<>();
-        Map<ItemStackKey, Integer> refund = new LinkedHashMap<>();
+        List<ItemStack> refund = new ArrayList<>();
         for (BuildPlan.Entry entry : plan.entries()) {
             BlockState previous = level.getBlockState(entry.pos());
             if (!canTouch(player, level, entry.pos(), previous)) {
@@ -270,20 +318,25 @@ public final class BuildOperationEngine {
             }
             positions.add(entry.pos().immutable());
             targets.add(entry.state());
-            undo.add(undoEntry(level, entry.pos(), previous, entry.state(), previous.isAir() || previous.canBeReplaced()));
-            refund.merge(new ItemStackKey(entry.state().getBlock().asItem()), 1, Integer::sum);
+            targetBlockEntities.add(entry.blockEntity());
+            undo.add(undoEntry(level, entry.pos(), previous, entry.state(), entry.blockEntity(), previous.isAir() || previous.canBeReplaced()));
+            addUndoRefund(refund, entry.state());
         }
         String label = "build plan";
         boolean trackHistory = hasHistoryItems(player);
-        Map<ItemStackKey, Integer> producedDrops = dropsForChanges(player, level, undo);
+        List<CapturedEntity> removedEntities = captureDecorEntities(level, BlockPos.ZERO, positions);
+        List<ItemStack> producedDrops = withEntityDrops(dropsForChanges(player, level, undo), removedEntities);
         return previewOrConfirm(player, level, new PendingOperation(
                 level.dimension(),
                 label,
                 List.copyOf(positions),
                 List.copyOf(targets),
+                copyBlockEntities(targetBlockEntities),
                 List.copyOf(undo),
-                Map.copyOf(refund),
+                StoredItems.copyOf(refund),
                 producedDrops,
+                removedEntities,
+                List.of(),
                 trackHistory,
                 false,
                 signature(label, level, positions, targets)));
@@ -291,11 +344,11 @@ public final class BuildOperationEngine {
 
     public static boolean executeBrush(ServerPlayer player, BlockPos origin) {
         ItemStack source = player.getOffhandItem();
-        if (!(source.getItem() instanceof BlockItem blockItem)) {
+        BlockState target = materialState(source);
+        if (target == null) {
             fail(player, "buildtools.error.offhand_block");
             return false;
         }
-        BlockState target = blockItem.getBlock().defaultBlockState();
         if (!isSupportedTarget(target)) {
             fail(player, "buildtools.error.unsupported_block");
             return false;
@@ -316,8 +369,9 @@ public final class BuildOperationEngine {
         BlockState replaceTarget = BuildToolsState.replaceTarget(player);
         List<BlockPos> positions = new ArrayList<>();
         List<BlockState> targets = new ArrayList<>();
+        List<CompoundTag> targetBlockEntities = new ArrayList<>();
         List<UndoSnapshot.Entry> undo = new ArrayList<>();
-        Map<ItemStackKey, Integer> refund = new LinkedHashMap<>();
+        List<ItemStack> refund = new ArrayList<>();
         for (BlockPos pos : generated) {
             BlockState previous = level.getBlockState(pos);
             if (!canTouch(player, level, pos, previous)) {
@@ -331,20 +385,25 @@ public final class BuildOperationEngine {
             }
             positions.add(pos.immutable());
             targets.add(target);
+            targetBlockEntities.add(null);
             undo.add(undoEntry(level, pos, previous, target, previous.isAir() || previous.canBeReplaced()));
-            refund.merge(new ItemStackKey(target.getBlock().asItem()), 1, Integer::sum);
+            addUndoRefund(refund, target);
         }
         boolean trackHistory = hasHistoryItems(player);
-        Map<ItemStackKey, Integer> producedDrops = dropsForChanges(player, level, undo);
+        List<CapturedEntity> removedEntities = captureDecorEntities(level, BlockPos.ZERO, positions);
+        List<ItemStack> producedDrops = withEntityDrops(dropsForChanges(player, level, undo), removedEntities);
         String label = "brush";
         return previewOrConfirm(player, level, new PendingOperation(
                 level.dimension(),
                 label,
                 List.copyOf(positions),
                 List.copyOf(targets),
+                copyBlockEntities(targetBlockEntities),
                 List.copyOf(undo),
-                Map.copyOf(refund),
+                StoredItems.copyOf(refund),
                 producedDrops,
+                removedEntities,
+                List.of(),
                 trackHistory,
                 false,
                 signature(label + ":" + brushMode.name() + ":" + radius, level, positions, targets)));
@@ -371,8 +430,9 @@ public final class BuildOperationEngine {
         int average = Mth.floor(heights.stream().mapToInt(Integer::intValue).average().orElse(origin.getY()));
         List<BlockPos> positions = new ArrayList<>();
         List<BlockState> targets = new ArrayList<>();
+        List<CompoundTag> targetBlockEntities = new ArrayList<>();
         List<UndoSnapshot.Entry> undo = new ArrayList<>();
-        Map<ItemStackKey, Integer> refund = new LinkedHashMap<>();
+        List<ItemStack> refund = new ArrayList<>();
 
         for (Map.Entry<BlockPos, Integer> entry : tops.entrySet()) {
             int x = entry.getKey().getX();
@@ -388,6 +448,7 @@ public final class BuildOperationEngine {
                         }
                         positions.add(pos);
                         targets.add(Blocks.AIR.defaultBlockState());
+                        targetBlockEntities.add(null);
                         undo.add(undoEntry(level, pos, previous, Blocks.AIR.defaultBlockState(), false));
                     }
                 }
@@ -401,23 +462,28 @@ public final class BuildOperationEngine {
                         }
                         positions.add(pos);
                         targets.add(fillState);
+                        targetBlockEntities.add(null);
                         undo.add(undoEntry(level, pos, previous, fillState, true));
-                        refund.merge(new ItemStackKey(fillState.getBlock().asItem()), 1, Integer::sum);
+                        addUndoRefund(refund, fillState);
                     }
                 }
             }
         }
         boolean trackHistory = hasHistoryItems(player);
-        Map<ItemStackKey, Integer> producedDrops = dropsForChanges(player, level, undo);
+        List<CapturedEntity> removedEntities = captureDecorEntities(level, BlockPos.ZERO, positions);
+        List<ItemStack> producedDrops = withEntityDrops(dropsForChanges(player, level, undo), removedEntities);
         String label = "smooth brush";
         return previewOrConfirm(player, level, new PendingOperation(
                 level.dimension(),
                 label,
                 List.copyOf(positions),
                 List.copyOf(targets),
+                copyBlockEntities(targetBlockEntities),
                 List.copyOf(undo),
-                Map.copyOf(refund),
+                StoredItems.copyOf(refund),
                 producedDrops,
+                removedEntities,
+                List.of(),
                 trackHistory,
                 false,
                 signature(label + ":" + radius, level, positions, targets)));
@@ -439,27 +505,32 @@ public final class BuildOperationEngine {
         List<Blueprint.Entry> entries = new ArrayList<>();
         for (BlockPos pos : positions) {
             BlockState state = level.getBlockState(pos);
-            if (state.isAir()) {
+            if (state.isAir() && state.getFluidState().isEmpty()) {
                 continue;
             }
-            if (!isSupportedTarget(state) || level.getBlockEntity(pos) != null) {
+            if (!isSupportedTarget(state)) {
                 fail(player, "buildtools.error.copy_unsupported");
                 return false;
             }
-            entries.add(new Blueprint.Entry(pos.subtract(origin), state));
+            entries.add(new Blueprint.Entry(pos.subtract(origin), state, captureBlockEntity(level, pos)));
+        }
+        List<CapturedEntity> entities = captureDecorEntities(level, origin, positions);
+        if (entries.isEmpty() && entities.isEmpty()) {
+            fail(player, "buildtools.error.no_targets");
+            return false;
         }
         if (entries.size() > BuildToolsConfig.MAX_COPY_VOLUME.get()) {
             fail(player, Component.translatable("buildtools.error.copy_too_large", entries.size(), BuildToolsConfig.MAX_COPY_VOLUME.get()));
             return false;
         }
-        BuildToolsState.setBlueprint(player, new Blueprint(List.copyOf(entries)));
-        player.displayClientMessage(Component.translatable("buildtools.message.copied", entries.size()), true);
+        BuildToolsState.setBlueprint(player, new Blueprint(List.copyOf(entries), entities));
+        player.displayClientMessage(Component.translatable("buildtools.message.copied", entries.size() + entities.size()), true);
         return true;
     }
 
     public static boolean pasteBlueprint(ServerPlayer player, BlockPos origin) {
         Blueprint blueprint = BuildToolsState.blueprint(player).orElse(null);
-        if (blueprint == null || blueprint.entries().isEmpty()) {
+        if (blueprint == null || blueprint.entries().isEmpty() && blueprint.entities().isEmpty()) {
             fail(player, "buildtools.error.no_blueprint");
             return false;
         }
@@ -471,8 +542,9 @@ public final class BuildOperationEngine {
         ServerLevel level = player.serverLevel();
         List<BlockPos> positions = new ArrayList<>();
         List<BlockState> targets = new ArrayList<>();
+        List<CompoundTag> targetBlockEntities = new ArrayList<>();
         List<UndoSnapshot.Entry> undo = new ArrayList<>();
-        Map<ItemStackKey, Integer> refund = new HashMap<>();
+        List<ItemStack> refund = new ArrayList<>();
         for (Blueprint.Entry entry : blueprint.entries()) {
             BlockPos pos = origin.offset(entry.offset());
             BlockState previous = level.getBlockState(pos);
@@ -481,11 +553,14 @@ public final class BuildOperationEngine {
             }
             positions.add(pos.immutable());
             targets.add(entry.state());
-            undo.add(undoEntry(level, pos, previous, entry.state(), previous.isAir() || previous.canBeReplaced()));
-            refund.merge(new ItemStackKey(entry.state().getBlock().asItem()), 1, Integer::sum);
+            targetBlockEntities.add(entry.blockEntity());
+            undo.add(undoEntry(level, pos, previous, entry.state(), entry.blockEntity(), previous.isAir() || previous.canBeReplaced()));
+            addUndoRefund(refund, entry.state());
         }
         boolean trackHistory = hasHistoryItems(player);
-        return enqueue(player, level, positions, targets, undo, refund, dropsForChanges(player, level, undo), trackHistory);
+        List<CapturedEntity> addedEntities = absoluteEntities(blueprint.entities(), origin);
+        List<CapturedEntity> removedEntities = captureDecorEntities(level, BlockPos.ZERO, positions);
+        return enqueue(player, level, positions, targets, copyBlockEntities(targetBlockEntities), undo, refund, withEntityDrops(dropsForChanges(player, level, undo), removedEntities), removedEntities, addedEntities, trackHistory);
     }
 
     public static boolean previewOrConfirmBlueprintPaste(ServerPlayer player, BlockPos origin) {
@@ -540,7 +615,7 @@ public final class BuildOperationEngine {
 
     private static void previewBlueprintPaste(ServerPlayer player, BlockPos origin) {
         Blueprint blueprint = BuildToolsState.blueprint(player).orElse(null);
-        if (blueprint == null || blueprint.entries().isEmpty()) {
+        if (blueprint == null || blueprint.entries().isEmpty() && blueprint.entities().isEmpty()) {
             fail(player, "buildtools.error.no_blueprint");
             return;
         }
@@ -558,6 +633,9 @@ public final class BuildOperationEngine {
                 return;
             }
             positions.add(pos.immutable());
+        }
+        for (CapturedEntity entity : blueprint.entities()) {
+            positions.add(BlockPos.containing(origin.getX() + entity.offsetX(), origin.getY() + entity.offsetY(), origin.getZ() + entity.offsetZ()));
         }
         BuildToolsState.setPendingPastePreview(player, origin, positions);
     }
@@ -578,13 +656,18 @@ public final class BuildOperationEngine {
                 return false;
             }
         }
-        UndoSnapshot redoSnapshot = new UndoSnapshot(snapshot.dimension(), captureCurrentAsRedone(level, snapshot.entries()), snapshot.refund(), snapshot.producedDrops());
+        UndoSnapshot redoSnapshot = new UndoSnapshot(snapshot.dimension(), captureCurrentAsRedone(level, snapshot.entries()), snapshot.refund(), snapshot.producedDrops(), snapshot.removedEntities(), snapshot.addedEntities());
         BuildToolsState.takeUndo(player);
+        removeCapturedEntities(level, snapshot.addedEntities());
+        List<ItemStack> unexpectedDrops = new ArrayList<>();
+        List<ItemStack> undoDropBudget = new ArrayList<>(StoredItems.copyOf(snapshot.refund()));
         for (UndoSnapshot.Entry entry : snapshot.entries()) {
-            restoreBlock(level, entry.pos(), entry.previousState(), entry.previousBlockEntity());
+            unexpectedDrops.addAll(capturedDropsBeyondBudget(undoDropBudget, restoreBlock(level, entry.pos(), entry.previousState(), entry.previousBlockEntity())));
         }
+        spawnCapturedEntities(level, snapshot.removedEntities());
         if (!player.gameMode.isCreative()) {
             BuildingStorageManager.depositOrGive(player, snapshot.refund());
+            BuildingStorageManager.depositOrGive(player, unexpectedDrops);
         }
         if (hasHistoryItems(player)) {
             BuildToolsState.setRedo(player, redoSnapshot);
@@ -609,6 +692,7 @@ public final class BuildOperationEngine {
         ServerLevel level = player.serverLevel();
         List<BlockPos> positions = new ArrayList<>();
         List<BlockState> targets = new ArrayList<>();
+        List<CompoundTag> targetBlockEntities = new ArrayList<>();
         List<UndoSnapshot.Entry> undoEntries = new ArrayList<>();
         for (UndoSnapshot.Entry entry : snapshot.entries()) {
             if (!canRestore(player, level, entry.pos())) {
@@ -617,6 +701,7 @@ public final class BuildOperationEngine {
             BlockState previous = level.getBlockState(entry.pos());
             positions.add(entry.pos().immutable());
             targets.add(entry.redoneState());
+            targetBlockEntities.add(entry.redoneBlockEntity() == null ? null : entry.redoneBlockEntity().copy());
             undoEntries.add(new UndoSnapshot.Entry(
                     entry.pos().immutable(),
                     previous,
@@ -627,7 +712,7 @@ public final class BuildOperationEngine {
         }
 
         boolean trackHistory = hasHistoryItems(player);
-        boolean queued = enqueue(player, level, positions, targets, List.copyOf(undoEntries), snapshot.refund(), snapshot.producedDrops(), trackHistory);
+        boolean queued = enqueue(player, level, positions, targets, copyBlockEntities(targetBlockEntities), List.copyOf(undoEntries), snapshot.refund(), snapshot.producedDrops(), snapshot.removedEntities(), snapshot.addedEntities(), trackHistory);
         if (queued) {
             BuildToolsState.takeRedo(player);
         }
@@ -635,7 +720,7 @@ public final class BuildOperationEngine {
     }
 
     public static boolean collectStoredDrops(ServerPlayer player) {
-        Map<ItemStackKey, Integer> drops = BuildToolsState.storedDrops(player);
+        List<ItemStack> drops = BuildToolsState.storedDropStacks(player);
         if (drops.isEmpty()) {
             fail(player, "buildtools.error.no_stored_drops");
             return false;
@@ -644,7 +729,7 @@ public final class BuildOperationEngine {
         BuildToolsState.clearHistory(player);
         player.displayClientMessage(Component.translatable(
                 "buildtools.message.stored_drops_collected",
-                drops.values().stream().mapToInt(Integer::intValue).sum()), true);
+                StoredItems.total(drops)), true);
         return true;
     }
 
@@ -656,8 +741,9 @@ public final class BuildOperationEngine {
             batch -= applied;
             if (operation.positions().isEmpty()) {
                 QUEUE.remove();
-                UndoSnapshot snapshot = new UndoSnapshot(operation.dimension(), operation.undoEntries(), operation.refund(), operation.producedDrops());
-                int drops = operation.producedDrops().values().stream().mapToInt(Integer::intValue).sum();
+                spawnCapturedEntities(operation.level(), operation.addedEntities());
+                UndoSnapshot snapshot = new UndoSnapshot(operation.dimension(), operation.undoEntries(), operation.refund(), operation.producedDrops(), operation.removedEntities(), operation.addedEntities());
+                int drops = StoredItems.total(operation.producedDrops());
                 if (operation.trackHistory()) {
                     BuildToolsState.setUndo(operation.player(), snapshot);
                 } else {
@@ -684,8 +770,8 @@ public final class BuildOperationEngine {
         if (pending != null && pending.signature().equals(operation.signature())) {
             PENDING_OPERATIONS.remove(player.getUUID());
             return operation.free()
-                    ? enqueueFree(player, level, operation.positions(), operation.targets(), operation.undo(), operation.refund(), operation.producedDrops(), operation.trackHistory())
-                    : enqueue(player, level, operation.positions(), operation.targets(), operation.undo(), operation.refund(), operation.producedDrops(), operation.trackHistory());
+                    ? enqueueFree(player, level, operation.positions(), operation.targets(), operation.targetBlockEntities(), operation.undo(), operation.refund(), operation.producedDrops(), operation.removedEntities(), operation.addedEntities(), operation.trackHistory())
+                    : enqueue(player, level, operation.positions(), operation.targets(), operation.targetBlockEntities(), operation.undo(), operation.refund(), operation.producedDrops(), operation.removedEntities(), operation.addedEntities(), operation.trackHistory());
         }
 
         PENDING_OPERATIONS.put(player.getUUID(), operation);
@@ -697,6 +783,7 @@ public final class BuildOperationEngine {
         PacketDistributor.sendToPlayer(player, new ToolStatusPayload(true, "Preview Ready", List.of(
                 operation.label() + ": " + operation.positions().size() + " changes",
                 materialPreviewLine(player, operation),
+                durabilityPreviewLine(player, operation.positions().size()),
                 dropPreviewLine(operation),
                 "Use the same tool again to confirm"), 0xF4C542));
         return false;
@@ -715,8 +802,18 @@ public final class BuildOperationEngine {
         return "Need " + required + " | missing " + missing;
     }
 
+    private static String durabilityPreviewLine(ServerPlayer player, int blockChanges) {
+        ItemStack tool = activeDurabilityTool(player);
+        if (tool.isEmpty() || !tool.isDamageableItem() || player.gameMode.isCreative()) {
+            return "";
+        }
+        int cost = durabilityCost(blockChanges);
+        int remaining = remainingDurability(tool);
+        return "Durability cost: " + cost + " | remaining: " + remaining;
+    }
+
     private static String dropPreviewLine(PendingOperation operation) {
-        int drops = operation.producedDrops().values().stream().mapToInt(Integer::intValue).sum();
+        int drops = StoredItems.total(operation.producedDrops());
         if (!operation.trackHistory()) {
             return drops <= 0 ? "No undo or redo token | no history" : "Sends " + drops + " drops to linked storage";
         }
@@ -732,12 +829,19 @@ public final class BuildOperationEngine {
             ServerLevel level,
             List<BlockPos> positions,
             List<BlockState> targets,
+            List<CompoundTag> targetBlockEntities,
             List<UndoSnapshot.Entry> undo,
-            Map<ItemStackKey, Integer> refund,
-            Map<ItemStackKey, Integer> producedDrops,
+            List<ItemStack> refund,
+            List<ItemStack> producedDrops,
+            List<CapturedEntity> removedEntities,
+            List<CapturedEntity> addedEntities,
             boolean trackHistory) {
-        if (positions.isEmpty()) {
+        if (positions.isEmpty() && removedEntities.isEmpty() && addedEntities.isEmpty()) {
             fail(player, "buildtools.error.no_targets");
+            return false;
+        }
+        int durabilityCost = durabilityCost(positions.size());
+        if (!hasDurabilityForOperation(player, durabilityCost)) {
             return false;
         }
         BlockCostPlan costPlan = BlockCostPlan.create(player, targets);
@@ -746,7 +850,10 @@ public final class BuildOperationEngine {
             return false;
         }
         costPlan.consume(player);
-        QUEUE.add(new BuildOperation(player, level, level.dimension(), new ArrayList<>(positions), new ArrayList<>(targets), List.copyOf(undo), Map.copyOf(refund), Map.copyOf(producedDrops), trackHistory));
+        damageOperationTool(player, durabilityCost);
+        removeCapturedEntities(level, removedEntities);
+        List<ItemStack> storedDrops = StoredItems.copyOf(producedDrops);
+        QUEUE.add(new BuildOperation(player, level, level.dimension(), new ArrayList<>(positions), new ArrayList<>(targets), new ArrayList<>(copyBlockEntities(targetBlockEntities)), List.copyOf(undo), StoredItems.copyOf(refund), new ArrayList<>(storedDrops), new ArrayList<>(storedDrops), List.copyOf(removedEntities), List.copyOf(addedEntities), trackHistory));
         player.displayClientMessage(Component.translatable("buildtools.message.queued", positions.size()), true);
         return true;
     }
@@ -756,15 +863,25 @@ public final class BuildOperationEngine {
             ServerLevel level,
             List<BlockPos> positions,
             List<BlockState> targets,
+            List<CompoundTag> targetBlockEntities,
             List<UndoSnapshot.Entry> undo,
-            Map<ItemStackKey, Integer> refund,
-            Map<ItemStackKey, Integer> producedDrops,
+            List<ItemStack> refund,
+            List<ItemStack> producedDrops,
+            List<CapturedEntity> removedEntities,
+            List<CapturedEntity> addedEntities,
             boolean trackHistory) {
-        if (positions.isEmpty()) {
+        if (positions.isEmpty() && removedEntities.isEmpty() && addedEntities.isEmpty()) {
             fail(player, "buildtools.error.no_targets");
             return false;
         }
-        QUEUE.add(new BuildOperation(player, level, level.dimension(), new ArrayList<>(positions), new ArrayList<>(targets), List.copyOf(undo), Map.copyOf(refund), Map.copyOf(producedDrops), trackHistory));
+        int durabilityCost = durabilityCost(positions.size());
+        if (!hasDurabilityForOperation(player, durabilityCost)) {
+            return false;
+        }
+        damageOperationTool(player, durabilityCost);
+        removeCapturedEntities(level, removedEntities);
+        List<ItemStack> storedDrops = StoredItems.copyOf(producedDrops);
+        QUEUE.add(new BuildOperation(player, level, level.dimension(), new ArrayList<>(positions), new ArrayList<>(targets), new ArrayList<>(copyBlockEntities(targetBlockEntities)), List.copyOf(undo), StoredItems.copyOf(refund), new ArrayList<>(storedDrops), new ArrayList<>(storedDrops), List.copyOf(removedEntities), List.copyOf(addedEntities), trackHistory));
         player.displayClientMessage(Component.translatable("buildtools.message.queued", positions.size()), true);
         return true;
     }
@@ -776,42 +893,109 @@ public final class BuildOperationEngine {
             UndoSnapshot.Entry entry = operation.undoEntries().get(entryIndex);
             BlockPos pos = operation.positions().remove(0);
             BlockState target = operation.targetStates().remove(0);
+            CompoundTag targetBlockEntity = operation.targetBlockEntities().remove(0);
             BlockState previous = operation.level().getBlockState(pos);
             if (target.isAir()) {
-                operation.level().destroyBlock(pos, false, operation.player());
+                appendCapturedDrops(operation, clearBlockWithoutDrops(operation.level(), pos, Blocks.AIR.defaultBlockState()));
                 applied++;
                 continue;
             }
             if (!previous.isAir() && !previous.canBeReplaced()) {
-                operation.level().destroyBlock(pos, false, operation.player());
+                appendCapturedDrops(operation, clearBlockWithoutDrops(operation.level(), pos, Blocks.AIR.defaultBlockState()));
             }
-            restoreBlock(operation.level(), pos, target, entry.redoneBlockEntity());
+            appendCapturedDrops(operation, restoreBlock(operation.level(), pos, target, targetBlockEntity == null ? entry.redoneBlockEntity() : targetBlockEntity));
             applied++;
         }
         return applied;
     }
 
     private static UndoSnapshot.Entry undoEntry(ServerLevel level, BlockPos pos, BlockState previous, BlockState redone, boolean mayRestorePrevious) {
-        return new UndoSnapshot.Entry(pos.immutable(), previous, captureBlockEntity(level, pos), redone, null, mayRestorePrevious);
+        return undoEntry(level, pos, previous, redone, null, mayRestorePrevious);
     }
 
-    private static Map<ItemStackKey, Integer> dropsForChanges(ServerPlayer player, ServerLevel level, List<UndoSnapshot.Entry> entries) {
-        Map<ItemStackKey, Integer> drops = new LinkedHashMap<>();
+    private static UndoSnapshot.Entry undoEntry(ServerLevel level, BlockPos pos, BlockState previous, BlockState redone, CompoundTag redoneBlockEntity, boolean mayRestorePrevious) {
+        return new UndoSnapshot.Entry(pos.immutable(), previous, captureBlockEntity(level, pos), redone, redoneBlockEntity, mayRestorePrevious);
+    }
+
+    private static List<ItemStack> dropsForChanges(ServerPlayer player, ServerLevel level, List<UndoSnapshot.Entry> entries) {
+        List<ItemStack> drops = new ArrayList<>();
         for (UndoSnapshot.Entry entry : entries) {
             if (!shouldCollectDrops(entry.previousState(), entry.redoneState())) {
                 continue;
             }
-            for (ItemStack stack : Block.getDrops(entry.previousState(), level, entry.pos(), null, player, player.getMainHandItem())) {
+            BlockEntity blockEntity = level.getBlockEntity(entry.pos());
+            ItemStack preserved = preservedBlockEntityStack(entry.previousState(), blockEntity, level);
+            if (!preserved.isEmpty()) {
+                drops.add(preserved);
+                continue;
+            }
+            for (ItemStack stack : Block.getDrops(entry.previousState(), level, entry.pos(), blockEntity, player, player.getMainHandItem())) {
                 if (!stack.isEmpty()) {
-                    drops.merge(new ItemStackKey(stack.getItem()), stack.getCount(), Integer::sum);
+                    drops.add(stack.copy());
                 }
             }
         }
-        return Map.copyOf(drops);
+        return StoredItems.copyOf(drops);
+    }
+
+    private static List<ItemStack> withEntityDrops(List<ItemStack> blockDrops, List<CapturedEntity> removedEntities) {
+        List<ItemStack> drops = new ArrayList<>(StoredItems.copyOf(blockDrops));
+        for (CapturedEntity entity : removedEntities) {
+            ItemStack stack = entityDrop(entity);
+            if (!stack.isEmpty()) {
+                drops.add(stack);
+            }
+            ItemStack contained = framedItem(entity);
+            if (!contained.isEmpty()) {
+                drops.add(contained);
+            }
+        }
+        return StoredItems.copyOf(drops);
+    }
+
+    private static ItemStack entityDrop(CapturedEntity entity) {
+        String id = entity.tag().getString("id");
+        ItemStack stack = switch (id) {
+            case "minecraft:item_frame" -> new ItemStack(Items.ITEM_FRAME);
+            case "minecraft:glow_item_frame" -> new ItemStack(Items.GLOW_ITEM_FRAME);
+            case "minecraft:painting" -> new ItemStack(Items.PAINTING);
+            case "minecraft:armor_stand" -> new ItemStack(Items.ARMOR_STAND);
+            case "minecraft:leash_knot" -> new ItemStack(Items.LEAD);
+            default -> ItemStack.EMPTY;
+        };
+        if (!stack.isEmpty()) {
+            CompoundTag data = entity.tag().copy();
+            data.remove("Pos");
+            data.remove("UUID");
+            data.remove("UUIDMost");
+            data.remove("UUIDLeast");
+            stack.set(DataComponents.ENTITY_DATA, CustomData.of(data));
+        }
+        return stack;
+    }
+
+    private static ItemStack framedItem(CapturedEntity entity) {
+        if (!entity.tag().contains("Item", net.minecraft.nbt.Tag.TAG_COMPOUND)) {
+            return ItemStack.EMPTY;
+        }
+        return ItemStack.parseOptional(currentRegistryAccess(), entity.tag().getCompound("Item"));
+    }
+
+    private static net.minecraft.core.HolderLookup.Provider currentRegistryAccess() {
+        return net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer().registryAccess();
     }
 
     private static boolean shouldCollectDrops(BlockState previous, BlockState redone) {
         return !previous.isAir() && !previous.canBeReplaced() && !redone.is(previous.getBlock());
+    }
+
+    private static ItemStack preservedBlockEntityStack(BlockState state, BlockEntity blockEntity, ServerLevel level) {
+        if (!(blockEntity instanceof Container) || state.getBlock().asItem() == Items.AIR) {
+            return ItemStack.EMPTY;
+        }
+        ItemStack stack = new ItemStack(state.getBlock().asItem());
+        blockEntity.saveToItem(stack, level.registryAccess());
+        return stack;
     }
 
     private static List<UndoSnapshot.Entry> captureCurrentAsRedone(ServerLevel level, List<UndoSnapshot.Entry> entries) {
@@ -833,15 +1017,23 @@ public final class BuildOperationEngine {
         return blockEntity == null ? null : blockEntity.saveWithFullMetadata(level.registryAccess()).copy();
     }
 
-    private static void restoreBlock(ServerLevel level, BlockPos pos, BlockState state, CompoundTag blockEntityTag) {
+    private static List<CompoundTag> copyBlockEntities(List<CompoundTag> tags) {
+        List<CompoundTag> copied = new ArrayList<>();
+        for (CompoundTag tag : tags) {
+            copied.add(tag == null ? null : tag.copy());
+        }
+        return copied;
+    }
+
+    private static List<ItemStack> restoreBlock(ServerLevel level, BlockPos pos, BlockState state, CompoundTag blockEntityTag) {
         BlockState previous = level.getBlockState(pos);
-        level.setBlock(pos, state, 3);
+        List<ItemStack> capturedDrops = clearBlockWithoutDrops(level, pos, state);
         if (state.isAir()) {
             level.removeBlockEntity(pos);
-            return;
+            return capturedDrops;
         }
         if (blockEntityTag == null) {
-            return;
+            return capturedDrops;
         }
 
         CompoundTag restoredTag = blockEntityTag.copy();
@@ -854,6 +1046,157 @@ public final class BuildOperationEngine {
             restored.setChanged();
             level.sendBlockUpdated(pos, previous, state, 3);
         }
+        return capturedDrops;
+    }
+
+    private static List<ItemStack> clearBlockWithoutDrops(ServerLevel level, BlockPos pos, BlockState replacement) {
+        return captureSpawnedDrops(level, () -> {
+            BlockEntity blockEntity = level.getBlockEntity(pos);
+            if (blockEntity instanceof Container container) {
+                container.clearContent();
+                blockEntity.setChanged();
+            }
+            level.removeBlockEntity(pos);
+            level.setBlock(pos, replacement, 3);
+        });
+    }
+
+    private static List<ItemStack> captureSpawnedDrops(ServerLevel level, Runnable action) {
+        DropCapture previous = ACTIVE_DROP_CAPTURE.get();
+        DropCapture capture = new DropCapture(level, new ArrayList<>());
+        ACTIVE_DROP_CAPTURE.set(capture);
+        try {
+            action.run();
+        } finally {
+            if (previous == null) {
+                ACTIVE_DROP_CAPTURE.remove();
+            } else {
+                ACTIVE_DROP_CAPTURE.set(previous);
+            }
+        }
+        return StoredItems.copyOf(capture.drops());
+    }
+
+    private static void appendCapturedDrops(BuildOperation operation, List<ItemStack> capturedDrops) {
+        operation.producedDrops().addAll(capturedDropsBeyondBudget(operation.expectedDropBudget(), capturedDrops));
+    }
+
+    private static List<ItemStack> capturedDropsBeyondBudget(List<ItemStack> budget, List<ItemStack> capturedDrops) {
+        List<ItemStack> unexpected = new ArrayList<>();
+        for (ItemStack captured : capturedDrops) {
+            ItemStack remaining = captured.copy();
+            for (ItemStack expected : budget) {
+                if (remaining.isEmpty()) {
+                    break;
+                }
+                if (!ItemStack.isSameItemSameComponents(remaining, expected)) {
+                    continue;
+                }
+                int consumed = Math.min(remaining.getCount(), expected.getCount());
+                remaining.shrink(consumed);
+                expected.shrink(consumed);
+            }
+            if (!remaining.isEmpty()) {
+                unexpected.add(remaining);
+            }
+        }
+        budget.removeIf(ItemStack::isEmpty);
+        return StoredItems.copyOf(unexpected);
+    }
+
+    private static List<CapturedEntity> captureDecorEntities(ServerLevel level, BlockPos origin, List<BlockPos> positions) {
+        if (positions.isEmpty()) {
+            return List.of();
+        }
+        Set<BlockPos> selected = new HashSet<>(positions);
+        AABB bounds = bounds(positions).inflate(2.0D);
+        List<CapturedEntity> captured = new ArrayList<>();
+        for (Entity entity : level.getEntities((Entity) null, bounds, BuildOperationEngine::isSupportedDecorEntity)) {
+            if (!selected.contains(entity.blockPosition())) {
+                continue;
+            }
+            CompoundTag tag = entity.saveWithoutId(new CompoundTag());
+            tag.putString("id", EntityType.getKey(entity.getType()).toString());
+            captured.add(new CapturedEntity(
+                    entity.getX() - origin.getX(),
+                    entity.getY() - origin.getY(),
+                    entity.getZ() - origin.getZ(),
+                    tag));
+        }
+        return List.copyOf(captured);
+    }
+
+    private static List<CapturedEntity> absoluteEntities(List<CapturedEntity> entities, BlockPos origin) {
+        return entities.stream()
+                .map(entity -> entity.withOffset(origin.getX() + entity.offsetX(), origin.getY() + entity.offsetY(), origin.getZ() + entity.offsetZ()))
+                .toList();
+    }
+
+    private static void removeCapturedEntities(ServerLevel level, List<CapturedEntity> entities) {
+        for (CapturedEntity captured : entities) {
+            AABB bounds = new AABB(
+                    captured.offsetX() - 1.0D,
+                    captured.offsetY() - 1.0D,
+                    captured.offsetZ() - 1.0D,
+                    captured.offsetX() + 1.0D,
+                    captured.offsetY() + 1.0D,
+                    captured.offsetZ() + 1.0D);
+            for (Entity entity : level.getEntities((Entity) null, bounds, BuildOperationEngine::isSupportedDecorEntity)) {
+                if (matchesCapturedEntity(entity, captured)) {
+                    entity.discard();
+                }
+            }
+        }
+    }
+
+    private static boolean matchesCapturedEntity(Entity entity, CapturedEntity captured) {
+        String capturedType = captured.tag().getString("id");
+        return EntityType.getKey(entity.getType()).toString().equals(capturedType)
+                && entity.distanceToSqr(captured.offsetX(), captured.offsetY(), captured.offsetZ()) < 0.25D;
+    }
+
+    private static void spawnCapturedEntities(ServerLevel level, List<CapturedEntity> entities) {
+        for (CapturedEntity captured : entities) {
+            CompoundTag tag = captured.tag().copy();
+            tag.remove("UUID");
+            tag.remove("UUIDMost");
+            tag.remove("UUIDLeast");
+            ListTag pos = new ListTag();
+            pos.add(DoubleTag.valueOf(captured.offsetX()));
+            pos.add(DoubleTag.valueOf(captured.offsetY()));
+            pos.add(DoubleTag.valueOf(captured.offsetZ()));
+            tag.put("Pos", pos);
+            Entity entity = EntityType.loadEntityRecursive(tag, level, loaded -> loaded);
+            if (entity != null) {
+                level.addFreshEntity(entity);
+            }
+        }
+    }
+
+    private static AABB bounds(List<BlockPos> positions) {
+        int minX = Integer.MAX_VALUE;
+        int minY = Integer.MAX_VALUE;
+        int minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE;
+        int maxY = Integer.MIN_VALUE;
+        int maxZ = Integer.MIN_VALUE;
+        for (BlockPos pos : positions) {
+            minX = Math.min(minX, pos.getX());
+            minY = Math.min(minY, pos.getY());
+            minZ = Math.min(minZ, pos.getZ());
+            maxX = Math.max(maxX, pos.getX());
+            maxY = Math.max(maxY, pos.getY());
+            maxZ = Math.max(maxZ, pos.getZ());
+        }
+        return new AABB(minX, minY, minZ, maxX + 1.0D, maxY + 1.0D, maxZ + 1.0D);
+    }
+
+    private static boolean isSupportedDecorEntity(Entity entity) {
+        return entity instanceof ItemFrame
+                || entity instanceof GlowItemFrame
+                || entity instanceof Painting
+                || entity instanceof ArmorStand
+                || entity instanceof LeashFenceKnotEntity;
     }
 
     private static boolean canRestore(ServerPlayer player, ServerLevel level, BlockPos pos) {
@@ -885,15 +1228,30 @@ public final class BuildOperationEngine {
             fail(player, "buildtools.error.too_far");
             return false;
         }
-        if (!previous.getFluidState().isEmpty()) {
-            fail(player, "buildtools.error.protected_state");
-            return false;
-        }
-        if (level.getBlockEntity(pos) != null) {
-            fail(player, "buildtools.error.protected_state");
-            return false;
-        }
         return true;
+    }
+
+    private static BlockState materialState(ItemStack stack) {
+        if (stack.getItem() instanceof BlockItem blockItem) {
+            return blockItem.getBlock().defaultBlockState();
+        }
+        if (stack.is(Items.WATER_BUCKET)) {
+            return Blocks.WATER.defaultBlockState();
+        }
+        if (stack.is(Items.LAVA_BUCKET)) {
+            return Blocks.LAVA.defaultBlockState();
+        }
+        return null;
+    }
+
+    private static void addUndoRefund(List<ItemStack> refund, BlockState state) {
+        if (state.isAir() || state.is(Blocks.WATER) || state.is(Blocks.LAVA)) {
+            return;
+        }
+        ItemStack stack = new ItemStack(state.getBlock().asItem());
+        if (!stack.isEmpty() && !stack.is(Items.AIR)) {
+            refund.add(stack);
+        }
     }
 
     private static BlockState materialTarget(Selection selection, BlockPos pos, BlockState fallback, List<PaletteEntry> palette, PaletteMode mode, GradientDirection gradientDirection) {
@@ -1041,14 +1399,73 @@ public final class BuildOperationEngine {
     }
 
     private static boolean isSupportedTarget(BlockState state) {
-        return !state.isAir()
-                && state.getFluidState().isEmpty()
+        return (state.is(Blocks.WATER) || state.is(Blocks.LAVA))
+                || !state.isAir()
                 && state.getBlock().asItem() != Blocks.AIR.asItem();
     }
 
     private static boolean hasHistoryItems(ServerPlayer player) {
         return hasInventoryItem(player, com.abhil.buildtools.registry.ModItems.UNDO_TOKEN.get())
                 || hasInventoryItem(player, com.abhil.buildtools.registry.ModItems.REDO_TOKEN.get());
+    }
+
+    private static int durabilityCost(int blockChanges) {
+        return 1 + Math.max(0, blockChanges) / 1000;
+    }
+
+    private static boolean hasDurabilityForOperation(ServerPlayer player, int cost) {
+        ItemStack tool = activeDurabilityTool(player);
+        if (tool.isEmpty() || !tool.isDamageableItem() || player.gameMode.isCreative()) {
+            return true;
+        }
+        int remaining = remainingDurability(tool);
+        if (cost <= remaining) {
+            return true;
+        }
+        fail(player, Component.translatable("buildtools.error.not_enough_durability", cost, remaining));
+        return false;
+    }
+
+    private static void damageOperationTool(ServerPlayer player, int cost) {
+        if (player.gameMode.isCreative()) {
+            return;
+        }
+        if (!damageOperationTool(player, InteractionHand.MAIN_HAND, cost)) {
+            damageOperationTool(player, InteractionHand.OFF_HAND, cost);
+        }
+    }
+
+    private static boolean damageOperationTool(ServerPlayer player, InteractionHand hand, int cost) {
+        ItemStack stack = player.getItemInHand(hand);
+        if (!isDurabilityOperationTool(stack) || !stack.isDamageableItem()) {
+            return false;
+        }
+        stack.hurtAndBreak(cost, player.serverLevel(), player,
+                broken -> player.onEquippedItemBroken(broken, LivingEntity.getSlotForHand(hand)));
+        return true;
+    }
+
+    private static ItemStack activeDurabilityTool(ServerPlayer player) {
+        ItemStack mainHand = player.getMainHandItem();
+        if (isDurabilityOperationTool(mainHand)) {
+            return mainHand;
+        }
+        ItemStack offHand = player.getOffhandItem();
+        return isDurabilityOperationTool(offHand) ? offHand : ItemStack.EMPTY;
+    }
+
+    private static boolean isDurabilityOperationTool(ItemStack stack) {
+        if (!ToolProfile.isBuildTool(stack)) {
+            return false;
+        }
+        return switch (ToolProfile.from(stack)) {
+            case BUILDER, ADVANCED_BUILDER, BRUSH, BREAKER, TROWEL -> true;
+            default -> false;
+        };
+    }
+
+    private static int remainingDurability(ItemStack stack) {
+        return stack.getMaxDamage() - stack.getDamageValue();
     }
 
     private static boolean hasInventoryItem(ServerPlayer player, Item item) {
@@ -1073,11 +1490,17 @@ public final class BuildOperationEngine {
             String label,
             List<BlockPos> positions,
             List<BlockState> targets,
+            List<CompoundTag> targetBlockEntities,
             List<UndoSnapshot.Entry> undo,
-            Map<ItemStackKey, Integer> refund,
-            Map<ItemStackKey, Integer> producedDrops,
+            List<ItemStack> refund,
+            List<ItemStack> producedDrops,
+            List<CapturedEntity> removedEntities,
+            List<CapturedEntity> addedEntities,
             boolean trackHistory,
             boolean free,
             String signature) {
+    }
+
+    private record DropCapture(ServerLevel level, List<ItemStack> drops) {
     }
 }

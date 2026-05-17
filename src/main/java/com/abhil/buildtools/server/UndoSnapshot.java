@@ -1,7 +1,6 @@
 package com.abhil.buildtools.server;
 
 import java.util.List;
-import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceKey;
@@ -12,10 +11,26 @@ import net.minecraft.world.level.block.state.BlockState;
 public record UndoSnapshot(
         ResourceKey<Level> dimension,
         List<Entry> entries,
-        Map<ItemStackKey, Integer> refund,
-        Map<ItemStackKey, Integer> producedDrops) {
-    public UndoSnapshot(ResourceKey<Level> dimension, List<Entry> entries, Map<ItemStackKey, Integer> refund) {
-        this(dimension, entries, refund, Map.of());
+        List<ItemStack> refund,
+        List<ItemStack> producedDrops,
+        List<CapturedEntity> removedEntities,
+        List<CapturedEntity> addedEntities) {
+    public UndoSnapshot(ResourceKey<Level> dimension, List<Entry> entries, List<ItemStack> refund, List<ItemStack> producedDrops) {
+        this(dimension, entries, refund, producedDrops, List.of(), List.of());
+    }
+
+    public UndoSnapshot {
+        refund = copyStacks(refund);
+        producedDrops = copyStacks(producedDrops);
+        removedEntities = List.copyOf(removedEntities);
+        addedEntities = List.copyOf(addedEntities);
+    }
+
+    private static List<ItemStack> copyStacks(List<ItemStack> stacks) {
+        return stacks.stream()
+                .filter(stack -> !stack.isEmpty())
+                .map(ItemStack::copy)
+                .toList();
     }
 
     public record Entry(

@@ -40,6 +40,7 @@ public final class ClientSelectionRenderer {
         ClientSelectionData.second().ifPresent(pos -> renderBox(poseStack, lines, new AABB(pos), 1.0F, 0.7F, 0.1F, 1.0F));
         renderSelectionHandles(poseStack, lines);
         renderAdvancedPointBoxes(poseStack, lines);
+        renderSharedSelections(poseStack, lines);
 
         List<BlockPos> preview = ClientSelectionData.preview();
         if (!preview.isEmpty()) {
@@ -57,6 +58,7 @@ public final class ClientSelectionRenderer {
 
         buffers.endBatch(RenderType.lines());
         renderAdvancedPointLabels(event, poseStack, buffers);
+        renderSharedPointLabels(event, poseStack, buffers);
         poseStack.popPose();
         buffers.endBatch();
     }
@@ -113,6 +115,65 @@ public final class ClientSelectionRenderer {
         List<BlockPos> points = ClientSelectionData.points();
         for (int i = 0; i < points.size(); i++) {
             renderPointLabel(event, poseStack, buffers, points.get(i), Component.literal("#" + (i + 1)));
+        }
+    }
+
+    private static void renderSharedSelections(PoseStack poseStack, VertexConsumer lines) {
+        for (ClientSelectionData.SharedSelection selection : ClientSelectionData.sharedSelections()) {
+            selection.first().ifPresent(pos -> renderBox(poseStack, lines, new AABB(pos), 0.45F, 0.95F, 1.0F, 0.8F));
+            selection.second().ifPresent(pos -> renderBox(poseStack, lines, new AABB(pos), 1.0F, 0.85F, 0.35F, 0.8F));
+            renderSharedHandles(poseStack, lines, selection);
+            for (BlockPos point : selection.points()) {
+                renderBox(poseStack, lines, new AABB(point).inflate(0.08D), 1.0F, 0.45F, 1.0F, 0.75F);
+            }
+            if (!selection.preview().isEmpty()) {
+                AABB bounds = null;
+                for (BlockPos pos : selection.preview()) {
+                    bounds = bounds == null ? new AABB(pos) : bounds.minmax(new AABB(pos));
+                }
+                if (rendersAffectedBlocks(selection.shape(), selection.detailedPreview())) {
+                    renderAffectedEdges(poseStack, lines, selection.preview(), 0.6F, 0.9F, 1.0F, 0.55F);
+                } else if (bounds != null) {
+                    renderBox(poseStack, lines, bounds.inflate(0.03D), 0.6F, 0.9F, 1.0F, 0.65F);
+                }
+            }
+        }
+    }
+
+    private static void renderSharedHandles(PoseStack poseStack, VertexConsumer lines, ClientSelectionData.SharedSelection selection) {
+        if (selection.first().isEmpty() || selection.second().isEmpty()) {
+            return;
+        }
+        BlockPos first = selection.first().get();
+        BlockPos second = selection.second().get();
+        int minX = Math.min(first.getX(), second.getX());
+        int minY = Math.min(first.getY(), second.getY());
+        int minZ = Math.min(first.getZ(), second.getZ());
+        int maxX = Math.max(first.getX(), second.getX()) + 1;
+        int maxY = Math.max(first.getY(), second.getY()) + 1;
+        int maxZ = Math.max(first.getZ(), second.getZ()) + 1;
+        double size = 0.1D;
+
+        for (int x : new int[] { minX, maxX }) {
+            for (int y : new int[] { minY, maxY }) {
+                for (int z : new int[] { minZ, maxZ }) {
+                    renderBox(poseStack, lines, new AABB(
+                            x - size,
+                            y - size,
+                            z - size,
+                            x + size,
+                            y + size,
+                            z + size), 0.6F, 0.9F, 1.0F, 0.75F);
+                }
+            }
+        }
+    }
+
+    private static void renderSharedPointLabels(RenderLevelStageEvent event, PoseStack poseStack, MultiBufferSource buffers) {
+        for (ClientSelectionData.SharedSelection selection : ClientSelectionData.sharedSelections()) {
+            for (int i = 0; i < selection.points().size(); i++) {
+                renderPointLabel(event, poseStack, buffers, selection.points().get(i), Component.literal("#" + (i + 1)));
+            }
         }
     }
 

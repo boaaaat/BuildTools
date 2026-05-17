@@ -24,25 +24,30 @@ public final class BuildingStorageManager {
     }
 
     public static boolean mark(ServerPlayer player, BlockPos pos) {
+        return toggle(player, pos).consumeLink();
+    }
+
+    public static LinkResult toggle(ServerPlayer player, BlockPos pos) {
         ServerLevel level = player.serverLevel();
         BlockPos storagePos = canonicalStoragePos(level, pos);
         if (handler(level, storagePos) == null) {
             player.displayClientMessage(Component.translatable("buildtools.error.not_storage"), false);
-            return false;
+            return LinkResult.FAILED;
         }
         BuildToolsStorageData data = BuildToolsStorageData.get(player.getServer());
         if (data.contains(player.getUUID(), level.dimension(), storagePos)) {
-            player.displayClientMessage(Component.translatable("buildtools.message.storage_already_tracked"), true);
-            return false;
+            data.remove(player.getUUID(), level.dimension(), storagePos);
+            player.displayClientMessage(Component.translatable("buildtools.message.storage_untracked"), true);
+            return LinkResult.UNLINKED;
         }
         trackedStorages(player);
         if (data.count(player.getUUID()) >= MAX_STORAGES_PER_PLAYER) {
             player.displayClientMessage(Component.translatable("buildtools.error.storage_limit", MAX_STORAGES_PER_PLAYER), false);
-            return false;
+            return LinkResult.FAILED;
         }
         data.add(player.getUUID(), level.dimension(), storagePos);
         player.displayClientMessage(Component.translatable("buildtools.message.storage_tracked"), true);
-        return true;
+        return LinkResult.LINKED;
     }
 
     public static void unmark(ServerLevel level, BlockPos pos) {
@@ -95,8 +100,18 @@ public final class BuildingStorageManager {
         if (items.isEmpty()) {
             return;
         }
-        for (Map.Entry<ItemStackKey, Integer> entry : items.entrySet()) {
-            ItemStack stack = entry.getKey().stack(entry.getValue());
+        depositOrGive(player, StoredItems.fromCounts(items));
+    }
+
+    public static void depositOrGive(ServerPlayer player, List<ItemStack> items) {
+        if (items.isEmpty()) {
+            return;
+        }
+        for (ItemStack item : items) {
+            if (item.isEmpty()) {
+                continue;
+            }
+            ItemStack stack = item.copy();
             ItemStack remaining = deposit(player, stack);
             if (!remaining.isEmpty()) {
                 remaining = giveToPlayer(player, remaining);
@@ -104,6 +119,19 @@ public final class BuildingStorageManager {
             if (!remaining.isEmpty()) {
                 player.drop(remaining, false);
             }
+        }
+    }
+
+    public static void depositOrGiveStack(ServerPlayer player, ItemStack stack) {
+        if (stack.isEmpty()) {
+            return;
+        }
+        ItemStack remaining = deposit(player, stack.copy());
+        if (!remaining.isEmpty()) {
+            remaining = giveToPlayer(player, remaining);
+        }
+        if (!remaining.isEmpty()) {
+            player.drop(remaining, false);
         }
     }
 
@@ -260,5 +288,21 @@ public final class BuildingStorageManager {
         level.sendParticles(ParticleTypes.END_ROD, x, y, z, 8, 0.45D, 0.35D, 0.45D, 0.015D);
         level.sendParticles(ParticleTypes.HAPPY_VILLAGER, x, y + 0.15D, z, 4, 0.35D, 0.25D, 0.35D, 0.0D);
         level.sendParticles(ParticleTypes.ENCHANT, x, y, z, 18, 0.55D, 0.35D, 0.55D, 0.04D);
+    }
+
+    public enum LinkResult {
+        LINKED(true),
+        UNLINKED(false),
+        FAILED(false);
+
+        private final boolean consumeLink;
+
+        LinkResult(boolean consumeLink) {
+            this.consumeLink = consumeLink;
+        }
+
+        public boolean consumeLink() {
+            return consumeLink;
+        }
     }
 }

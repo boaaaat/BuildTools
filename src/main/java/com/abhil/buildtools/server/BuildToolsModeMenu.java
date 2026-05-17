@@ -137,17 +137,23 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
     }
 
     private void populateSelectionMenu() {
-        menuItems.setItem(0, utilityItem(Items.BARRIER, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
-        menuItems.setItem(1, utilityItem(Items.ENDER_EYE, "buildtools.menu.rotate_selection", "buildtools.menu.rotate_selection.description"));
-        menuItems.setItem(2, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.save_preset", "buildtools.menu.save_preset.description"));
-        menuItems.setItem(3, utilityItem(Items.BOOK, "buildtools.menu.load_preset", "buildtools.menu.load_preset.description"));
-        menuItems.setItem(4, utilityItem(Items.ARROW, "buildtools.menu.nudge_west", "buildtools.menu.nudge.description"));
-        menuItems.setItem(5, utilityItem(Items.ARROW, "buildtools.menu.nudge_east", "buildtools.menu.nudge.description"));
-        menuItems.setItem(6, utilityItem(Items.ARROW, "buildtools.menu.nudge_down", "buildtools.menu.nudge.description"));
-        menuItems.setItem(7, utilityItem(Items.ARROW, "buildtools.menu.nudge_up", "buildtools.menu.nudge.description"));
-        menuItems.setItem(8, utilityItem(Items.ARROW, "buildtools.menu.nudge_north", "buildtools.menu.nudge.description"));
+        boolean shared = owner != null && BuildToolsState.selectionVisibleToOthers(owner);
+        menuItems.setItem(0, NudgeMenuItems.item(owner, Direction.WEST, "buildtools.menu.nudge.description"));
+        menuItems.setItem(1, NudgeMenuItems.item(owner, Direction.EAST, "buildtools.menu.nudge.description"));
+        menuItems.setItem(2, NudgeMenuItems.item(owner, Direction.DOWN, "buildtools.menu.nudge.description"));
+        menuItems.setItem(3, NudgeMenuItems.item(owner, Direction.UP, "buildtools.menu.nudge.description"));
+        menuItems.setItem(4, NudgeMenuItems.item(owner, Direction.NORTH, "buildtools.menu.nudge.description"));
+        menuItems.setItem(5, NudgeMenuItems.item(owner, Direction.SOUTH, "buildtools.menu.nudge.description"));
+        menuItems.setItem(6, utilityItem(Items.BARRIER, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
+        menuItems.setItem(7, utilityItem(Items.ENDER_EYE, "buildtools.menu.rotate_selection", "buildtools.menu.rotate_selection.description"));
+        menuItems.setItem(8, utilityItem(
+                shared ? Items.ENDER_EYE : Items.ENDER_PEARL,
+                "buildtools.menu.selection_visibility",
+                "buildtools.menu.selection_visibility.description",
+                shared));
         populateShapes(9);
-        menuItems.setItem(22, utilityItem(Items.ARROW, "buildtools.menu.nudge_south", "buildtools.menu.nudge.description"));
+        menuItems.setItem(22, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.save_preset", "buildtools.menu.save_preset.description"));
+        menuItems.setItem(23, utilityItem(Items.BOOK, "buildtools.menu.load_preset", "buildtools.menu.load_preset.description"));
     }
 
     private void populateBrushMenu() {
@@ -167,13 +173,12 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(1, utilityItem(Items.ENDER_EYE, "buildtools.menu.rotate_selection", "buildtools.menu.rotate_selection.description"));
         menuItems.setItem(2, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.save_preset", "buildtools.menu.save_preset.description"));
         menuItems.setItem(3, utilityItem(Items.BOOK, "buildtools.menu.load_preset", "buildtools.menu.load_preset.description"));
-        menuItems.setItem(4, utilityItem(Items.ARROW, "buildtools.menu.nudge_west", "buildtools.menu.nudge.description"));
-        menuItems.setItem(5, utilityItem(Items.ARROW, "buildtools.menu.nudge_east", "buildtools.menu.nudge.description"));
-        menuItems.setItem(6, utilityItem(Items.ARROW, "buildtools.menu.nudge_down", "buildtools.menu.nudge.description"));
-        menuItems.setItem(7, utilityItem(Items.ARROW, "buildtools.menu.nudge_up", "buildtools.menu.nudge.description"));
-        menuItems.setItem(8, utilityItem(Items.ARROW, "buildtools.menu.nudge_north", "buildtools.menu.nudge.description"));
+        menuItems.setItem(4, NudgeMenuItems.item(owner, Direction.WEST, "buildtools.menu.nudge.description"));
+        menuItems.setItem(5, NudgeMenuItems.item(owner, Direction.EAST, "buildtools.menu.nudge.description"));
+        menuItems.setItem(6, NudgeMenuItems.item(owner, Direction.DOWN, "buildtools.menu.nudge.description"));
+        menuItems.setItem(7, NudgeMenuItems.item(owner, Direction.UP, "buildtools.menu.nudge.description"));
+        menuItems.setItem(8, NudgeMenuItems.item(owner, Direction.NORTH, "buildtools.menu.nudge.description"));
         populateShapes(9);
-        menuItems.setItem(22, utilityItem(Items.ARROW, "buildtools.menu.nudge_south", "buildtools.menu.nudge.description"));
     }
 
     private void populateTrowelMenu() {
@@ -186,12 +191,12 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(6, utilityItem(Items.IRON_BARS, "buildtools.menu.mirror_blueprint_x", "buildtools.menu.mirror_blueprint.description"));
         menuItems.setItem(7, utilityItem(Items.CHAIN, "buildtools.menu.mirror_blueprint_z", "buildtools.menu.mirror_blueprint.description"));
         menuItems.setItem(8, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
-        menuItems.setItem(18, utilityItem(Items.ARROW, "buildtools.menu.nudge_west", "buildtools.menu.nudge_paste.description"));
-        menuItems.setItem(19, utilityItem(Items.ARROW, "buildtools.menu.nudge_east", "buildtools.menu.nudge_paste.description"));
-        menuItems.setItem(20, utilityItem(Items.ARROW, "buildtools.menu.nudge_down", "buildtools.menu.nudge_paste.description"));
-        menuItems.setItem(21, utilityItem(Items.ARROW, "buildtools.menu.nudge_up", "buildtools.menu.nudge_paste.description"));
-        menuItems.setItem(22, utilityItem(Items.ARROW, "buildtools.menu.nudge_north", "buildtools.menu.nudge_paste.description"));
-        menuItems.setItem(23, utilityItem(Items.ARROW, "buildtools.menu.nudge_south", "buildtools.menu.nudge_paste.description"));
+        menuItems.setItem(18, NudgeMenuItems.item(owner, Direction.WEST, "buildtools.menu.nudge_paste.description"));
+        menuItems.setItem(19, NudgeMenuItems.item(owner, Direction.EAST, "buildtools.menu.nudge_paste.description"));
+        menuItems.setItem(20, NudgeMenuItems.item(owner, Direction.DOWN, "buildtools.menu.nudge_paste.description"));
+        menuItems.setItem(21, NudgeMenuItems.item(owner, Direction.UP, "buildtools.menu.nudge_paste.description"));
+        menuItems.setItem(22, NudgeMenuItems.item(owner, Direction.NORTH, "buildtools.menu.nudge_paste.description"));
+        menuItems.setItem(23, NudgeMenuItems.item(owner, Direction.SOUTH, "buildtools.menu.nudge_paste.description"));
     }
 
     private void populateShapes(int startSlot) {
@@ -290,16 +295,17 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
 
     private boolean handleSelectionClick(ServerPlayer player, int slotId) {
         switch (slotId) {
-            case 0 -> BuildToolsState.clearSelection(player);
-            case 1 -> BuildToolsState.rotateSelection(player);
-            case 2 -> BuildToolsState.savePreset(player);
-            case 3 -> BuildToolsState.loadPreset(player);
-            case 4 -> BuildToolsState.nudgeSelection(player, Direction.WEST);
-            case 5 -> BuildToolsState.nudgeSelection(player, Direction.EAST);
-            case 6 -> BuildToolsState.nudgeSelection(player, Direction.DOWN);
-            case 7 -> BuildToolsState.nudgeSelection(player, Direction.UP);
-            case 8 -> BuildToolsState.nudgeSelection(player, Direction.NORTH);
-            case 22 -> BuildToolsState.nudgeSelection(player, Direction.SOUTH);
+            case 0 -> BuildToolsState.nudgeSelection(player, Direction.WEST);
+            case 1 -> BuildToolsState.nudgeSelection(player, Direction.EAST);
+            case 2 -> BuildToolsState.nudgeSelection(player, Direction.DOWN);
+            case 3 -> BuildToolsState.nudgeSelection(player, Direction.UP);
+            case 4 -> BuildToolsState.nudgeSelection(player, Direction.NORTH);
+            case 5 -> BuildToolsState.nudgeSelection(player, Direction.SOUTH);
+            case 6 -> BuildToolsState.clearSelection(player);
+            case 7 -> BuildToolsState.rotateSelection(player);
+            case 8 -> BuildToolsState.toggleSelectionVisibility(player);
+            case 22 -> BuildToolsState.savePreset(player);
+            case 23 -> BuildToolsState.loadPreset(player);
             default -> {
                 return handleShapeClick(player, slotId, 9);
             }
@@ -333,7 +339,6 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case 6 -> BuildToolsState.nudgeSelection(player, Direction.DOWN);
             case 7 -> BuildToolsState.nudgeSelection(player, Direction.UP);
             case 8 -> BuildToolsState.nudgeSelection(player, Direction.NORTH);
-            case 22 -> BuildToolsState.nudgeSelection(player, Direction.SOUTH);
             default -> {
                 return handleShapeClick(player, slotId, 9);
             }
@@ -504,6 +509,11 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             counts.merge(name, 1, Integer::sum);
         }
         return countedSummary(counts);
+    }
+
+    private static String materialSummary(List<ItemStack> refund) {
+        return countedSummary(StoredItems.toCounts(refund).entrySet().stream()
+                .collect(HashMap::new, (counts, entry) -> counts.put(entry.getKey().stack(1).getHoverName().getString(), entry.getValue()), HashMap::putAll));
     }
 
     private static String materialSummary(Map<ItemStackKey, Integer> refund) {

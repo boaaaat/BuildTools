@@ -91,13 +91,14 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             return ItemStack.EMPTY;
         }
         ItemStack source = this.slots.get(index).getItem();
-        if (!(source.getItem() instanceof BlockItem)) {
+        BlockState state = paletteState(source);
+        if (state == null) {
             return ItemStack.EMPTY;
         }
         for (int slot = PALETTE_START; slot < PALETTE_START + PALETTE_COUNT; slot++) {
             if (menuItems.getItem(slot).isEmpty()) {
                 ItemStack original = source.copy();
-                setPaletteEntry(slot, new PaletteEntry(((BlockItem) source.getItem()).getBlock().defaultBlockState(), PaletteEntry.DEFAULT_WEIGHT));
+                setPaletteEntry(slot, new PaletteEntry(state, PaletteEntry.DEFAULT_WEIGHT));
                 source.shrink(1);
                 return original;
             }
@@ -179,18 +180,24 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
     }
 
     private void populateAdvancedSelectionMenu() {
+        boolean shared = owner != null && BuildToolsState.selectionVisibleToOthers(owner);
         menuItems.setItem(0, utilityItem(Items.BARRIER, "buildtools.menu.clear_advanced_points", "buildtools.menu.clear_advanced_points.description"));
         menuItems.setItem(1, utilityItem(Items.RED_DYE, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
         menuItems.setItem(2, utilityItem(Items.ENDER_EYE, "buildtools.menu.rotate_selection", "buildtools.menu.rotate_selection.description"));
         menuItems.setItem(3, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.save_preset", "buildtools.menu.save_preset.description"));
         menuItems.setItem(4, utilityItem(Items.BOOK, "buildtools.menu.load_preset", "buildtools.menu.load_preset.description"));
         populateShapes(9);
-        menuItems.setItem(27, utilityItem(Items.ARROW, "buildtools.menu.nudge_west", "buildtools.menu.nudge.description"));
-        menuItems.setItem(28, utilityItem(Items.ARROW, "buildtools.menu.nudge_east", "buildtools.menu.nudge.description"));
-        menuItems.setItem(29, utilityItem(Items.ARROW, "buildtools.menu.nudge_down", "buildtools.menu.nudge.description"));
-        menuItems.setItem(30, utilityItem(Items.ARROW, "buildtools.menu.nudge_up", "buildtools.menu.nudge.description"));
-        menuItems.setItem(31, utilityItem(Items.ARROW, "buildtools.menu.nudge_north", "buildtools.menu.nudge.description"));
-        menuItems.setItem(32, utilityItem(Items.ARROW, "buildtools.menu.nudge_south", "buildtools.menu.nudge.description"));
+        menuItems.setItem(27, NudgeMenuItems.item(owner, Direction.WEST, "buildtools.menu.nudge.description"));
+        menuItems.setItem(28, NudgeMenuItems.item(owner, Direction.EAST, "buildtools.menu.nudge.description"));
+        menuItems.setItem(29, NudgeMenuItems.item(owner, Direction.DOWN, "buildtools.menu.nudge.description"));
+        menuItems.setItem(30, NudgeMenuItems.item(owner, Direction.UP, "buildtools.menu.nudge.description"));
+        menuItems.setItem(31, NudgeMenuItems.item(owner, Direction.NORTH, "buildtools.menu.nudge.description"));
+        menuItems.setItem(32, NudgeMenuItems.item(owner, Direction.SOUTH, "buildtools.menu.nudge.description"));
+        menuItems.setItem(33, utilityItem(
+                shared ? Items.ENDER_EYE : Items.ENDER_PEARL,
+                "buildtools.menu.selection_visibility",
+                "buildtools.menu.selection_visibility.description",
+                shared));
     }
 
     private void populateShapes(int startSlot) {
@@ -297,6 +304,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             case 30 -> BuildToolsState.nudgeSelection(player, Direction.UP);
             case 31 -> BuildToolsState.nudgeSelection(player, Direction.NORTH);
             case 32 -> BuildToolsState.nudgeSelection(player, Direction.SOUTH);
+            case 33 -> BuildToolsState.toggleSelectionVisibility(player);
             default -> {
                 int shapeIndex = shapeIndex(slotId);
                 if (shapeIndex >= 0 && shapeIndex < SelectionShape.values().length) {
@@ -326,10 +334,11 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             return;
         }
         ItemStack carried = getCarried();
-        if (!(carried.getItem() instanceof BlockItem blockItem) || !menuItems.getItem(slotId).isEmpty()) {
+        BlockState state = paletteState(carried);
+        if (state == null || !menuItems.getItem(slotId).isEmpty()) {
             return;
         }
-        setPaletteEntry(slotId, new PaletteEntry(blockItem.getBlock().defaultBlockState(), PaletteEntry.DEFAULT_WEIGHT));
+        setPaletteEntry(slotId, new PaletteEntry(state, PaletteEntry.DEFAULT_WEIGHT));
         carried.shrink(1);
         if (carried.isEmpty()) {
             setCarried(ItemStack.EMPTY);
@@ -371,7 +380,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
     }
 
     private static ItemStack paletteItem(PaletteEntry entry, int totalWeight) {
-        ItemStack stack = new ItemStack(entry.state().getBlock().asItem());
+        ItemStack stack = paletteStack(entry.state());
         double chance = totalWeight <= 0 ? 100.0D : (entry.weight() * 100.0D) / totalWeight;
         Component weight = Component.literal("Pattern weight: " + entry.weight() + " (" + Math.round(chance) + "%)").withStyle(ChatFormatting.GRAY);
         Component scroll = Component.translatable("buildtools.menu.palette_weight.description").withStyle(ChatFormatting.DARK_GRAY);
@@ -386,7 +395,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         }
         Map<ItemStackKey, Integer> returned = new LinkedHashMap<>();
         for (PaletteEntry entry : entries) {
-            ItemStack stack = new ItemStack(entry.state().getBlock().asItem());
+            ItemStack stack = paletteStack(entry.state());
             if (!stack.isEmpty()) {
                 returned.merge(new ItemStackKey(stack.getItem()), stack.getCount(), Integer::sum);
             }
@@ -405,6 +414,29 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
 
     private static int shapeIndex(int slotId) {
         return slotId - 9;
+    }
+
+    private static BlockState paletteState(ItemStack stack) {
+        if (stack.getItem() instanceof BlockItem blockItem) {
+            return blockItem.getBlock().defaultBlockState();
+        }
+        if (stack.is(Items.WATER_BUCKET)) {
+            return net.minecraft.world.level.block.Blocks.WATER.defaultBlockState();
+        }
+        if (stack.is(Items.LAVA_BUCKET)) {
+            return net.minecraft.world.level.block.Blocks.LAVA.defaultBlockState();
+        }
+        return null;
+    }
+
+    private static ItemStack paletteStack(BlockState state) {
+        if (state.is(net.minecraft.world.level.block.Blocks.WATER)) {
+            return new ItemStack(Items.WATER_BUCKET);
+        }
+        if (state.is(net.minecraft.world.level.block.Blocks.LAVA)) {
+            return new ItemStack(Items.LAVA_BUCKET);
+        }
+        return new ItemStack(state.getBlock().asItem());
     }
 
     private static final class FakeSlot extends Slot {
