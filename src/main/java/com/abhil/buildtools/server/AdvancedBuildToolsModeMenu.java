@@ -148,11 +148,9 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(1, modeItem(Items.ORANGE_STAINED_GLASS, BuildMode.REPLACE));
         menuItems.setItem(2, modeItem(Items.RED_STAINED_GLASS, BuildMode.OVERWRITE));
         menuItems.setItem(3, utilityItem(Items.PAPER, "buildtools.menu.materials", "buildtools.menu.materials.description"));
-        menuItems.setItem(4, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.save_preset", "buildtools.menu.save_preset.description"));
-        menuItems.setItem(5, utilityItem(Items.BOOK, "buildtools.menu.load_preset", "buildtools.menu.load_preset.description"));
-        menuItems.setItem(6, utilityItem(Items.MAP, "buildtools.menu.save_plan", "buildtools.menu.save_plan.description"));
-        menuItems.setItem(7, utilityItem(Items.FILLED_MAP, "buildtools.menu.build_plan", "buildtools.menu.build_plan.description"));
-        menuItems.setItem(8, utilityItem(Items.ENDER_EYE, "buildtools.menu.rotate_selection", "buildtools.menu.rotate_selection.description"));
+        menuItems.setItem(4, utilityItem(Items.POWDER_SNOW_BUCKET, "buildtools.menu.gradient", "buildtools.menu.gradient.description"));
+        menuItems.setItem(5, utilityItem(Items.MAP, "buildtools.menu.save_plan", "buildtools.menu.save_plan.description"));
+        menuItems.setItem(6, utilityItem(Items.FILLED_MAP, "buildtools.menu.build_plan", "buildtools.menu.build_plan.description"));
 
         SelectionShape[] shapes = SelectionShape.values();
         ItemStack[] icons = new ItemStack[] {
@@ -164,7 +162,11 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
                 new ItemStack(Items.STRING),
                 new ItemStack(Items.COPPER_BLOCK),
                 new ItemStack(Items.SNOWBALL),
-                new ItemStack(Items.SLIME_BALL)
+                new ItemStack(Items.SLIME_BALL),
+                new ItemStack(Items.GRAVEL),
+                new ItemStack(Items.RAIL),
+                new ItemStack(Items.STONE_BRICK_STAIRS),
+                new ItemStack(Items.GLASS)
         };
         for (int i = 0; i < shapes.length; i++) {
             ItemStack stack = icons[i].copy();
@@ -172,30 +174,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             menuItems.setItem(9 + i, stack);
         }
 
-        menuItems.setItem(18, utilityItem(Items.ARROW, "buildtools.menu.nudge_west", "buildtools.menu.nudge.description"));
-        menuItems.setItem(19, utilityItem(Items.ARROW, "buildtools.menu.nudge_east", "buildtools.menu.nudge.description"));
-        menuItems.setItem(20, utilityItem(Items.ARROW, "buildtools.menu.nudge_down", "buildtools.menu.nudge.description"));
-        menuItems.setItem(21, utilityItem(Items.ARROW, "buildtools.menu.nudge_up", "buildtools.menu.nudge.description"));
-        menuItems.setItem(22, utilityItem(Items.ARROW, "buildtools.menu.nudge_north", "buildtools.menu.nudge.description"));
-        menuItems.setItem(23, utilityItem(Items.ARROW, "buildtools.menu.nudge_south", "buildtools.menu.nudge.description"));
-
-        menuItems.setItem(27, utilityItem(Items.LIME_DYE, "buildtools.menu.expand_west", "buildtools.menu.expand.description"));
-        menuItems.setItem(28, utilityItem(Items.LIME_DYE, "buildtools.menu.expand_east", "buildtools.menu.expand.description"));
-        menuItems.setItem(29, utilityItem(Items.LIME_DYE, "buildtools.menu.expand_down", "buildtools.menu.expand.description"));
-        menuItems.setItem(30, utilityItem(Items.LIME_DYE, "buildtools.menu.expand_up", "buildtools.menu.expand.description"));
-        menuItems.setItem(31, utilityItem(Items.LIME_DYE, "buildtools.menu.expand_north", "buildtools.menu.expand.description"));
-        menuItems.setItem(32, utilityItem(Items.LIME_DYE, "buildtools.menu.expand_south", "buildtools.menu.expand.description"));
-
-        menuItems.setItem(36, utilityItem(Items.RED_DYE, "buildtools.menu.shrink_west", "buildtools.menu.shrink.description"));
-        menuItems.setItem(37, utilityItem(Items.RED_DYE, "buildtools.menu.shrink_east", "buildtools.menu.shrink.description"));
-        menuItems.setItem(38, utilityItem(Items.RED_DYE, "buildtools.menu.shrink_down", "buildtools.menu.shrink.description"));
-        menuItems.setItem(39, utilityItem(Items.RED_DYE, "buildtools.menu.shrink_up", "buildtools.menu.shrink.description"));
-        menuItems.setItem(40, utilityItem(Items.RED_DYE, "buildtools.menu.shrink_north", "buildtools.menu.shrink.description"));
-        menuItems.setItem(41, utilityItem(Items.RED_DYE, "buildtools.menu.shrink_south", "buildtools.menu.shrink.description"));
-
-        menuItems.setItem(45, utilityItem(Items.CLOCK, "buildtools.menu.rotate_blueprint", "buildtools.menu.rotate_blueprint.description"));
-        menuItems.setItem(46, utilityItem(Items.IRON_BARS, "buildtools.menu.mirror_blueprint_x", "buildtools.menu.mirror_blueprint.description"));
-        menuItems.setItem(47, utilityItem(Items.CHAIN, "buildtools.menu.mirror_blueprint_z", "buildtools.menu.mirror_blueprint.description"));
+        menuItems.setItem(45, utilityItem(Items.CHEST, "buildtools.menu.replace_palette", "buildtools.menu.replace_palette.description"));
     }
 
     private static ItemStack named(net.minecraft.world.item.Item item, Component name) {
@@ -221,32 +200,9 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
     private static boolean handleUtilityClick(ServerPlayer player, int slotId) {
         switch (slotId) {
             case 3 -> BuildToolsState.sendPreview(player);
-            case 4 -> BuildToolsState.savePreset(player);
-            case 5 -> BuildToolsState.loadPreset(player);
-            case 6 -> BuildOperationEngine.createPlan(player);
-            case 7 -> BuildOperationEngine.applyPlan(player);
-            case 8 -> BuildToolsState.rotateSelection(player);
-            case 18 -> BuildToolsState.nudgeSelection(player, Direction.WEST);
-            case 19 -> BuildToolsState.nudgeSelection(player, Direction.EAST);
-            case 20 -> BuildToolsState.nudgeSelection(player, Direction.DOWN);
-            case 21 -> BuildToolsState.nudgeSelection(player, Direction.UP);
-            case 22 -> BuildToolsState.nudgeSelection(player, Direction.NORTH);
-            case 23 -> BuildToolsState.nudgeSelection(player, Direction.SOUTH);
-            case 27 -> BuildToolsState.resizeSelection(player, Direction.WEST, 1);
-            case 28 -> BuildToolsState.resizeSelection(player, Direction.EAST, 1);
-            case 29 -> BuildToolsState.resizeSelection(player, Direction.DOWN, 1);
-            case 30 -> BuildToolsState.resizeSelection(player, Direction.UP, 1);
-            case 31 -> BuildToolsState.resizeSelection(player, Direction.NORTH, 1);
-            case 32 -> BuildToolsState.resizeSelection(player, Direction.SOUTH, 1);
-            case 36 -> BuildToolsState.resizeSelection(player, Direction.WEST, -1);
-            case 37 -> BuildToolsState.resizeSelection(player, Direction.EAST, -1);
-            case 38 -> BuildToolsState.resizeSelection(player, Direction.DOWN, -1);
-            case 39 -> BuildToolsState.resizeSelection(player, Direction.UP, -1);
-            case 40 -> BuildToolsState.resizeSelection(player, Direction.NORTH, -1);
-            case 41 -> BuildToolsState.resizeSelection(player, Direction.SOUTH, -1);
-            case 45 -> BuildToolsState.rotateBlueprint(player);
-            case 46 -> BuildToolsState.mirrorBlueprintX(player);
-            case 47 -> BuildToolsState.mirrorBlueprintZ(player);
+            case 4 -> BuildToolsState.toggleGradient(player);
+            case 5 -> BuildOperationEngine.createPlan(player);
+            case 6 -> BuildOperationEngine.applyPlan(player);
             default -> {
                 return false;
             }

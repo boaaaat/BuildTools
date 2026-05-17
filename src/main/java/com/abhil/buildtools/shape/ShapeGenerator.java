@@ -27,6 +27,10 @@ public final class ShapeGenerator {
             case CYLINDER -> cylinder(a, b);
             case SPHERE -> sphere(a, b, true);
             case ELLIPSOID -> sphere(a, b, false);
+            case ROAD -> cuboid(a, b, Filter.FLOOR);
+            case TUNNEL -> tunnel(a, b);
+            case ARCH -> arch(a, b);
+            case DOME -> dome(a, b);
         };
     }
 
@@ -132,6 +136,83 @@ public final class ShapeGenerator {
             }
         }
         return positions;
+    }
+
+    public static List<BlockPos> tunnel(BlockPos a, BlockPos b) {
+        int minX = Math.min(a.getX(), b.getX());
+        int minY = Math.min(a.getY(), b.getY());
+        int minZ = Math.min(a.getZ(), b.getZ());
+        int maxX = Math.max(a.getX(), b.getX());
+        int maxY = Math.max(a.getY(), b.getY());
+        int maxZ = Math.max(a.getZ(), b.getZ());
+        double centerX = (minX + maxX) / 2.0D;
+        double centerY = minY;
+        double radiusX = Math.max(1.0D, (maxX - minX) / 2.0D);
+        double radiusY = Math.max(1.0D, maxY - minY);
+        List<BlockPos> positions = new ArrayList<>();
+
+        for (int z = minZ; z <= maxZ; z++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int x = minX; x <= maxX; x++) {
+                    double nx = (x - centerX) / radiusX;
+                    double ny = (y - centerY) / radiusY;
+                    double value = nx * nx + ny * ny;
+                    if (y == minY || (ny >= 0.0D && value <= 1.08D && value >= 0.70D)) {
+                        positions.add(new BlockPos(x, y, z));
+                    }
+                }
+            }
+        }
+        return positions;
+    }
+
+    public static List<BlockPos> arch(BlockPos a, BlockPos b) {
+        int minX = Math.min(a.getX(), b.getX());
+        int minY = Math.min(a.getY(), b.getY());
+        int minZ = Math.min(a.getZ(), b.getZ());
+        int maxX = Math.max(a.getX(), b.getX());
+        int maxY = Math.max(a.getY(), b.getY());
+        int maxZ = Math.max(a.getZ(), b.getZ());
+        double centerX = (minX + maxX) / 2.0D;
+        double radiusX = Math.max(1.0D, (maxX - minX) / 2.0D);
+        double radiusY = Math.max(1.0D, maxY - minY);
+        List<BlockPos> positions = new ArrayList<>();
+
+        for (int z = minZ; z <= maxZ; z++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int x = minX; x <= maxX; x++) {
+                    double nx = (x - centerX) / radiusX;
+                    double ny = (y - minY) / radiusY;
+                    double value = nx * nx + ny * ny;
+                    if (x == minX || x == maxX || (ny >= 0.0D && value <= 1.08D && value >= 0.70D)) {
+                        positions.add(new BlockPos(x, y, z));
+                    }
+                }
+            }
+        }
+        return positions;
+    }
+
+    public static List<BlockPos> dome(BlockPos a, BlockPos b) {
+        List<BlockPos> shell = new ArrayList<>();
+        Set<BlockPos> all = new LinkedHashSet<>(sphere(a, b, false));
+        int centerY = Math.min(a.getY(), b.getY()) + Math.abs(a.getY() - b.getY()) / 2;
+        for (BlockPos pos : all) {
+            if (pos.getY() < centerY) {
+                continue;
+            }
+            boolean edge = false;
+            for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.values()) {
+                if (!all.contains(pos.relative(direction))) {
+                    edge = true;
+                    break;
+                }
+            }
+            if (edge) {
+                shell.add(pos);
+            }
+        }
+        return shell;
     }
 
     public enum Filter {

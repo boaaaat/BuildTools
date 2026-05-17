@@ -1,6 +1,5 @@
 package com.abhil.buildtools.item;
 
-import com.abhil.buildtools.server.AdvancedBuildToolsModeMenu;
 import com.abhil.buildtools.server.BuildOperationEngine;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
@@ -21,9 +20,7 @@ public final class AdvancedBuilderWandItem extends BuildToolItem {
     public InteractionResult useOn(UseOnContext context) {
         Player player = context.getPlayer();
         if (player instanceof ServerPlayer serverPlayer) {
-            if (player.isShiftKeyDown()) {
-                AdvancedBuildToolsModeMenu.open(serverPlayer);
-            } else if (BuildOperationEngine.executeAdvancedBuilder(serverPlayer)) {
+            if (BuildOperationEngine.executeAdvancedBuilder(serverPlayer)) {
                 context.getItemInHand().hurtAndBreak(1, serverPlayer.serverLevel(), serverPlayer, item -> serverPlayer.onEquippedItemBroken(item, LivingEntity.getSlotForHand(context.getHand())));
             }
         }
@@ -33,10 +30,6 @@ public final class AdvancedBuilderWandItem extends BuildToolItem {
     @Override
     public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand usedHand) {
         ItemStack stack = player.getItemInHand(usedHand);
-        if (player instanceof ServerPlayer serverPlayer && player.isShiftKeyDown()) {
-            AdvancedBuildToolsModeMenu.open(serverPlayer);
-            return InteractionResultHolder.sidedSuccess(stack, level.isClientSide());
-        }
         return InteractionResultHolder.pass(stack);
     }
 }

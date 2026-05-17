@@ -11,7 +11,11 @@ public enum SelectionShape {
     LINE("line"),
     CYLINDER("cylinder"),
     SPHERE("sphere"),
-    ELLIPSOID("ellipsoid");
+    ELLIPSOID("ellipsoid"),
+    ROAD("road"),
+    TUNNEL("tunnel"),
+    ARCH("arch"),
+    DOME("dome");
 
     private final String key;
 

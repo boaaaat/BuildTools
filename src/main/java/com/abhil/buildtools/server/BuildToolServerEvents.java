@@ -17,6 +17,7 @@ public final class BuildToolServerEvents {
     public static void serverTick(ServerTickEvent.Post event) {
         BuildOperationEngine.tick();
         BuildToolActionbar.tick(event.getServer());
+        MagnetCollector.tick(event.getServer());
     }
 
     @SubscribeEvent
@@ -29,8 +30,8 @@ public final class BuildToolServerEvents {
         }
         boolean selectionStaff = event.getItemStack().is(ModItems.SELECTION_STAFF.get());
         boolean advancedSelectionStaff = event.getItemStack().is(ModItems.ADVANCED_SELECTION_STAFF.get());
-        boolean replacePicker = event.getItemStack().is(ModItems.ADVANCED_BUILDER_WAND.get()) && event.getEntity().isShiftKeyDown();
-        if (!selectionStaff && !advancedSelectionStaff && !replacePicker) {
+        boolean menuTool = isMenuTool(event.getItemStack());
+        if (!selectionStaff && !advancedSelectionStaff && !menuTool) {
             return;
         }
         event.setCanceled(true);
@@ -43,10 +44,22 @@ public final class BuildToolServerEvents {
                 } else {
                     BuildToolsState.addAdvancedPoint(player, event.getPos());
                 }
+            } else if (event.getItemStack().is(ModItems.ADVANCED_BUILDER_WAND.get())) {
+                AdvancedBuildToolsModeMenu.open(player);
             } else {
-                BuildToolsState.setReplaceTarget(player, player.level().getBlockState(event.getPos()));
+                BuildToolsModeMenu.open(player);
             }
         }
+    }
+
+    private static boolean isMenuTool(net.minecraft.world.item.ItemStack stack) {
+        return stack.is(ModItems.BUILDER_WAND.get())
+                || stack.is(ModItems.ADVANCED_BUILDER_WAND.get())
+                || stack.is(ModItems.BUILDER_BRUSH.get())
+                || stack.is(ModItems.AREA_BREAKER.get())
+                || stack.is(ModItems.BLUEPRINT_TROWEL.get())
+                || stack.is(ModItems.UNDO_TOKEN.get())
+                || stack.is(ModItems.REDO_TOKEN.get());
     }
 
     @SubscribeEvent

@@ -1,7 +1,6 @@
 package com.abhil.buildtools.item;
 
 import com.abhil.buildtools.server.BuildOperationEngine;
-import com.abhil.buildtools.server.BuildToolsModeMenu;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
@@ -18,13 +17,9 @@ public final class BuilderBrushItem extends BuildToolItem {
     public InteractionResult useOn(UseOnContext context) {
         Player player = context.getPlayer();
         if (player instanceof ServerPlayer serverPlayer) {
-            if (player.isShiftKeyDown()) {
-                BuildToolsModeMenu.open(serverPlayer);
-            } else {
-                BlockPos origin = context.getClickedPos().relative(context.getClickedFace());
-                if (BuildOperationEngine.executeBrush(serverPlayer, origin)) {
-                    context.getItemInHand().hurtAndBreak(1, serverPlayer.serverLevel(), serverPlayer, item -> serverPlayer.onEquippedItemBroken(item, LivingEntity.getSlotForHand(context.getHand())));
-                }
+            BlockPos origin = context.getClickedPos().relative(context.getClickedFace());
+            if (BuildOperationEngine.executeBrush(serverPlayer, origin)) {
+                context.getItemInHand().hurtAndBreak(1, serverPlayer.serverLevel(), serverPlayer, item -> serverPlayer.onEquippedItemBroken(item, LivingEntity.getSlotForHand(context.getHand())));
             }
         }
         return InteractionResult.sidedSuccess(context.getLevel().isClientSide());

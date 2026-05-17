@@ -1,6 +1,7 @@
 package com.abhil.buildtools.server;
 
 import com.abhil.buildtools.config.BuildToolsConfig;
+import com.abhil.buildtools.network.ToolStatusPayload;
 import com.abhil.buildtools.registry.ModItems;
 import com.abhil.buildtools.shape.BuildMode;
 import com.abhil.buildtools.shape.Selection;
@@ -16,6 +17,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
+import net.neoforged.neoforge.network.PacketDistributor;
 
 public final class BuildToolActionbar {
     private static final int UPDATE_INTERVAL_TICKS = 10;
@@ -34,13 +36,45 @@ public final class BuildToolActionbar {
     private static void show(ServerPlayer player) {
         ItemStack held = heldBuildTool(player);
         if (held.isEmpty()) {
+            PacketDistributor.sendToPlayer(player, ToolStatusPayload.hidden());
             return;
         }
 
         Component message = messageFor(player, held);
         if (message != null) {
-            player.displayClientMessage(message, true);
+            sendStatus(player, held, message);
         }
+    }
+
+    private static void sendStatus(ServerPlayer player, ItemStack held, Component message) {
+        String[] parts = message.getString().split("\\s*\\|\\s*");
+        String title = parts.length == 0 ? held.getHoverName().getString() : parts[0];
+        List<String> lines = new ArrayList<>();
+        for (int i = 1; i < parts.length; i++) {
+            if (!parts[i].isBlank()) {
+                lines.add(parts[i]);
+            }
+        }
+        PacketDistributor.sendToPlayer(player, new ToolStatusPayload(true, title, lines, accentColor(held)));
+    }
+
+    private static int accentColor(ItemStack held) {
+        if (held.is(ModItems.SELECTION_STAFF.get()) || held.is(ModItems.ADVANCED_SELECTION_STAFF.get())) {
+            return 0x41C7F4;
+        }
+        if (held.is(ModItems.BUILDER_WAND.get()) || held.is(ModItems.ADVANCED_BUILDER_WAND.get())) {
+            return 0x60D96A;
+        }
+        if (held.is(ModItems.BUILDER_BRUSH.get())) {
+            return 0xD2B45F;
+        }
+        if (held.is(ModItems.AREA_BREAKER.get())) {
+            return 0xF05A4F;
+        }
+        if (held.is(ModItems.BLUEPRINT_TROWEL.get())) {
+            return 0x7FA7FF;
+        }
+        return 0xDADADA;
     }
 
     private static ItemStack heldBuildTool(ServerPlayer player) {
@@ -102,6 +136,7 @@ public final class BuildToolActionbar {
         }
         BuildMode mode = BuildToolsState.mode(player);
         return Component.literal("Selection Staff | " + stats.shapeName()
+                + " | Size: " + stats.dimensions()
                 + " | Area: " + stats.total()
                 + " | Air: " + stats.air()
                 + " | Blocks: " + stats.solid()
@@ -118,6 +153,7 @@ public final class BuildToolActionbar {
         ItemStack source = player.getOffhandItem();
         if (!(source.getItem() instanceof BlockItem blockItem)) {
             return Component.literal("Builder Wand | " + stats.shapeName()
+                    + " | Size: " + stats.dimensions()
                     + " | Area: " + stats.total()
                     + " | Put the block to place in your offhand").withStyle(ChatFormatting.YELLOW);
         }
@@ -132,6 +168,7 @@ public final class BuildToolActionbar {
         BlockCostPlan costPlan = BlockCostPlan.create(player, targetStates);
         return Component.literal("Builder Wand | " + modeName(mode)
                 + " " + source.getHoverName().getString()
+                + " | Size: " + stats.dimensions()
                 + " | Will place: " + targets
                 + " | Air: " + stats.air()
                 + " | Blocks: " + stats.solid()
@@ -150,6 +187,7 @@ public final class BuildToolActionbar {
         ItemStack source = player.getOffhandItem();
         String offhand = source.getItem() instanceof BlockItem ? source.getHoverName().getString() : "missing offhand block";
         return Component.literal("Builder Brush | " + BuildToolsState.brushMode(player).displayName().getString()
+                + " | Radius: " + BuildToolsState.brushRadius(player)
                 + " | Block: " + offhand
                 + " | Replace target: " + BuildToolsState.replaceTarget(player).getBlock().getName().getString()
                 + " | Sneak right-click: menu");
@@ -161,6 +199,7 @@ public final class BuildToolActionbar {
             return Component.literal("Area Breaker | " + stats.status()).withStyle(ChatFormatting.RED);
         }
         return Component.literal("Area Breaker | " + stats.shapeName()
+                + " | Size: " + stats.dimensions()
                 + " | Area: " + stats.total()
                 + " | Air: " + stats.air()
                 + " | Will break: " + stats.solid()
@@ -186,6 +225,7 @@ public final class BuildToolActionbar {
             return Component.literal("Blueprint Trowel | Copy | " + stats.status() + " | " + saved).withStyle(ChatFormatting.YELLOW);
         }
         return Component.literal("Blueprint Trowel | Copy | Area: " + stats.total()
+                + " | Size: " + stats.dimensions()
                 + " | Air skipped: " + stats.air()
                 + " | Copy blocks: " + stats.solid()
                 + " | " + saved);
@@ -237,12 +277,20 @@ public final class BuildToolActionbar {
                 true,
                 "",
                 selection.shape().displayName().getString(),
+                dimensions(selection),
                 positions.size(),
                 air,
                 positions.size() - air,
                 fillTargets,
                 replaceTargets,
                 positions.size() > BuildToolsConfig.MAX_OPERATION_VOLUME.get());
+    }
+
+    private static String dimensions(Selection selection) {
+        int width = Math.abs(selection.second().getX() - selection.first().getX()) + 1;
+        int height = Math.abs(selection.second().getY() - selection.first().getY()) + 1;
+        int depth = Math.abs(selection.second().getZ() - selection.first().getZ()) + 1;
+        return width + "x" + height + "x" + depth;
     }
 
     private static String modeName(BuildMode mode) {
@@ -279,6 +327,7 @@ public final class BuildToolActionbar {
             boolean valid,
             String status,
             String shapeName,
+            String dimensions,
             int total,
             int air,
             int solid,
@@ -286,7 +335,7 @@ public final class BuildToolActionbar {
             int replaceTargets,
             boolean tooLarge) {
         private static SelectionStats invalid(String status) {
-            return new SelectionStats(false, status, "", 0, 0, 0, 0, 0, false);
+            return new SelectionStats(false, status, "", "", 0, 0, 0, 0, 0, false);
         }
 
         private int targetsFor(BuildMode mode) {

@@ -34,6 +34,7 @@ public final class ClientSelectionRenderer {
 
         ClientSelectionData.first().ifPresent(pos -> renderBox(poseStack, lines, new AABB(pos), 0.1F, 0.8F, 1.0F, 1.0F));
         ClientSelectionData.second().ifPresent(pos -> renderBox(poseStack, lines, new AABB(pos), 1.0F, 0.7F, 0.1F, 1.0F));
+        renderSelectionHandles(poseStack, lines);
 
         List<BlockPos> preview = ClientSelectionData.preview();
         if (!preview.isEmpty()) {
@@ -59,6 +60,35 @@ public final class ClientSelectionRenderer {
 
     private static void renderBox(PoseStack poseStack, VertexConsumer lines, AABB box, float red, float green, float blue, float alpha) {
         LevelRenderer.renderLineBox(poseStack, lines, box, red, green, blue, alpha);
+    }
+
+    private static void renderSelectionHandles(PoseStack poseStack, VertexConsumer lines) {
+        if (ClientSelectionData.first().isEmpty() || ClientSelectionData.second().isEmpty()) {
+            return;
+        }
+        BlockPos first = ClientSelectionData.first().get();
+        BlockPos second = ClientSelectionData.second().get();
+        int minX = Math.min(first.getX(), second.getX());
+        int minY = Math.min(first.getY(), second.getY());
+        int minZ = Math.min(first.getZ(), second.getZ());
+        int maxX = Math.max(first.getX(), second.getX()) + 1;
+        int maxY = Math.max(first.getY(), second.getY()) + 1;
+        int maxZ = Math.max(first.getZ(), second.getZ()) + 1;
+        double size = 0.12D;
+
+        for (int x : new int[] { minX, maxX }) {
+            for (int y : new int[] { minY, maxY }) {
+                for (int z : new int[] { minZ, maxZ }) {
+                    renderBox(poseStack, lines, new AABB(
+                            x - size,
+                            y - size,
+                            z - size,
+                            x + size,
+                            y + size,
+                            z + size), 1.0F, 1.0F, 0.15F, 1.0F);
+                }
+            }
+        }
     }
 
     private static void renderAffectedEdges(PoseStack poseStack, VertexConsumer lines, List<BlockPos> positions, float red, float green, float blue, float alpha) {

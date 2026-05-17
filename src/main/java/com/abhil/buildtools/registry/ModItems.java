@@ -7,6 +7,7 @@ import com.abhil.buildtools.item.AreaBreakerItem;
 import com.abhil.buildtools.item.BlueprintTrowelItem;
 import com.abhil.buildtools.item.BuilderBrushItem;
 import com.abhil.buildtools.item.BuilderWandItem;
+import com.abhil.buildtools.item.MagnetItem;
 import com.abhil.buildtools.item.RedoTokenItem;
 import com.abhil.buildtools.item.SelectionStaffItem;
 import com.abhil.buildtools.item.UndoTokenItem;
@@ -35,6 +36,8 @@ public final class ModItems {
             () -> new UndoTokenItem(new Item.Properties().stacksTo(16)));
     public static final DeferredItem<Item> REDO_TOKEN = ITEMS.register("redo_token",
             () -> new RedoTokenItem(new Item.Properties().stacksTo(16)));
+    public static final DeferredItem<Item> MAGNET = ITEMS.register("magnet",
+            () -> new MagnetItem(new Item.Properties().stacksTo(1)));
 
     private ModItems() {
     }

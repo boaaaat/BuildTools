@@ -28,6 +28,7 @@ public final class ModCreativeTabs {
                         output.accept(ModItems.BLUEPRINT_TROWEL.get());
                         output.accept(ModItems.UNDO_TOKEN.get());
                         output.accept(ModItems.REDO_TOKEN.get());
+                        output.accept(ModItems.MAGNET.get());
                     })
                     .build());
 

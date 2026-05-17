@@ -3,7 +3,11 @@ package com.abhil.buildtools.server;
 import com.abhil.buildtools.registry.ModMenus;
 import com.abhil.buildtools.shape.BuildMode;
 import com.abhil.buildtools.shape.SelectionShape;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
@@ -22,9 +26,17 @@ import net.minecraft.world.item.component.ItemLore;
 public final class BuildToolsModeMenu extends AbstractContainerMenu {
     private static final int MENU_SIZE = 27;
     private final SimpleContainer menuItems = new SimpleContainer(MENU_SIZE);
+    private final ToolProfile profile;
+    private final ServerPlayer owner;
 
     public BuildToolsModeMenu(int containerId, Inventory inventory) {
+        this(containerId, inventory, inventory.player instanceof ServerPlayer serverPlayer ? serverPlayer : null);
+    }
+
+    private BuildToolsModeMenu(int containerId, Inventory inventory, ServerPlayer owner) {
         super(ModMenus.MODE_MENU.get(), containerId);
+        this.owner = owner;
+        this.profile = owner == null ? ToolProfile.BUILDER : BuildToolsState.activeToolProfile(owner);
         populateMenuItems();
         addMenuSlots();
         addPlayerInventory(inventory);
@@ -32,20 +44,15 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
 
     public static void open(ServerPlayer player) {
         player.openMenu(new SimpleMenuProvider(
-                (containerId, inventory, ignored) -> new BuildToolsModeMenu(containerId, inventory),
+                (containerId, inventory, ignored) -> new BuildToolsModeMenu(containerId, inventory, player),
                 Component.translatable("buildtools.menu.title")));
     }
 
     @Override
     public void clicked(int slotId, int button, ClickType clickType, Player player) {
         if (slotId >= 0 && slotId < MENU_SIZE && player instanceof ServerPlayer serverPlayer) {
-            if (slotId >= 0 && slotId < BuildMode.values().length) {
-                BuildToolsState.setMode(serverPlayer, BuildMode.values()[slotId]);
-                return;
-            }
-            int shapeIndex = slotId - 9;
-            if (shapeIndex >= 0 && shapeIndex < SelectionShape.values().length) {
-                BuildToolsState.setShape(serverPlayer, SelectionShape.values()[shapeIndex]);
+            if (handleClick(serverPlayer, slotId)) {
+                populateMenuItems();
                 return;
             }
         }
@@ -87,10 +94,76 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
 
     private void populateMenuItems() {
         menuItems.clearContent();
+        switch (profile) {
+            case SELECTION, ADVANCED_SELECTION -> populateSelectionMenu();
+            case BRUSH -> populateBrushMenu();
+            case BREAKER -> populateBreakerMenu();
+            case TROWEL -> populateTrowelMenu();
+            case UNDO -> populateHistoryMenu(true);
+            case REDO -> populateHistoryMenu(false);
+            default -> populateBuilderMenu();
+        }
+    }
+
+    private void populateHistoryMenu(boolean undo) {
+        List<UndoSnapshot> history = owner == null ? List.of()
+                : undo ? BuildToolsState.undoHistory(owner) : BuildToolsState.redoHistory(owner);
+        if (history.isEmpty()) {
+            menuItems.setItem(0, emptyHistoryItem(undo));
+            return;
+        }
+        for (int i = 0; i < Math.min(MENU_SIZE, history.size()); i++) {
+            menuItems.setItem(i, historyItem(undo, i, history.get(i)));
+        }
+    }
+
+    private void populateBuilderMenu() {
         menuItems.setItem(0, modeItem(Items.LIME_STAINED_GLASS, BuildMode.FILL));
         menuItems.setItem(1, modeItem(Items.ORANGE_STAINED_GLASS, BuildMode.REPLACE));
         menuItems.setItem(2, modeItem(Items.RED_STAINED_GLASS, BuildMode.OVERWRITE));
+        menuItems.setItem(3, utilityItem(Items.POWDER_SNOW_BUCKET, "buildtools.menu.gradient", "buildtools.menu.gradient.description"));
+        menuItems.setItem(4, utilityItem(Items.BARRIER, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
+        menuItems.setItem(5, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.save_preset", "buildtools.menu.save_preset.description"));
+        menuItems.setItem(6, utilityItem(Items.BOOK, "buildtools.menu.load_preset", "buildtools.menu.load_preset.description"));
+        populateShapes(4);
+    }
 
+    private void populateSelectionMenu() {
+        menuItems.setItem(0, utilityItem(Items.BARRIER, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
+        menuItems.setItem(1, utilityItem(Items.ENDER_EYE, "buildtools.menu.rotate_selection", "buildtools.menu.rotate_selection.description"));
+        menuItems.setItem(2, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.save_preset", "buildtools.menu.save_preset.description"));
+        menuItems.setItem(3, utilityItem(Items.BOOK, "buildtools.menu.load_preset", "buildtools.menu.load_preset.description"));
+        populateShapes(9);
+        menuItems.setItem(18, utilityItem(Items.ARROW, "buildtools.menu.nudge_west", "buildtools.menu.nudge.description"));
+        menuItems.setItem(19, utilityItem(Items.ARROW, "buildtools.menu.nudge_east", "buildtools.menu.nudge.description"));
+        menuItems.setItem(20, utilityItem(Items.ARROW, "buildtools.menu.nudge_down", "buildtools.menu.nudge.description"));
+        menuItems.setItem(21, utilityItem(Items.ARROW, "buildtools.menu.nudge_up", "buildtools.menu.nudge.description"));
+        menuItems.setItem(22, utilityItem(Items.ARROW, "buildtools.menu.nudge_north", "buildtools.menu.nudge.description"));
+        menuItems.setItem(23, utilityItem(Items.ARROW, "buildtools.menu.nudge_south", "buildtools.menu.nudge.description"));
+    }
+
+    private void populateBrushMenu() {
+        menuItems.setItem(0, utilityItem(Items.PAINTING, "buildtools.menu.brush_mode", "buildtools.menu.brush_mode.description"));
+        menuItems.setItem(1, utilityItem(Items.LIGHT_BLUE_DYE, "buildtools.menu.brush_smaller", "buildtools.menu.brush_radius.description"));
+        menuItems.setItem(2, utilityItem(Items.BLUE_DYE, "buildtools.menu.brush_larger", "buildtools.menu.brush_radius.description"));
+        menuItems.setItem(3, modeItem(Items.LIME_STAINED_GLASS, BuildMode.FILL));
+        menuItems.setItem(4, modeItem(Items.ORANGE_STAINED_GLASS, BuildMode.REPLACE));
+    }
+
+    private void populateBreakerMenu() {
+        menuItems.setItem(0, utilityItem(Items.BARRIER, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
+        populateShapes(9);
+    }
+
+    private void populateTrowelMenu() {
+        menuItems.setItem(0, utilityItem(Items.PAPER, "buildtools.menu.copy_blueprint", "buildtools.menu.copy_blueprint.description"));
+        menuItems.setItem(1, utilityItem(Items.CLOCK, "buildtools.menu.rotate_blueprint", "buildtools.menu.rotate_blueprint.description"));
+        menuItems.setItem(2, utilityItem(Items.IRON_BARS, "buildtools.menu.mirror_blueprint_x", "buildtools.menu.mirror_blueprint.description"));
+        menuItems.setItem(3, utilityItem(Items.CHAIN, "buildtools.menu.mirror_blueprint_z", "buildtools.menu.mirror_blueprint.description"));
+        menuItems.setItem(4, utilityItem(Items.BARRIER, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
+    }
+
+    private void populateShapes(int startSlot) {
         SelectionShape[] shapes = SelectionShape.values();
         ItemStack[] icons = new ItemStack[] {
                 new ItemStack(Items.STONE),
@@ -101,14 +174,122 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
                 new ItemStack(Items.STRING),
                 new ItemStack(Items.COPPER_BLOCK),
                 new ItemStack(Items.SNOWBALL),
-                new ItemStack(Items.SLIME_BALL)
+                new ItemStack(Items.SLIME_BALL),
+                new ItemStack(Items.GRAVEL),
+                new ItemStack(Items.RAIL),
+                new ItemStack(Items.STONE_BRICK_STAIRS),
+                new ItemStack(Items.GLASS)
         };
         for (int i = 0; i < shapes.length; i++) {
             ItemStack stack = icons[i].copy();
             stack.set(DataComponents.CUSTOM_NAME, shapes[i].displayName());
-            menuItems.setItem(9 + i, stack);
+            menuItems.setItem(startSlot + i, stack);
         }
+    }
 
+    private boolean handleClick(ServerPlayer player, int slotId) {
+        return switch (profile) {
+            case SELECTION, ADVANCED_SELECTION -> handleSelectionClick(player, slotId);
+            case BRUSH -> handleBrushClick(player, slotId);
+            case BREAKER -> handleBreakerClick(player, slotId);
+            case TROWEL -> handleTrowelClick(player, slotId);
+            case UNDO -> {
+                if (slotId == 0 && BuildToolsState.undoCount(player) > 0) {
+                    BuildOperationEngine.undo(player);
+                    yield true;
+                }
+                yield false;
+            }
+            case REDO -> {
+                if (slotId == 0 && BuildToolsState.redoCount(player) > 0) {
+                    BuildOperationEngine.redo(player);
+                    yield true;
+                }
+                yield false;
+            }
+            default -> handleBuilderClick(player, slotId);
+        };
+    }
+
+    private boolean handleBuilderClick(ServerPlayer player, int slotId) {
+        if (slotId >= 0 && slotId < BuildMode.values().length) {
+            BuildToolsState.setMode(player, BuildMode.values()[slotId]);
+            return true;
+        }
+        switch (slotId) {
+            case 3 -> BuildToolsState.toggleGradient(player);
+            case 4 -> BuildToolsState.clearSelection(player);
+            case 5 -> BuildToolsState.savePreset(player);
+            case 6 -> BuildToolsState.loadPreset(player);
+            default -> {
+                return handleShapeClick(player, slotId, 4);
+            }
+        }
+        return true;
+    }
+
+    private boolean handleSelectionClick(ServerPlayer player, int slotId) {
+        switch (slotId) {
+            case 0 -> BuildToolsState.clearSelection(player);
+            case 1 -> BuildToolsState.rotateSelection(player);
+            case 2 -> BuildToolsState.savePreset(player);
+            case 3 -> BuildToolsState.loadPreset(player);
+            case 18 -> BuildToolsState.nudgeSelection(player, net.minecraft.core.Direction.WEST);
+            case 19 -> BuildToolsState.nudgeSelection(player, net.minecraft.core.Direction.EAST);
+            case 20 -> BuildToolsState.nudgeSelection(player, net.minecraft.core.Direction.DOWN);
+            case 21 -> BuildToolsState.nudgeSelection(player, net.minecraft.core.Direction.UP);
+            case 22 -> BuildToolsState.nudgeSelection(player, net.minecraft.core.Direction.NORTH);
+            case 23 -> BuildToolsState.nudgeSelection(player, net.minecraft.core.Direction.SOUTH);
+            default -> {
+                return handleShapeClick(player, slotId, 9);
+            }
+        }
+        return true;
+    }
+
+    private boolean handleBrushClick(ServerPlayer player, int slotId) {
+        switch (slotId) {
+            case 0 -> BuildToolsState.cycleBrushMode(player);
+            case 1 -> BuildToolsState.changeBrushRadius(player, -1);
+            case 2 -> BuildToolsState.changeBrushRadius(player, 1);
+            case 3 -> BuildToolsState.setMode(player, BuildMode.FILL);
+            case 4 -> BuildToolsState.setMode(player, BuildMode.REPLACE);
+            default -> {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean handleBreakerClick(ServerPlayer player, int slotId) {
+        if (slotId == 0) {
+            BuildToolsState.clearSelection(player);
+            return true;
+        }
+        return handleShapeClick(player, slotId, 9);
+    }
+
+    private boolean handleTrowelClick(ServerPlayer player, int slotId) {
+        switch (slotId) {
+            case 0 -> BuildOperationEngine.copySelection(player);
+            case 1 -> BuildToolsState.rotateBlueprint(player);
+            case 2 -> BuildToolsState.mirrorBlueprintX(player);
+            case 3 -> BuildToolsState.mirrorBlueprintZ(player);
+            case 4 -> BuildToolsState.clearSelection(player);
+            default -> {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean handleShapeClick(ServerPlayer player, int slotId, int startSlot) {
+        int shapeIndex = slotId - startSlot;
+        if (shapeIndex >= 0 && shapeIndex < SelectionShape.values().length) {
+            BuildToolsState.setShape(player, SelectionShape.values()[shapeIndex]);
+            return true;
+        }
+        return false;
     }
 
     private static ItemStack named(net.minecraft.world.item.Item item, Component name) {
@@ -122,6 +303,113 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         Component description = mode.description().copy().withStyle(ChatFormatting.GRAY);
         stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
         return stack;
+    }
+
+    private static ItemStack utilityItem(net.minecraft.world.item.Item item, String nameKey, String descriptionKey) {
+        ItemStack stack = named(item, Component.translatable(nameKey));
+        Component description = Component.translatable(descriptionKey).withStyle(ChatFormatting.GRAY);
+        stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
+        return stack;
+    }
+
+    private static ItemStack emptyHistoryItem(boolean undo) {
+        ItemStack stack = named(undo ? Items.GRAY_DYE : Items.LIGHT_GRAY_DYE,
+                Component.literal(undo ? "No undo history" : "No redo history").withStyle(ChatFormatting.GRAY));
+        Component description = Component.literal("Build actions will appear here after you use tools.").withStyle(ChatFormatting.DARK_GRAY);
+        stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
+        return stack;
+    }
+
+    private static ItemStack historyItem(boolean undo, int index, UndoSnapshot snapshot) {
+        HistoryStats stats = HistoryStats.of(snapshot);
+        ItemStack stack = named(undo ? Items.CLOCK : Items.COMPASS, Component.literal(historyTitle(undo, index, stats.total()))
+                .withStyle(index == 0 ? ChatFormatting.GOLD : ChatFormatting.YELLOW));
+        List<Component> lore = historyLore(undo, index, snapshot, stats);
+        stack.set(DataComponents.LORE, new ItemLore(lore, lore));
+        return stack;
+    }
+
+    private static String historyTitle(boolean undo, int index, int total) {
+        String action = undo ? "Undo" : "Redo";
+        String suffix = index == 0 ? "next" : "queued";
+        return action + " #" + (index + 1) + " (" + suffix + "): " + total + " changes";
+    }
+
+    private static List<Component> historyLore(boolean undo, int index, UndoSnapshot snapshot, HistoryStats stats) {
+        List<Component> lore = new ArrayList<>();
+        lore.add(Component.literal(index == 0 ? "Click to " + (undo ? "undo" : "redo") + " this action." : "Older history entry; undo/redo runs in order.")
+                .withStyle(index == 0 ? ChatFormatting.GREEN : ChatFormatting.DARK_GRAY));
+        lore.add(Component.literal("Dimension: " + snapshot.dimension().location()).withStyle(ChatFormatting.GRAY));
+        lore.add(Component.literal("Placed: " + stats.placed() + "  Removed: " + stats.removed() + "  Replaced: " + stats.replaced())
+                .withStyle(ChatFormatting.GRAY));
+        String setBlocks = blockSummary(snapshot, true);
+        if (!setBlocks.isEmpty()) {
+            lore.add(Component.literal("Set: " + setBlocks).withStyle(ChatFormatting.AQUA));
+        }
+        String clearedBlocks = blockSummary(snapshot, false);
+        if (!clearedBlocks.isEmpty()) {
+            lore.add(Component.literal("Cleared: " + clearedBlocks).withStyle(ChatFormatting.DARK_AQUA));
+        }
+        if (stats.skippedRestore() > 0) {
+            lore.add(Component.literal(stats.skippedRestore() + " positions will stay protected on undo.").withStyle(ChatFormatting.DARK_GRAY));
+        }
+        if (!snapshot.refund().isEmpty()) {
+            lore.add(Component.literal("Materials: " + materialSummary(snapshot.refund())).withStyle(ChatFormatting.AQUA));
+        }
+        return lore;
+    }
+
+    private static String blockSummary(UndoSnapshot snapshot, boolean redoneBlocks) {
+        Map<String, Integer> counts = new HashMap<>();
+        for (UndoSnapshot.Entry entry : snapshot.entries()) {
+            if (redoneBlocks && entry.redoneState().isAir()) {
+                continue;
+            }
+            if (!redoneBlocks && (!entry.redoneState().isAir() || entry.previousState().isAir())) {
+                continue;
+            }
+            String name = (redoneBlocks ? entry.redoneState() : entry.previousState()).getBlock().getName().getString();
+            counts.merge(name, 1, Integer::sum);
+        }
+        return countedSummary(counts);
+    }
+
+    private static String materialSummary(Map<ItemStackKey, Integer> refund) {
+        return countedSummary(refund.entrySet().stream()
+                .collect(HashMap::new, (counts, entry) -> counts.put(entry.getKey().stack(1).getHoverName().getString(), entry.getValue()), HashMap::putAll));
+    }
+
+    private static String countedSummary(Map<String, Integer> counts) {
+        List<String> parts = new ArrayList<>();
+        counts.entrySet().stream()
+                .sorted(Map.Entry.<String, Integer>comparingByValue(Comparator.reverseOrder()))
+                .limit(3)
+                .forEach(entry -> parts.add(entry.getValue() + "x " + entry.getKey()));
+        int remaining = Math.max(0, counts.size() - parts.size());
+        String summary = String.join(", ", parts);
+        return remaining == 0 ? summary : summary + ", +" + remaining + " more";
+    }
+
+    private record HistoryStats(int total, int placed, int removed, int replaced, int skippedRestore) {
+        private static HistoryStats of(UndoSnapshot snapshot) {
+            int placed = 0;
+            int removed = 0;
+            int replaced = 0;
+            int skippedRestore = 0;
+            for (UndoSnapshot.Entry entry : snapshot.entries()) {
+                if (entry.redoneState().isAir()) {
+                    removed++;
+                } else if (entry.previousState().isAir() || entry.previousState().canBeReplaced()) {
+                    placed++;
+                } else {
+                    replaced++;
+                }
+                if (!entry.mayRestorePrevious()) {
+                    skippedRestore++;
+                }
+            }
+            return new HistoryStats(snapshot.entries().size(), placed, removed, replaced, skippedRestore);
+        }
     }
 
     private static final class FakeSlot extends Slot {

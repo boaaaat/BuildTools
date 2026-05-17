@@ -1,0 +1,46 @@
+package com.abhil.buildtools.network;
+
+import com.abhil.buildtools.BuildTools;
+import com.abhil.buildtools.registry.ModItems;
+import com.abhil.buildtools.server.BuildToolsState;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
+
+public record ScrollToolPayload(int direction) implements CustomPacketPayload {
+    public static final Type<ScrollToolPayload> TYPE = new Type<>(BuildTools.id("scroll_tool"));
+    public static final StreamCodec<RegistryFriendlyByteBuf, ScrollToolPayload> STREAM_CODEC = CustomPacketPayload.codec(
+            ScrollToolPayload::write,
+            ScrollToolPayload::read);
+
+    private static ScrollToolPayload read(RegistryFriendlyByteBuf buffer) {
+        return new ScrollToolPayload(buffer.readVarInt());
+    }
+
+    private void write(RegistryFriendlyByteBuf buffer) {
+        buffer.writeVarInt(direction);
+    }
+
+    public static void handle(ScrollToolPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player)) {
+            return;
+        }
+        int step = payload.direction() >= 0 ? 1 : -1;
+        ItemStack held = player.getMainHandItem();
+        if (held.is(ModItems.SELECTION_STAFF.get()) || held.is(ModItems.ADVANCED_SELECTION_STAFF.get()) || held.is(ModItems.AREA_BREAKER.get())) {
+            BuildToolsState.cycleShape(player);
+        } else if (held.is(ModItems.BUILDER_BRUSH.get())) {
+            BuildToolsState.changeBrushRadius(player, step);
+        } else if (held.is(ModItems.BUILDER_WAND.get()) || held.is(ModItems.ADVANCED_BUILDER_WAND.get())) {
+            BuildToolsState.cycleMode(player);
+        }
+    }
+
+    @Override
+    public Type<? extends CustomPacketPayload> type() {
+        return TYPE;
+    }
+}

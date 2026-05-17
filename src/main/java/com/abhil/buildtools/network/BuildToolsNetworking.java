@@ -13,6 +13,9 @@ public final class BuildToolsNetworking {
         PayloadRegistrar registrar = event.registrar("1");
         registrar.playToClient(SelectionSyncPayload.TYPE, SelectionSyncPayload.STREAM_CODEC, SelectionSyncPayload::handle);
         registrar.playToClient(PreviewPayload.TYPE, PreviewPayload.STREAM_CODEC, PreviewPayload::handle);
+        registrar.playToClient(ToolStatusPayload.TYPE, ToolStatusPayload.STREAM_CODEC, ToolStatusPayload::handle);
         registrar.playToServer(RequestPreviewPayload.TYPE, RequestPreviewPayload.STREAM_CODEC, RequestPreviewPayload::handle);
+        registrar.playToServer(ScrollToolPayload.TYPE, ScrollToolPayload.STREAM_CODEC, ScrollToolPayload::handle);
+        registrar.playToServer(OpenToolMenuPayload.TYPE, OpenToolMenuPayload.STREAM_CODEC, OpenToolMenuPayload::handle);
     }
 }

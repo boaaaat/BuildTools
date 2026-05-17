@@ -1,0 +1,23 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "RIR",
+    "ICI",
+    "RIR"
+  ],
+  "key": {
+    "C": {
+      "item": "minecraft:compass"
+    },
+    "I": {
+      "item": "minecraft:iron_ingot"
+    },
+    "R": {
+      "item": "minecraft:redstone"
+    }
+  },
+  "result": {
+    "id": "buildtools:magnet",
+    "count": 1
+  }
+}

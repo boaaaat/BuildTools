@@ -1,6 +1,9 @@
 package com.abhil.buildtools.server;
 
 import com.abhil.buildtools.config.BuildToolsConfig;
+import com.abhil.buildtools.network.BuildToolsNetworking;
+import com.abhil.buildtools.network.PreviewPayload;
+import com.abhil.buildtools.network.ToolStatusPayload;
 import com.abhil.buildtools.shape.BrushMode;
 import com.abhil.buildtools.shape.BuildMode;
 import com.abhil.buildtools.shape.Selection;
@@ -12,26 +15,31 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
+import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
-import net.neoforged.neoforge.server.ServerLifecycleHooks;
+import net.neoforged.neoforge.network.PacketDistributor;
 
 public final class BuildOperationEngine {
     private static final Queue<BuildOperation> QUEUE = new ArrayDeque<>();
+    private static final Map<UUID, PendingOperation> PENDING_OPERATIONS = new HashMap<>();
 
     private BuildOperationEngine() {
+    }
+
+    public static void clearPendingOperation(ServerPlayer player) {
+        PENDING_OPERATIONS.remove(player.getUUID());
     }
 
     public static boolean executeBuilder(ServerPlayer player) {
@@ -74,6 +82,7 @@ public final class BuildOperationEngine {
         }
 
         BuildMode mode = BuildToolsState.mode(player);
+        List<BlockState> gradientPalette = gradientPalette(player, target);
         List<BlockPos> positions = new ArrayList<>();
         List<BlockState> targets = new ArrayList<>();
         List<UndoSnapshot.Entry> undo = new ArrayList<>();
@@ -92,14 +101,24 @@ public final class BuildOperationEngine {
             if (mode == BuildMode.REPLACE && !(advanced ? BuildToolsState.matchesReplaceTargets(player, previous, replaceMatch) : previous.is(replaceMatch.getBlock()))) {
                 continue;
             }
+            BlockState targetState = gradientTarget(selection, pos, target, gradientPalette);
             positions.add(pos.immutable());
-            targets.add(target);
+            targets.add(targetState);
             boolean restore = previous.isAir() || mode == BuildMode.FILL;
-            undo.add(new UndoSnapshot.Entry(pos.immutable(), previous, target, restore));
-            refund.merge(new ItemStackKey(target.getBlock().asItem()), 1, Integer::sum);
+            undo.add(new UndoSnapshot.Entry(pos.immutable(), previous, targetState, restore));
+            refund.merge(new ItemStackKey(targetState.getBlock().asItem()), 1, Integer::sum);
         }
 
-        return enqueue(player, level, positions, targets, undo, refund);
+        String label = advanced ? "advanced builder" : "builder";
+        return previewOrConfirm(player, level, new PendingOperation(
+                level.dimension(),
+                label,
+                List.copyOf(positions),
+                List.copyOf(targets),
+                List.copyOf(undo),
+                Map.copyOf(refund),
+                false,
+                signature(label, level, positions, targets)));
     }
 
     public static boolean executeBreaker(ServerPlayer player) {
@@ -139,7 +158,16 @@ public final class BuildOperationEngine {
             undo.add(new UndoSnapshot.Entry(pos.immutable(), previous, Blocks.AIR.defaultBlockState(), false));
         }
 
-        return enqueueFree(player, level, positions, targets, undo, Map.of());
+        String label = "area break";
+        return previewOrConfirm(player, level, new PendingOperation(
+                level.dimension(),
+                label,
+                List.copyOf(positions),
+                List.copyOf(targets),
+                List.copyOf(undo),
+                Map.of(),
+                true,
+                signature(label, level, positions, targets)));
     }
 
     public static boolean createPlan(ServerPlayer player) {
@@ -174,6 +202,7 @@ public final class BuildOperationEngine {
         }
 
         BuildMode mode = BuildToolsState.mode(player);
+        List<BlockState> gradientPalette = gradientPalette(player, target);
         BlockState replaceMatch = BuildToolsState.replaceTarget(player);
         List<BuildPlan.Entry> entries = new ArrayList<>();
         ServerLevel level = player.serverLevel();
@@ -185,7 +214,7 @@ public final class BuildOperationEngine {
             if (mode == BuildMode.REPLACE && !BuildToolsState.matchesReplaceTargets(player, previous, replaceMatch)) {
                 continue;
             }
-            entries.add(new BuildPlan.Entry(pos.immutable(), target));
+            entries.add(new BuildPlan.Entry(pos.immutable(), gradientTarget(selection, pos, target, gradientPalette)));
         }
         if (entries.isEmpty()) {
             fail(player, "buildtools.error.no_targets");
@@ -221,7 +250,16 @@ public final class BuildOperationEngine {
             undo.add(new UndoSnapshot.Entry(entry.pos().immutable(), previous, entry.state(), previous.isAir() || previous.canBeReplaced()));
             refund.merge(new ItemStackKey(entry.state().getBlock().asItem()), 1, Integer::sum);
         }
-        return enqueue(player, level, positions, targets, undo, refund);
+        String label = "build plan";
+        return previewOrConfirm(player, level, new PendingOperation(
+                level.dimension(),
+                label,
+                List.copyOf(positions),
+                List.copyOf(targets),
+                List.copyOf(undo),
+                Map.copyOf(refund),
+                false,
+                signature(label, level, positions, targets)));
     }
 
     public static boolean executeBrush(ServerPlayer player, BlockPos origin) {
@@ -243,9 +281,10 @@ public final class BuildOperationEngine {
     }
 
     private static boolean executePlaceBrush(ServerPlayer player, BlockPos origin, BlockState target, BrushMode brushMode) {
+        int radius = BuildToolsState.brushRadius(player);
         List<BlockPos> generated = brushMode == BrushMode.CYLINDER
-                ? ShapeGenerator.cylinder(origin.offset(-2, 0, -2), origin.offset(2, 0, 2))
-                : ShapeGenerator.sphere(origin.offset(-2, -2, -2), origin.offset(2, 2, 2), true);
+                ? ShapeGenerator.cylinder(origin.offset(-radius, 0, -radius), origin.offset(radius, 0, radius))
+                : ShapeGenerator.sphere(origin.offset(-radius, -radius, -radius), origin.offset(radius, radius, radius), true);
         ServerLevel level = player.serverLevel();
         BlockState replaceTarget = BuildToolsState.replaceTarget(player);
         List<BlockPos> positions = new ArrayList<>();
@@ -268,16 +307,26 @@ public final class BuildOperationEngine {
             undo.add(new UndoSnapshot.Entry(pos.immutable(), previous, target, previous.isAir() || previous.canBeReplaced()));
             refund.merge(new ItemStackKey(target.getBlock().asItem()), 1, Integer::sum);
         }
-        return enqueue(player, level, positions, targets, undo, refund);
+        String label = "brush";
+        return previewOrConfirm(player, level, new PendingOperation(
+                level.dimension(),
+                label,
+                List.copyOf(positions),
+                List.copyOf(targets),
+                List.copyOf(undo),
+                Map.copyOf(refund),
+                false,
+                signature(label + ":" + brushMode.name() + ":" + radius, level, positions, targets)));
     }
 
     private static boolean executeSmoothBrush(ServerPlayer player, BlockPos origin, BlockState fillState) {
         ServerLevel level = player.serverLevel();
+        int radius = BuildToolsState.brushRadius(player);
         List<Integer> heights = new ArrayList<>();
         Map<BlockPos, Integer> tops = new LinkedHashMap<>();
-        for (int x = origin.getX() - 2; x <= origin.getX() + 2; x++) {
-            for (int z = origin.getZ() - 2; z <= origin.getZ() + 2; z++) {
-                BlockPos top = findTopSolid(level, x, z, origin.getY() - 4, origin.getY() + 4);
+        for (int x = origin.getX() - radius; x <= origin.getX() + radius; x++) {
+            for (int z = origin.getZ() - radius; z <= origin.getZ() + radius; z++) {
+                BlockPos top = findTopSolid(level, x, z, origin.getY() - radius * 2, origin.getY() + radius * 2);
                 if (top != null) {
                     heights.add(top.getY());
                     tops.put(new BlockPos(x, 0, z), top.getY());
@@ -327,7 +376,16 @@ public final class BuildOperationEngine {
                 }
             }
         }
-        return enqueue(player, level, positions, targets, undo, refund);
+        String label = "smooth brush";
+        return previewOrConfirm(player, level, new PendingOperation(
+                level.dimension(),
+                label,
+                List.copyOf(positions),
+                List.copyOf(targets),
+                List.copyOf(undo),
+                Map.copyOf(refund),
+                false,
+                signature(label + ":" + radius, level, positions, targets)));
     }
 
     public static boolean copySelection(ServerPlayer player) {
@@ -503,6 +561,45 @@ public final class BuildOperationEngine {
         }
     }
 
+    private static boolean previewOrConfirm(ServerPlayer player, ServerLevel level, PendingOperation operation) {
+        PendingOperation pending = PENDING_OPERATIONS.get(player.getUUID());
+        if (pending != null && pending.signature().equals(operation.signature())) {
+            PENDING_OPERATIONS.remove(player.getUUID());
+            return operation.free()
+                    ? enqueueFree(player, level, operation.positions(), operation.targets(), operation.undo(), operation.refund())
+                    : enqueue(player, level, operation.positions(), operation.targets(), operation.undo(), operation.refund());
+        }
+
+        PENDING_OPERATIONS.put(player.getUUID(), operation);
+        List<BlockPos> preview = operation.positions();
+        if (preview.size() > BuildToolsNetworking.MAX_PREVIEW_POSITIONS) {
+            preview = preview.subList(0, BuildToolsNetworking.MAX_PREVIEW_POSITIONS);
+        }
+        PacketDistributor.sendToPlayer(player, new PreviewPayload(preview, true));
+        PacketDistributor.sendToPlayer(player, new ToolStatusPayload(true, "Preview Ready", List.of(
+                operation.label() + ": " + operation.positions().size() + " changes",
+                materialPreviewLine(player, operation),
+                "Use the same tool again to confirm"), 0xF4C542));
+        return false;
+    }
+
+    private static String materialPreviewLine(ServerPlayer player, PendingOperation operation) {
+        if (operation.free()) {
+            return "";
+        }
+        BlockCostPlan costPlan = BlockCostPlan.create(player, operation.targets());
+        int required = costPlan.required().values().stream().mapToInt(Integer::intValue).sum();
+        if (costPlan.canAfford()) {
+            return "Materials ready: " + required;
+        }
+        int missing = costPlan.missing().values().stream().mapToInt(Integer::intValue).sum();
+        return "Need " + required + " | missing " + missing;
+    }
+
+    private static String signature(String label, ServerLevel level, List<BlockPos> positions, List<BlockState> targets) {
+        return label + ":" + level.dimension().location() + ":" + positions.hashCode() + ":" + targets.hashCode();
+    }
+
     private static boolean enqueue(
             ServerPlayer player,
             ServerLevel level,
@@ -582,6 +679,34 @@ public final class BuildOperationEngine {
         return true;
     }
 
+    private static List<BlockState> gradientPalette(ServerPlayer player, BlockState fallback) {
+        if (!BuildToolsState.gradientEnabled(player)) {
+            return List.of(fallback);
+        }
+        List<BlockState> palette = new ArrayList<>();
+        palette.add(fallback);
+        for (BlockState state : BuildToolsState.replaceTargets(player)) {
+            if (!state.is(fallback.getBlock())) {
+                palette.add(state);
+            }
+        }
+        return palette;
+    }
+
+    private static BlockState gradientTarget(Selection selection, BlockPos pos, BlockState fallback, List<BlockState> palette) {
+        if (palette.size() <= 1 || !selection.isComplete()) {
+            return fallback;
+        }
+        int minY = Math.min(selection.first().getY(), selection.second().getY());
+        int maxY = Math.max(selection.first().getY(), selection.second().getY());
+        if (minY == maxY) {
+            return palette.get(0);
+        }
+        double ratio = (double) (pos.getY() - minY) / (double) (maxY - minY);
+        int index = Mth.clamp((int) Math.round(ratio * (palette.size() - 1)), 0, palette.size() - 1);
+        return palette.get(index);
+    }
+
     private static BlockPos findTopSolid(ServerLevel level, int x, int z, int minY, int maxY) {
         int clampedMin = Mth.clamp(minY, level.getMinBuildHeight(), level.getMaxBuildHeight() - 1);
         int clampedMax = Mth.clamp(maxY, level.getMinBuildHeight(), level.getMaxBuildHeight() - 1);
@@ -606,5 +731,16 @@ public final class BuildOperationEngine {
 
     private static void fail(ServerPlayer player, Component message) {
         player.displayClientMessage(message, false);
+    }
+
+    private record PendingOperation(
+            ResourceKey<Level> dimension,
+            String label,
+            List<BlockPos> positions,
+            List<BlockState> targets,
+            List<UndoSnapshot.Entry> undo,
+            Map<ItemStackKey, Integer> refund,
+            boolean free,
+            String signature) {
     }
 }

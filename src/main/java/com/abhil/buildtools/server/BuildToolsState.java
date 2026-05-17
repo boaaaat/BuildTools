@@ -11,6 +11,7 @@ import com.abhil.buildtools.shape.ShapeGenerator;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,18 +26,23 @@ import net.neoforged.neoforge.network.PacketDistributor;
 
 public final class BuildToolsState {
     private static final Map<UUID, Selection> SELECTIONS = new HashMap<>();
-    private static final Map<UUID, BuildMode> MODES = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, BuildMode>> MODES = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, SelectionShape>> SHAPES = new HashMap<>();
     private static final Map<UUID, Deque<UndoSnapshot>> UNDO = new HashMap<>();
     private static final Map<UUID, Deque<UndoSnapshot>> REDO = new HashMap<>();
     private static final Map<UUID, Blueprint> BLUEPRINTS = new HashMap<>();
     private static final Map<UUID, BlockPos> PENDING_PASTE_ORIGINS = new HashMap<>();
     private static final Map<UUID, BlockState> REPLACE_TARGETS = new HashMap<>();
-    private static final Map<UUID, List<BlockState>> REPLACE_TARGET_ARRAYS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, List<BlockState>>> REPLACE_TARGET_ARRAYS = new HashMap<>();
     private static final Map<UUID, SelectionPreset> PRESETS = new HashMap<>();
     private static final Map<UUID, BuildPlan> PLANS = new HashMap<>();
-    private static final Map<UUID, BrushMode> BRUSH_MODES = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, BrushMode>> BRUSH_MODES = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Integer>> BRUSH_RADII = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Boolean>> GRADIENTS = new HashMap<>();
     private static final Map<UUID, List<BlockPos>> ADVANCED_POINTS = new HashMap<>();
     private static final int HISTORY_LIMIT = 10;
+    private static final int MIN_BRUSH_RADIUS = 1;
+    private static final int MAX_BRUSH_RADIUS = 8;
 
     private BuildToolsState() {
     }
@@ -46,37 +52,52 @@ public final class BuildToolsState {
     }
 
     public static BuildMode mode(ServerPlayer player) {
-        return MODES.getOrDefault(player.getUUID(), BuildMode.FILL);
+        return modes(player).getOrDefault(activeProfile(player), BuildMode.FILL);
     }
 
     public static BrushMode brushMode(ServerPlayer player) {
-        return BRUSH_MODES.getOrDefault(player.getUUID(), BrushMode.SPHERE);
+        return brushModes(player).getOrDefault(activeProfile(player), BrushMode.SPHERE);
+    }
+
+    public static int brushRadius(ServerPlayer player) {
+        return brushRadii(player).getOrDefault(activeProfile(player), 2);
+    }
+
+    public static boolean gradientEnabled(ServerPlayer player) {
+        return gradients(player).getOrDefault(activeProfile(player), false);
+    }
+
+    public static ToolProfile activeToolProfile(ServerPlayer player) {
+        return activeProfile(player);
     }
 
     public static void setFirst(ServerPlayer player, BlockPos pos) {
-        Selection selection = selection(player).withFirst(player.level().dimension(), pos);
+        Selection selection = selection(player).withFirst(player.level().dimension(), pos).withShape(shape(player));
         SELECTIONS.put(player.getUUID(), selection);
         PENDING_PASTE_ORIGINS.remove(player.getUUID());
+        BuildOperationEngine.clearPendingOperation(player);
         sync(player);
         player.displayClientMessage(Component.translatable("buildtools.message.first", format(pos)), true);
     }
 
     public static void setSecond(ServerPlayer player, BlockPos pos) {
-        Selection selection = selection(player).withSecond(player.level().dimension(), pos);
+        Selection selection = selection(player).withSecond(player.level().dimension(), pos).withShape(shape(player));
         SELECTIONS.put(player.getUUID(), selection);
         PENDING_PASTE_ORIGINS.remove(player.getUUID());
+        BuildOperationEngine.clearPendingOperation(player);
         sync(player);
         player.displayClientMessage(Component.translatable("buildtools.message.second", format(pos)), true);
     }
 
     public static void cycleShape(ServerPlayer player) {
-        Selection selection = selection(player);
-        setShape(player, selection.shape().next());
+        setShape(player, shape(player).next());
     }
 
     public static void setShape(ServerPlayer player, SelectionShape shape) {
+        shapes(player).put(activeProfile(player), shape);
         Selection selection = selection(player).withShape(shape);
         SELECTIONS.put(player.getUUID(), selection);
+        BuildOperationEngine.clearPendingOperation(player);
         sync(player);
         player.displayClientMessage(Component.translatable("buildtools.message.shape", selection.shape().displayName()), true);
     }
@@ -86,7 +107,8 @@ public final class BuildToolsState {
     }
 
     public static void setMode(ServerPlayer player, BuildMode mode) {
-        MODES.put(player.getUUID(), mode);
+        modes(player).put(activeProfile(player), mode);
+        BuildOperationEngine.clearPendingOperation(player);
         player.displayClientMessage(Component.translatable("buildtools.message.mode", mode.displayName()), true);
         sendPreview(player);
     }
@@ -130,9 +152,20 @@ public final class BuildToolsState {
         return history == null ? 0 : history.size();
     }
 
+    public static List<UndoSnapshot> undoHistory(ServerPlayer player) {
+        Deque<UndoSnapshot> history = UNDO.get(player.getUUID());
+        return history == null ? List.of() : List.copyOf(history);
+    }
+
+    public static List<UndoSnapshot> redoHistory(ServerPlayer player) {
+        Deque<UndoSnapshot> history = REDO.get(player.getUUID());
+        return history == null ? List.of() : List.copyOf(history);
+    }
+
     public static void setBlueprint(ServerPlayer player, Blueprint blueprint) {
         BLUEPRINTS.put(player.getUUID(), blueprint);
         PENDING_PASTE_ORIGINS.remove(player.getUUID());
+        BuildOperationEngine.clearPendingOperation(player);
         sendPreview(player);
     }
 
@@ -166,6 +199,7 @@ public final class BuildToolsState {
         UUID uuid = player.getUUID();
         SELECTIONS.remove(uuid);
         MODES.remove(uuid);
+        SHAPES.remove(uuid);
         UNDO.remove(uuid);
         REDO.remove(uuid);
         BLUEPRINTS.remove(uuid);
@@ -174,7 +208,18 @@ public final class BuildToolsState {
         REPLACE_TARGET_ARRAYS.remove(uuid);
         PLANS.remove(uuid);
         BRUSH_MODES.remove(uuid);
+        BRUSH_RADII.remove(uuid);
+        GRADIENTS.remove(uuid);
         ADVANCED_POINTS.remove(uuid);
+    }
+
+    public static void clearSelection(ServerPlayer player) {
+        SELECTIONS.put(player.getUUID(), Selection.empty(player.getUUID()).withShape(shape(player)));
+        ADVANCED_POINTS.remove(player.getUUID());
+        PENDING_PASTE_ORIGINS.remove(player.getUUID());
+        BuildOperationEngine.clearPendingOperation(player);
+        sync(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.selection_cleared"), true);
     }
 
     public static Optional<BlockPos> pendingPasteOrigin(ServerPlayer player) {
@@ -192,6 +237,7 @@ public final class BuildToolsState {
 
     public static void clearPendingPaste(ServerPlayer player) {
         PENDING_PASTE_ORIGINS.remove(player.getUUID());
+        BuildOperationEngine.clearPendingOperation(player);
         sendPreview(player);
     }
 
@@ -201,7 +247,7 @@ public final class BuildToolsState {
                 selection.dimension() == null ? "" : selection.dimension().location().toString(),
                 selection.firstOptional(),
                 selection.secondOptional(),
-                selection.shape()));
+                shape(player)));
         sendPreview(player);
     }
 
@@ -217,7 +263,8 @@ public final class BuildToolsState {
                 selection.dimension(),
                 selection.first().offset(offset),
                 selection.second().offset(offset),
-                selection.shape()));
+                shape(player)));
+        BuildOperationEngine.clearPendingOperation(player);
         sync(player);
         player.displayClientMessage(Component.translatable("buildtools.message.selection_nudged", direction.getName()), true);
     }
@@ -255,6 +302,7 @@ public final class BuildToolsState {
                 new BlockPos(minX, minY, minZ),
                 new BlockPos(maxX, maxY, maxZ),
                 selection.shape()));
+        BuildOperationEngine.clearPendingOperation(player);
         sync(player);
         player.displayClientMessage(Component.translatable(amount >= 0 ? "buildtools.message.selection_expanded" : "buildtools.message.selection_shrunk", direction.getName()), true);
     }
@@ -265,7 +313,7 @@ public final class BuildToolsState {
             player.displayClientMessage(Component.translatable("buildtools.error.incomplete_selection"), false);
             return;
         }
-        PRESETS.put(player.getUUID(), new SelectionPreset(selection.second().subtract(selection.first()), selection.shape()));
+        PRESETS.put(player.getUUID(), new SelectionPreset(selection.second().subtract(selection.first()), shape(player)));
         player.displayClientMessage(Component.translatable("buildtools.message.preset_saved"), true);
     }
 
@@ -288,20 +336,22 @@ public final class BuildToolsState {
 
     public static void setReplaceTarget(ServerPlayer player, BlockState state) {
         REPLACE_TARGETS.put(player.getUUID(), state);
-        REPLACE_TARGET_ARRAYS.put(player.getUUID(), List.of(state));
+        replaceTargetArrays(player).put(activeProfile(player), List.of(state));
+        BuildOperationEngine.clearPendingOperation(player);
         player.displayClientMessage(Component.translatable("buildtools.message.replace_target", state.getBlock().getName()), true);
         sendPreview(player);
     }
 
     public static void setReplaceTargets(ServerPlayer player, List<BlockState> states) {
         if (states.isEmpty()) {
-            REPLACE_TARGET_ARRAYS.remove(player.getUUID());
+            replaceTargetArrays(player).remove(activeProfile(player));
             player.displayClientMessage(Component.translatable("buildtools.message.replace_targets_cleared"), true);
         } else {
-            REPLACE_TARGET_ARRAYS.put(player.getUUID(), List.copyOf(states));
+            replaceTargetArrays(player).put(activeProfile(player), List.copyOf(states));
             REPLACE_TARGETS.put(player.getUUID(), states.get(0));
             player.displayClientMessage(Component.translatable("buildtools.message.replace_targets", states.size()), true);
         }
+        BuildOperationEngine.clearPendingOperation(player);
         sendPreview(player);
     }
 
@@ -314,7 +364,7 @@ public final class BuildToolsState {
     }
 
     public static List<BlockState> replaceTargets(ServerPlayer player) {
-        return REPLACE_TARGET_ARRAYS.getOrDefault(player.getUUID(), List.of());
+        return replaceTargetArrays(player).getOrDefault(activeProfile(player), List.of());
     }
 
     public static boolean matchesReplaceTargets(ServerPlayer player, BlockState state, BlockState fallback) {
@@ -332,8 +382,26 @@ public final class BuildToolsState {
 
     public static void cycleBrushMode(ServerPlayer player) {
         BrushMode next = brushMode(player).next();
-        BRUSH_MODES.put(player.getUUID(), next);
+        brushModes(player).put(activeProfile(player), next);
+        BuildOperationEngine.clearPendingOperation(player);
         player.displayClientMessage(Component.translatable("buildtools.message.brush_mode", next.displayName()), true);
+        sendPreview(player);
+    }
+
+    public static void changeBrushRadius(ServerPlayer player, int delta) {
+        int radius = Math.max(MIN_BRUSH_RADIUS, Math.min(MAX_BRUSH_RADIUS, brushRadius(player) + delta));
+        brushRadii(player).put(activeProfile(player), radius);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.brush_radius", radius), true);
+        sendPreview(player);
+    }
+
+    public static void toggleGradient(ServerPlayer player) {
+        boolean enabled = !gradientEnabled(player);
+        gradients(player).put(activeProfile(player), enabled);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable(enabled ? "buildtools.message.gradient_on" : "buildtools.message.gradient_off"), true);
+        sendPreview(player);
     }
 
     public static void sendPreview(ServerPlayer player) {
@@ -376,7 +444,8 @@ public final class BuildToolsState {
         }
         BlockPos offset = selection.second().subtract(selection.first());
         BlockPos rotated = new BlockPos(-offset.getZ(), offset.getY(), offset.getX());
-        SELECTIONS.put(player.getUUID(), new Selection(player.getUUID(), selection.dimension(), selection.first(), selection.first().offset(rotated), selection.shape()));
+        SELECTIONS.put(player.getUUID(), new Selection(player.getUUID(), selection.dimension(), selection.first(), selection.first().offset(rotated), shape(player)));
+        BuildOperationEngine.clearPendingOperation(player);
         sync(player);
         player.displayClientMessage(Component.translatable("buildtools.message.selection_rotated"), true);
     }
@@ -397,7 +466,10 @@ public final class BuildToolsState {
     private static List<BlockPos> filteredPreview(ServerPlayer player, Selection selection) {
         List<BlockPos> generated = ShapeGenerator.generate(selection);
         BuildMode mode = mode(player);
-        if (mode == BuildMode.OVERWRITE || generated.isEmpty()) {
+        if (generated.isEmpty()) {
+            return generated;
+        }
+        if (mode == BuildMode.OVERWRITE) {
             return generated;
         }
 
@@ -440,8 +512,43 @@ public final class BuildToolsState {
                 player.level().dimension(),
                 new BlockPos(minX, minY, minZ),
                 new BlockPos(maxX, maxY, maxZ),
-                selection(player).shape()));
+                shape(player)));
         sync(player);
+    }
+
+    private static SelectionShape shape(ServerPlayer player) {
+        return shapes(player).getOrDefault(activeProfile(player), selection(player).shape());
+    }
+
+    private static ToolProfile activeProfile(ServerPlayer player) {
+        if (!player.getMainHandItem().isEmpty()) {
+            return ToolProfile.from(player.getMainHandItem());
+        }
+        return ToolProfile.from(player.getOffhandItem());
+    }
+
+    private static EnumMap<ToolProfile, BuildMode> modes(ServerPlayer player) {
+        return MODES.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, SelectionShape> shapes(ServerPlayer player) {
+        return SHAPES.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, BrushMode> brushModes(ServerPlayer player) {
+        return BRUSH_MODES.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, Integer> brushRadii(ServerPlayer player) {
+        return BRUSH_RADII.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, Boolean> gradients(ServerPlayer player) {
+        return GRADIENTS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, List<BlockState>> replaceTargetArrays(ServerPlayer player) {
+        return REPLACE_TARGET_ARRAYS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
     }
 
     private static void transformBlueprint(ServerPlayer player, String messageKey, java.util.function.Function<BlockPos, BlockPos> transform) {
@@ -455,6 +562,7 @@ public final class BuildToolsState {
                 .toList();
         BLUEPRINTS.put(player.getUUID(), new Blueprint(transformed));
         PENDING_PASTE_ORIGINS.remove(player.getUUID());
+        BuildOperationEngine.clearPendingOperation(player);
         player.displayClientMessage(Component.translatable(messageKey), true);
         sendPreview(player);
     }

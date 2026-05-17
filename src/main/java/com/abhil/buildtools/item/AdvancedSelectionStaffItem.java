@@ -1,6 +1,6 @@
 package com.abhil.buildtools.item;
 
-import com.abhil.buildtools.server.AdvancedBuildToolsModeMenu;
+import com.abhil.buildtools.server.BuildToolsModeMenu;
 import com.abhil.buildtools.server.BuildToolsState;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
@@ -21,7 +21,7 @@ public final class AdvancedSelectionStaffItem extends BuildToolItem {
         Player player = context.getPlayer();
         if (player instanceof ServerPlayer serverPlayer) {
             if (player.isShiftKeyDown()) {
-                AdvancedBuildToolsModeMenu.open(serverPlayer);
+                BuildToolsModeMenu.open(serverPlayer);
             } else {
                 BuildToolsState.addAdvancedPoint(serverPlayer, context.getClickedPos());
             }
@@ -33,7 +33,7 @@ public final class AdvancedSelectionStaffItem extends BuildToolItem {
     public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand usedHand) {
         ItemStack stack = player.getItemInHand(usedHand);
         if (player instanceof ServerPlayer serverPlayer && player.isShiftKeyDown()) {
-            AdvancedBuildToolsModeMenu.open(serverPlayer);
+            BuildToolsModeMenu.open(serverPlayer);
             return InteractionResultHolder.sidedSuccess(stack, level.isClientSide());
         }
         return InteractionResultHolder.pass(stack);
