@@ -38,7 +38,8 @@ public final class BlockCostPlan {
         Map<ItemStackKey, Integer> missing = new LinkedHashMap<>();
         if (!isCreative(player)) {
             for (Map.Entry<ItemStackKey, Integer> entry : required.entrySet()) {
-                int available = count(player.getInventory(), entry.getKey());
+                int available = BuildingStorageManager.count(player, entry.getKey())
+                        + count(player.getInventory(), entry.getKey());
                 if (available < entry.getValue()) {
                     missing.put(entry.getKey(), entry.getValue() - available);
                 }
@@ -65,7 +66,7 @@ public final class BlockCostPlan {
         }
         Inventory inventory = player.getInventory();
         for (Map.Entry<ItemStackKey, Integer> entry : required.entrySet()) {
-            int remaining = entry.getValue();
+            int remaining = entry.getValue() - BuildingStorageManager.extract(player, entry.getKey(), entry.getValue());
             for (int i = 0; i < inventory.getContainerSize() && remaining > 0; i++) {
                 ItemStack stack = inventory.getItem(i);
                 if (!stack.isEmpty() && stack.is(entry.getKey().item())) {

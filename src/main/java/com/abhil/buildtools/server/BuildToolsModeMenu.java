@@ -110,13 +110,16 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
     private void populateHistoryMenu(boolean undo) {
         List<UndoSnapshot> history = owner == null ? List.of()
                 : undo ? BuildToolsState.undoHistory(owner) : BuildToolsState.redoHistory(owner);
+        Map<ItemStackKey, Integer> storedDrops = owner == null ? Map.of() : BuildToolsState.storedDrops(owner);
         if (history.isEmpty()) {
             menuItems.setItem(0, emptyHistoryItem(undo));
+            menuItems.setItem(26, collectDropsItem(storedDrops));
             return;
         }
-        for (int i = 0; i < Math.min(MENU_SIZE, history.size()); i++) {
+        for (int i = 0; i < Math.min(MENU_SIZE - 1, history.size()); i++) {
             menuItems.setItem(i, historyItem(undo, i, history.get(i)));
         }
+        menuItems.setItem(26, collectDropsItem(storedDrops));
     }
 
     private void populateBuilderMenu() {
@@ -219,6 +222,9 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case BREAKER -> handleBreakerClick(player, slotId);
             case TROWEL -> handleTrowelClick(player, slotId);
             case UNDO -> {
+                if (slotId == 26 && BuildOperationEngine.collectStoredDrops(player)) {
+                    yield true;
+                }
                 if (slotId == 0 && BuildToolsState.undoCount(player) > 0) {
                     BuildOperationEngine.undo(player);
                     yield true;
@@ -226,6 +232,9 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
                 yield false;
             }
             case REDO -> {
+                if (slotId == 26 && BuildOperationEngine.collectStoredDrops(player)) {
+                    yield true;
+                }
                 if (slotId == 0 && BuildToolsState.redoCount(player) > 0) {
                     BuildOperationEngine.redo(player);
                     yield true;
@@ -438,7 +447,21 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         if (!snapshot.refund().isEmpty()) {
             lore.add(Component.literal("Materials: " + materialSummary(snapshot.refund())).withStyle(ChatFormatting.AQUA));
         }
+        if (!snapshot.producedDrops().isEmpty()) {
+            lore.add(Component.literal("Stored drops: " + materialSummary(snapshot.producedDrops())).withStyle(ChatFormatting.GREEN));
+        }
         return lore;
+    }
+
+    private static ItemStack collectDropsItem(Map<ItemStackKey, Integer> drops) {
+        ItemStack stack = named(drops.isEmpty() ? Items.GRAY_DYE : Items.HOPPER,
+                Component.translatable("buildtools.menu.collect_stored_drops").withStyle(drops.isEmpty() ? ChatFormatting.GRAY : ChatFormatting.GREEN));
+        Component description = (drops.isEmpty()
+                ? Component.translatable("buildtools.menu.collect_stored_drops.empty")
+                : Component.translatable("buildtools.menu.collect_stored_drops.description", materialSummary(drops)))
+                .withStyle(ChatFormatting.GRAY);
+        stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
+        return stack;
     }
 
     private static String blockSummary(UndoSnapshot snapshot, boolean redoneBlocks) {

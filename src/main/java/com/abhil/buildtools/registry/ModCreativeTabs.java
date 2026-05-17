@@ -29,6 +29,7 @@ public final class ModCreativeTabs {
                         output.accept(ModItems.UNDO_TOKEN.get());
                         output.accept(ModItems.REDO_TOKEN.get());
                         output.accept(ModItems.MAGNET.get());
+                        output.accept(ModItems.STORAGE_LINK.get());
                     })
                     .build());
 

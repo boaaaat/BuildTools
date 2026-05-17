@@ -16,5 +16,7 @@ public record BuildOperation(
         List<BlockPos> positions,
         List<BlockState> targetStates,
         List<UndoSnapshot.Entry> undoEntries,
-        Map<ItemStackKey, Integer> refund) {
+        Map<ItemStackKey, Integer> refund,
+        Map<ItemStackKey, Integer> producedDrops,
+        boolean trackHistory) {
 }

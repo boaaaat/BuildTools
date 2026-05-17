@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -201,6 +202,17 @@ public final class BuildToolsState {
         persist(player);
     }
 
+    public static void clearRedo(ServerPlayer player) {
+        REDO.remove(player.getUUID());
+        persist(player);
+    }
+
+    public static void clearHistory(ServerPlayer player) {
+        UNDO.remove(player.getUUID());
+        REDO.remove(player.getUUID());
+        persist(player);
+    }
+
     public static Optional<UndoSnapshot> takeRedo(ServerPlayer player) {
         Deque<UndoSnapshot> history = REDO.get(player.getUUID());
         if (history == null || history.isEmpty()) {
@@ -234,6 +246,17 @@ public final class BuildToolsState {
     public static List<UndoSnapshot> redoHistory(ServerPlayer player) {
         Deque<UndoSnapshot> history = REDO.get(player.getUUID());
         return history == null ? List.of() : List.copyOf(history);
+    }
+
+    public static Map<ItemStackKey, Integer> storedDrops(ServerPlayer player) {
+        Map<ItemStackKey, Integer> drops = new LinkedHashMap<>();
+        Deque<UndoSnapshot> history = UNDO.get(player.getUUID());
+        if (history != null) {
+            for (UndoSnapshot snapshot : history) {
+                snapshot.producedDrops().forEach((key, count) -> drops.merge(key, count, Integer::sum));
+            }
+        }
+        return Map.copyOf(drops);
     }
 
     public static void setBlueprint(ServerPlayer player, Blueprint blueprint) {
@@ -1149,6 +1172,7 @@ public final class BuildToolsState {
             }
             tag.put("entries", entries);
             tag.put("refund", writeRefund(snapshot.refund()));
+            tag.put("producedDrops", writeRefund(snapshot.producedDrops()));
             list.add(tag);
         }
         return list;
@@ -1182,7 +1206,11 @@ public final class BuildToolsState {
                         entryTag.getBoolean("mayRestorePrevious")));
             }
             if (!entries.isEmpty()) {
-                snapshots.addLast(new UndoSnapshot(dimension, List.copyOf(entries), readRefund(tag.getList("refund", Tag.TAG_COMPOUND))));
+                snapshots.addLast(new UndoSnapshot(
+                        dimension,
+                        List.copyOf(entries),
+                        readRefund(tag.getList("refund", Tag.TAG_COMPOUND)),
+                        readRefund(tag.getList("producedDrops", Tag.TAG_COMPOUND))));
             }
         }
         return snapshots;

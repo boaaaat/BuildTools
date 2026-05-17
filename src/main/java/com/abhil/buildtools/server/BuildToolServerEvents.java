@@ -6,6 +6,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
@@ -18,6 +19,7 @@ public final class BuildToolServerEvents {
         BuildOperationEngine.tick();
         BuildToolActionbar.tick(event.getServer());
         MagnetCollector.tick(event.getServer());
+        BuildingStorageManager.tick(event.getServer());
     }
 
     @SubscribeEvent
@@ -61,6 +63,13 @@ public final class BuildToolServerEvents {
                 || stack.is(ModItems.BLUEPRINT_TROWEL.get())
                 || stack.is(ModItems.UNDO_TOKEN.get())
                 || stack.is(ModItems.REDO_TOKEN.get());
+    }
+
+    @SubscribeEvent
+    public static void breakBlock(BlockEvent.BreakEvent event) {
+        if (event.getLevel() instanceof net.minecraft.server.level.ServerLevel level) {
+            BuildingStorageManager.unmark(level, event.getPos());
+        }
     }
 
     @SubscribeEvent

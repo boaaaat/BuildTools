@@ -205,7 +205,7 @@ public final class BuildToolActionbar {
                 + " | Area: " + stats.total()
                 + " | Air: " + stats.air()
                 + " | Will break: " + stats.solid()
-                + " | No block drops"
+                + " | Drops stored if history is active"
                 + limitSuffix(stats));
     }
 

@@ -9,7 +9,15 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 
-public record UndoSnapshot(ResourceKey<Level> dimension, List<Entry> entries, Map<ItemStackKey, Integer> refund) {
+public record UndoSnapshot(
+        ResourceKey<Level> dimension,
+        List<Entry> entries,
+        Map<ItemStackKey, Integer> refund,
+        Map<ItemStackKey, Integer> producedDrops) {
+    public UndoSnapshot(ResourceKey<Level> dimension, List<Entry> entries, Map<ItemStackKey, Integer> refund) {
+        this(dimension, entries, refund, Map.of());
+    }
+
     public record Entry(
             BlockPos pos,
             BlockState previousState,

@@ -4,7 +4,9 @@ import com.abhil.buildtools.registry.ModMenus;
 import com.abhil.buildtools.shape.BuildMode;
 import com.abhil.buildtools.shape.SelectionShape;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
@@ -382,12 +384,14 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         if (entries.isEmpty()) {
             return;
         }
+        Map<ItemStackKey, Integer> returned = new LinkedHashMap<>();
         for (PaletteEntry entry : entries) {
             ItemStack stack = new ItemStack(entry.state().getBlock().asItem());
-            if (!stack.isEmpty() && !player.getInventory().add(stack)) {
-                player.drop(stack, false);
+            if (!stack.isEmpty()) {
+                returned.merge(new ItemStackKey(stack.getItem()), stack.getCount(), Integer::sum);
             }
         }
+        BuildingStorageManager.depositOrGive(player, returned);
         BuildToolsState.setPaletteEntries(player, List.of());
     }
 

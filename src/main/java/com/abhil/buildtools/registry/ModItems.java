@@ -10,6 +10,7 @@ import com.abhil.buildtools.item.BuilderWandItem;
 import com.abhil.buildtools.item.MagnetItem;
 import com.abhil.buildtools.item.RedoTokenItem;
 import com.abhil.buildtools.item.SelectionStaffItem;
+import com.abhil.buildtools.item.StorageLinkItem;
 import com.abhil.buildtools.item.UndoTokenItem;
 import net.minecraft.world.item.Item;
 import net.neoforged.neoforge.registries.DeferredItem;
@@ -38,6 +39,8 @@ public final class ModItems {
             () -> new RedoTokenItem(new Item.Properties().stacksTo(16)));
     public static final DeferredItem<Item> MAGNET = ITEMS.register("magnet",
             () -> new MagnetItem(new Item.Properties().stacksTo(1)));
+    public static final DeferredItem<Item> STORAGE_LINK = ITEMS.register("storage_link",
+            () -> new StorageLinkItem(new Item.Properties().stacksTo(16)));
 
     private ModItems() {
     }
