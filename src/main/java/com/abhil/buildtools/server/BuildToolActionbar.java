@@ -205,7 +205,7 @@ public final class BuildToolActionbar {
                 + " | Area: " + stats.total()
                 + " | Air: " + stats.air()
                 + " | Will break: " + stats.solid()
-                + " | Drops normal loot"
+                + " | No block drops"
                 + limitSuffix(stats));
     }
 

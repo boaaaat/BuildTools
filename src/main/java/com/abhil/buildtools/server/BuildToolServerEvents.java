@@ -64,16 +64,31 @@ public final class BuildToolServerEvents {
     }
 
     @SubscribeEvent
+    public static void login(PlayerEvent.PlayerLoggedInEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            BuildToolsState.loadPlayer(player);
+        }
+    }
+
+    @SubscribeEvent
     public static void logout(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
-            BuildToolsState.clearPlayer(player);
+            BuildToolsState.savePlayer(player);
+            BuildToolsState.discardLoadedPlayer(player);
         }
     }
 
     @SubscribeEvent
     public static void changeDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
-            BuildToolsState.clearPlayer(player);
+            BuildToolsState.sync(player);
+        }
+    }
+
+    @SubscribeEvent
+    public static void clone(PlayerEvent.Clone event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            BuildToolsState.sync(player);
         }
     }
 }

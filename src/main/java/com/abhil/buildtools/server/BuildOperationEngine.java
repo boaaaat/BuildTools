@@ -713,12 +713,12 @@ public final class BuildOperationEngine {
             BlockState target = operation.targetStates().remove(0);
             BlockState previous = operation.level().getBlockState(pos);
             if (target.isAir()) {
-                operation.level().destroyBlock(pos, true, operation.player());
+                operation.level().destroyBlock(pos, false, operation.player());
                 applied++;
                 continue;
             }
             if (!previous.isAir() && !previous.canBeReplaced()) {
-                operation.level().destroyBlock(pos, true, operation.player());
+                operation.level().destroyBlock(pos, false, operation.player());
             }
             restoreBlock(operation.level(), pos, target, entry.redoneBlockEntity());
             applied++;
@@ -802,6 +802,10 @@ public final class BuildOperationEngine {
             return false;
         }
         if (!previous.getFluidState().isEmpty()) {
+            fail(player, "buildtools.error.protected_state");
+            return false;
+        }
+        if (level.getBlockEntity(pos) != null) {
             fail(player, "buildtools.error.protected_state");
             return false;
         }

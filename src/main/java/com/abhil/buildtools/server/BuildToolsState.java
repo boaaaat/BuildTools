@@ -20,8 +20,21 @@ import java.util.Optional;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.NbtUtils;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.BlockHitResult;
@@ -102,6 +115,24 @@ public final class BuildToolsState {
         return activeProfile(player);
     }
 
+    public static void loadPlayer(ServerPlayer player) {
+        UUID uuid = player.getUUID();
+        clearInMemory(uuid);
+        CompoundTag tag = BuildToolsPlayerStateData.get(player).getPlayer(uuid);
+        if (!tag.isEmpty()) {
+            readState(player, tag, player.serverLevel().registryAccess());
+        }
+        sync(player);
+    }
+
+    public static void savePlayer(ServerPlayer player) {
+        persist(player);
+    }
+
+    public static void discardLoadedPlayer(ServerPlayer player) {
+        clearInMemory(player.getUUID());
+    }
+
     public static void setFirst(ServerPlayer player, BlockPos pos) {
         Selection selection = selection(player).withFirst(player.level().dimension(), pos).withShape(shape(player));
         SELECTIONS.put(player.getUUID(), selection);
@@ -147,11 +178,17 @@ public final class BuildToolsState {
     public static void setUndo(ServerPlayer player, UndoSnapshot snapshot) {
         pushLimited(UNDO.computeIfAbsent(player.getUUID(), ignored -> new ArrayDeque<>()), snapshot);
         REDO.remove(player.getUUID());
+        persist(player);
     }
 
     public static Optional<UndoSnapshot> takeUndo(ServerPlayer player) {
         Deque<UndoSnapshot> history = UNDO.get(player.getUUID());
-        return history == null || history.isEmpty() ? Optional.empty() : Optional.of(history.removeFirst());
+        if (history == null || history.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<UndoSnapshot> snapshot = Optional.of(history.removeFirst());
+        persist(player);
+        return snapshot;
     }
 
     public static Optional<UndoSnapshot> peekUndo(ServerPlayer player) {
@@ -161,11 +198,17 @@ public final class BuildToolsState {
 
     public static void setRedo(ServerPlayer player, UndoSnapshot snapshot) {
         pushLimited(REDO.computeIfAbsent(player.getUUID(), ignored -> new ArrayDeque<>()), snapshot);
+        persist(player);
     }
 
     public static Optional<UndoSnapshot> takeRedo(ServerPlayer player) {
         Deque<UndoSnapshot> history = REDO.get(player.getUUID());
-        return history == null || history.isEmpty() ? Optional.empty() : Optional.of(history.removeFirst());
+        if (history == null || history.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<UndoSnapshot> snapshot = Optional.of(history.removeFirst());
+        persist(player);
+        return snapshot;
     }
 
     public static Optional<UndoSnapshot> peekRedo(ServerPlayer player) {
@@ -218,6 +261,7 @@ public final class BuildToolsState {
 
     public static void setPlan(ServerPlayer player, BuildPlan plan) {
         PLANS.put(player.getUUID(), plan);
+        persist(player);
         player.displayClientMessage(Component.translatable("buildtools.message.plan_saved", plan.entries().size()), true);
         sendPlanPreview(player);
     }
@@ -227,23 +271,7 @@ public final class BuildToolsState {
     }
 
     public static void clearPlayer(ServerPlayer player) {
-        UUID uuid = player.getUUID();
-        SELECTIONS.remove(uuid);
-        MODES.remove(uuid);
-        SHAPES.remove(uuid);
-        UNDO.remove(uuid);
-        REDO.remove(uuid);
-        BLUEPRINTS.remove(uuid);
-        PENDING_PASTE_ORIGINS.remove(uuid);
-        REPLACE_TARGETS.remove(uuid);
-        PALETTES.remove(uuid);
-        PLANS.remove(uuid);
-        BRUSH_MODES.remove(uuid);
-        BRUSH_RADII.remove(uuid);
-        GRADIENTS.remove(uuid);
-        PALETTE_MODES.remove(uuid);
-        GRADIENT_DIRECTIONS.remove(uuid);
-        ADVANCED_POINTS.remove(uuid);
+        clearInMemory(player.getUUID());
     }
 
     public static void clearSelection(ServerPlayer player) {
@@ -265,12 +293,14 @@ public final class BuildToolsState {
             positions = positions.subList(0, BuildToolsNetworking.MAX_PREVIEW_POSITIONS);
         }
         PacketDistributor.sendToPlayer(player, new PreviewPayload(positions, true));
+        persist(player);
         player.displayClientMessage(Component.translatable("buildtools.message.paste_preview", positions.size()), true);
     }
 
     public static void clearPendingPaste(ServerPlayer player) {
         PENDING_PASTE_ORIGINS.remove(player.getUUID());
         BuildOperationEngine.clearPendingOperation(player);
+        persist(player);
         sendPreview(player);
     }
 
@@ -348,6 +378,7 @@ public final class BuildToolsState {
             return;
         }
         PRESETS.put(player.getUUID(), new SelectionPreset(selection.second().subtract(selection.first()), shape(player)));
+        persist(player);
         player.displayClientMessage(Component.translatable("buildtools.message.preset_saved"), true);
     }
 
@@ -489,6 +520,7 @@ public final class BuildToolsState {
         if (preview.size() > BuildToolsNetworking.MAX_PREVIEW_POSITIONS) {
             preview = preview.subList(0, BuildToolsNetworking.MAX_PREVIEW_POSITIONS);
         }
+        persist(player);
         PacketDistributor.sendToPlayer(player, new PreviewPayload(preview, false));
     }
 
@@ -706,10 +738,13 @@ public final class BuildToolsState {
     }
 
     private static ToolProfile activeProfile(ServerPlayer player) {
-        if (!player.getMainHandItem().isEmpty()) {
+        if (ToolProfile.isBuildTool(player.getMainHandItem())) {
             return ToolProfile.from(player.getMainHandItem());
         }
-        return ToolProfile.from(player.getOffhandItem());
+        if (ToolProfile.isBuildTool(player.getOffhandItem())) {
+            return ToolProfile.from(player.getOffhandItem());
+        }
+        return ToolProfile.BUILDER;
     }
 
     private static EnumMap<ToolProfile, BuildMode> modes(ServerPlayer player) {
@@ -742,6 +777,462 @@ public final class BuildToolsState {
 
     private static EnumMap<ToolProfile, GradientDirection> gradientDirections(ServerPlayer player) {
         return GRADIENT_DIRECTIONS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static void persist(ServerPlayer player) {
+        BuildToolsPlayerStateData.get(player).putPlayer(player.getUUID(), writeState(player));
+    }
+
+    private static CompoundTag writeState(ServerPlayer player) {
+        UUID uuid = player.getUUID();
+        CompoundTag tag = new CompoundTag();
+        Selection selection = SELECTIONS.get(uuid);
+        if (selection != null) {
+            tag.put("selection", writeSelection(selection));
+        }
+        tag.put("modes", writeEnumMap(MODES.get(uuid)));
+        tag.put("shapes", writeEnumMap(SHAPES.get(uuid)));
+        tag.put("brushModes", writeEnumMap(BRUSH_MODES.get(uuid)));
+        tag.put("brushRadii", writeIntMap(BRUSH_RADII.get(uuid)));
+        tag.put("gradients", writeBooleanMap(GRADIENTS.get(uuid)));
+        tag.put("paletteModes", writeEnumMap(PALETTE_MODES.get(uuid)));
+        tag.put("gradientDirections", writeEnumMap(GRADIENT_DIRECTIONS.get(uuid)));
+        tag.put("palettes", writePaletteMap(PALETTES.get(uuid)));
+        tag.put("undo", writeUndoSnapshots(UNDO.get(uuid)));
+        tag.put("redo", writeUndoSnapshots(REDO.get(uuid)));
+        if (BLUEPRINTS.containsKey(uuid)) {
+            tag.put("blueprint", writeBlueprint(BLUEPRINTS.get(uuid)));
+        }
+        if (REPLACE_TARGETS.containsKey(uuid)) {
+            tag.put("replaceTarget", NbtUtils.writeBlockState(REPLACE_TARGETS.get(uuid)));
+        }
+        if (PRESETS.containsKey(uuid)) {
+            tag.put("preset", writePreset(PRESETS.get(uuid)));
+        }
+        if (PLANS.containsKey(uuid)) {
+            tag.put("plan", writePlan(PLANS.get(uuid)));
+        }
+        List<BlockPos> points = ADVANCED_POINTS.get(uuid);
+        if (points != null && !points.isEmpty()) {
+            tag.put("advancedPoints", writePositions(points));
+        }
+        return tag;
+    }
+
+    private static void readState(ServerPlayer player, CompoundTag tag, HolderLookup.Provider registries) {
+        UUID uuid = player.getUUID();
+        if (tag.contains("selection", Tag.TAG_COMPOUND)) {
+            SELECTIONS.put(uuid, readSelection(uuid, tag.getCompound("selection")));
+        }
+        readBuildModes(tag.getList("modes", Tag.TAG_COMPOUND)).ifPresent(map -> MODES.put(uuid, map));
+        readShapes(tag.getList("shapes", Tag.TAG_COMPOUND)).ifPresent(map -> SHAPES.put(uuid, map));
+        readBrushModes(tag.getList("brushModes", Tag.TAG_COMPOUND)).ifPresent(map -> BRUSH_MODES.put(uuid, map));
+        readIntMap(tag.getList("brushRadii", Tag.TAG_COMPOUND)).ifPresent(map -> BRUSH_RADII.put(uuid, map));
+        readBooleanMap(tag.getList("gradients", Tag.TAG_COMPOUND)).ifPresent(map -> GRADIENTS.put(uuid, map));
+        readPaletteModes(tag.getList("paletteModes", Tag.TAG_COMPOUND)).ifPresent(map -> PALETTE_MODES.put(uuid, map));
+        readGradientDirections(tag.getList("gradientDirections", Tag.TAG_COMPOUND)).ifPresent(map -> GRADIENT_DIRECTIONS.put(uuid, map));
+        readPaletteMap(tag.getList("palettes", Tag.TAG_COMPOUND), registries).ifPresent(map -> PALETTES.put(uuid, map));
+        Deque<UndoSnapshot> undo = readUndoSnapshots(tag.getList("undo", Tag.TAG_COMPOUND), registries);
+        if (!undo.isEmpty()) {
+            UNDO.put(uuid, undo);
+        }
+        Deque<UndoSnapshot> redo = readUndoSnapshots(tag.getList("redo", Tag.TAG_COMPOUND), registries);
+        if (!redo.isEmpty()) {
+            REDO.put(uuid, redo);
+        }
+        if (tag.contains("blueprint", Tag.TAG_COMPOUND)) {
+            BLUEPRINTS.put(uuid, readBlueprint(tag.getCompound("blueprint"), registries));
+        }
+        if (tag.contains("replaceTarget", Tag.TAG_COMPOUND)) {
+            REPLACE_TARGETS.put(uuid, readBlockState(tag.getCompound("replaceTarget"), registries));
+        }
+        if (tag.contains("preset", Tag.TAG_COMPOUND)) {
+            PRESETS.put(uuid, readPreset(tag.getCompound("preset")));
+        }
+        if (tag.contains("plan", Tag.TAG_COMPOUND)) {
+            PLANS.put(uuid, readPlan(tag.getCompound("plan"), registries));
+        }
+        List<BlockPos> points = readPositions(tag.getList("advancedPoints", Tag.TAG_INT_ARRAY));
+        if (!points.isEmpty()) {
+            ADVANCED_POINTS.put(uuid, points);
+            applyAdvancedPoints(player, points);
+        }
+    }
+
+    private static void clearInMemory(UUID uuid) {
+        SELECTIONS.remove(uuid);
+        MODES.remove(uuid);
+        SHAPES.remove(uuid);
+        UNDO.remove(uuid);
+        REDO.remove(uuid);
+        BLUEPRINTS.remove(uuid);
+        PENDING_PASTE_ORIGINS.remove(uuid);
+        REPLACE_TARGETS.remove(uuid);
+        PALETTES.remove(uuid);
+        PRESETS.remove(uuid);
+        PLANS.remove(uuid);
+        BRUSH_MODES.remove(uuid);
+        BRUSH_RADII.remove(uuid);
+        GRADIENTS.remove(uuid);
+        PALETTE_MODES.remove(uuid);
+        GRADIENT_DIRECTIONS.remove(uuid);
+        ADVANCED_POINTS.remove(uuid);
+    }
+
+    private static CompoundTag writeSelection(Selection selection) {
+        CompoundTag tag = new CompoundTag();
+        if (selection.dimension() != null) {
+            tag.putString("dimension", selection.dimension().location().toString());
+        }
+        selection.firstOptional().ifPresent(pos -> tag.put("first", NbtUtils.writeBlockPos(pos)));
+        selection.secondOptional().ifPresent(pos -> tag.put("second", NbtUtils.writeBlockPos(pos)));
+        tag.putString("shape", selection.shape().name());
+        tag.put("points", writePositions(selection.points()));
+        return tag;
+    }
+
+    private static Selection readSelection(UUID owner, CompoundTag tag) {
+        ResourceKey<Level> dimension = readDimension(tag.getString("dimension")).orElse(null);
+        BlockPos first = NbtUtils.readBlockPos(tag, "first").orElse(null);
+        BlockPos second = NbtUtils.readBlockPos(tag, "second").orElse(null);
+        SelectionShape shape = readEnum(SelectionShape.class, tag.getString("shape"), SelectionShape.CUBOID);
+        List<BlockPos> points = readPositions(tag.getList("points", Tag.TAG_INT_ARRAY));
+        return new Selection(owner, dimension, first, second, shape, points);
+    }
+
+    private static ListTag writePositions(List<BlockPos> positions) {
+        ListTag list = new ListTag();
+        for (BlockPos pos : positions) {
+            list.add(NbtUtils.writeBlockPos(pos));
+        }
+        return list;
+    }
+
+    private static List<BlockPos> readPositions(ListTag list) {
+        List<BlockPos> positions = new ArrayList<>();
+        for (int i = 0; i < list.size(); i++) {
+            int[] raw = list.getIntArray(i);
+            if (raw.length == 3) {
+                positions.add(new BlockPos(raw[0], raw[1], raw[2]).immutable());
+            }
+        }
+        return List.copyOf(positions);
+    }
+
+    private static <E extends Enum<E>> ListTag writeEnumMap(EnumMap<ToolProfile, E> map) {
+        ListTag list = new ListTag();
+        if (map == null) {
+            return list;
+        }
+        for (Map.Entry<ToolProfile, E> entry : map.entrySet()) {
+            CompoundTag tag = new CompoundTag();
+            tag.putString("profile", entry.getKey().name());
+            tag.putString("value", entry.getValue().name());
+            list.add(tag);
+        }
+        return list;
+    }
+
+    private static ListTag writeIntMap(EnumMap<ToolProfile, Integer> map) {
+        ListTag list = new ListTag();
+        if (map == null) {
+            return list;
+        }
+        for (Map.Entry<ToolProfile, Integer> entry : map.entrySet()) {
+            CompoundTag tag = new CompoundTag();
+            tag.putString("profile", entry.getKey().name());
+            tag.putInt("value", entry.getValue());
+            list.add(tag);
+        }
+        return list;
+    }
+
+    private static ListTag writeBooleanMap(EnumMap<ToolProfile, Boolean> map) {
+        ListTag list = new ListTag();
+        if (map == null) {
+            return list;
+        }
+        for (Map.Entry<ToolProfile, Boolean> entry : map.entrySet()) {
+            CompoundTag tag = new CompoundTag();
+            tag.putString("profile", entry.getKey().name());
+            tag.putBoolean("value", entry.getValue());
+            list.add(tag);
+        }
+        return list;
+    }
+
+    private static Optional<EnumMap<ToolProfile, BuildMode>> readBuildModes(ListTag list) {
+        return readEnumMap(list, BuildMode.class);
+    }
+
+    private static Optional<EnumMap<ToolProfile, SelectionShape>> readShapes(ListTag list) {
+        return readEnumMap(list, SelectionShape.class);
+    }
+
+    private static Optional<EnumMap<ToolProfile, BrushMode>> readBrushModes(ListTag list) {
+        return readEnumMap(list, BrushMode.class);
+    }
+
+    private static Optional<EnumMap<ToolProfile, PaletteMode>> readPaletteModes(ListTag list) {
+        return readEnumMap(list, PaletteMode.class);
+    }
+
+    private static Optional<EnumMap<ToolProfile, GradientDirection>> readGradientDirections(ListTag list) {
+        return readEnumMap(list, GradientDirection.class);
+    }
+
+    private static <E extends Enum<E>> Optional<EnumMap<ToolProfile, E>> readEnumMap(ListTag list, Class<E> enumClass) {
+        EnumMap<ToolProfile, E> map = new EnumMap<>(ToolProfile.class);
+        for (int i = 0; i < list.size(); i++) {
+            CompoundTag tag = list.getCompound(i);
+            readProfile(tag.getString("profile")).ifPresent(profile ->
+                    map.put(profile, readEnum(enumClass, tag.getString("value"), null)));
+        }
+        map.values().removeIf(java.util.Objects::isNull);
+        return map.isEmpty() ? Optional.empty() : Optional.of(map);
+    }
+
+    private static Optional<EnumMap<ToolProfile, Integer>> readIntMap(ListTag list) {
+        EnumMap<ToolProfile, Integer> map = new EnumMap<>(ToolProfile.class);
+        for (int i = 0; i < list.size(); i++) {
+            CompoundTag tag = list.getCompound(i);
+            readProfile(tag.getString("profile")).ifPresent(profile -> map.put(profile, tag.getInt("value")));
+        }
+        return map.isEmpty() ? Optional.empty() : Optional.of(map);
+    }
+
+    private static Optional<EnumMap<ToolProfile, Boolean>> readBooleanMap(ListTag list) {
+        EnumMap<ToolProfile, Boolean> map = new EnumMap<>(ToolProfile.class);
+        for (int i = 0; i < list.size(); i++) {
+            CompoundTag tag = list.getCompound(i);
+            readProfile(tag.getString("profile")).ifPresent(profile -> map.put(profile, tag.getBoolean("value")));
+        }
+        return map.isEmpty() ? Optional.empty() : Optional.of(map);
+    }
+
+    private static ListTag writePaletteMap(EnumMap<ToolProfile, List<PaletteEntry>> map) {
+        ListTag list = new ListTag();
+        if (map == null) {
+            return list;
+        }
+        for (Map.Entry<ToolProfile, List<PaletteEntry>> entry : map.entrySet()) {
+            CompoundTag tag = new CompoundTag();
+            tag.putString("profile", entry.getKey().name());
+            ListTag entries = new ListTag();
+            for (PaletteEntry paletteEntry : entry.getValue()) {
+                CompoundTag entryTag = new CompoundTag();
+                entryTag.put("state", NbtUtils.writeBlockState(paletteEntry.state()));
+                entryTag.putInt("weight", paletteEntry.weight());
+                entries.add(entryTag);
+            }
+            tag.put("entries", entries);
+            list.add(tag);
+        }
+        return list;
+    }
+
+    private static Optional<EnumMap<ToolProfile, List<PaletteEntry>>> readPaletteMap(ListTag list, HolderLookup.Provider registries) {
+        EnumMap<ToolProfile, List<PaletteEntry>> map = new EnumMap<>(ToolProfile.class);
+        for (int i = 0; i < list.size(); i++) {
+            CompoundTag tag = list.getCompound(i);
+            Optional<ToolProfile> profile = readProfile(tag.getString("profile"));
+            if (profile.isEmpty()) {
+                continue;
+            }
+            List<PaletteEntry> entries = new ArrayList<>();
+            ListTag rawEntries = tag.getList("entries", Tag.TAG_COMPOUND);
+            for (int j = 0; j < rawEntries.size(); j++) {
+                CompoundTag entryTag = rawEntries.getCompound(j);
+                BlockState state = readBlockState(entryTag.getCompound("state"), registries);
+                if (!state.isAir()) {
+                    entries.add(new PaletteEntry(state, entryTag.getInt("weight")));
+                }
+            }
+            if (!entries.isEmpty()) {
+                map.put(profile.get(), List.copyOf(entries));
+            }
+        }
+        return map.isEmpty() ? Optional.empty() : Optional.of(map);
+    }
+
+    private static CompoundTag writeBlueprint(Blueprint blueprint) {
+        CompoundTag tag = new CompoundTag();
+        ListTag entries = new ListTag();
+        for (Blueprint.Entry entry : blueprint.entries()) {
+            CompoundTag entryTag = new CompoundTag();
+            entryTag.put("offset", NbtUtils.writeBlockPos(entry.offset()));
+            entryTag.put("state", NbtUtils.writeBlockState(entry.state()));
+            entries.add(entryTag);
+        }
+        tag.put("entries", entries);
+        return tag;
+    }
+
+    private static Blueprint readBlueprint(CompoundTag tag, HolderLookup.Provider registries) {
+        List<Blueprint.Entry> entries = new ArrayList<>();
+        ListTag rawEntries = tag.getList("entries", Tag.TAG_COMPOUND);
+        for (int i = 0; i < rawEntries.size(); i++) {
+            CompoundTag entryTag = rawEntries.getCompound(i);
+            Optional<BlockPos> offset = NbtUtils.readBlockPos(entryTag, "offset");
+            BlockState state = readBlockState(entryTag.getCompound("state"), registries);
+            if (offset.isPresent() && !state.isAir()) {
+                entries.add(new Blueprint.Entry(offset.get(), state));
+            }
+        }
+        return new Blueprint(List.copyOf(entries));
+    }
+
+    private static CompoundTag writePlan(BuildPlan plan) {
+        CompoundTag tag = new CompoundTag();
+        tag.putString("dimension", plan.dimension().location().toString());
+        ListTag entries = new ListTag();
+        for (BuildPlan.Entry entry : plan.entries()) {
+            CompoundTag entryTag = new CompoundTag();
+            entryTag.put("pos", NbtUtils.writeBlockPos(entry.pos()));
+            entryTag.put("state", NbtUtils.writeBlockState(entry.state()));
+            entries.add(entryTag);
+        }
+        tag.put("entries", entries);
+        return tag;
+    }
+
+    private static BuildPlan readPlan(CompoundTag tag, HolderLookup.Provider registries) {
+        ResourceKey<Level> dimension = readDimension(tag.getString("dimension")).orElse(Level.OVERWORLD);
+        List<BuildPlan.Entry> entries = new ArrayList<>();
+        ListTag rawEntries = tag.getList("entries", Tag.TAG_COMPOUND);
+        for (int i = 0; i < rawEntries.size(); i++) {
+            CompoundTag entryTag = rawEntries.getCompound(i);
+            Optional<BlockPos> pos = NbtUtils.readBlockPos(entryTag, "pos");
+            BlockState state = readBlockState(entryTag.getCompound("state"), registries);
+            if (pos.isPresent() && !state.isAir()) {
+                entries.add(new BuildPlan.Entry(pos.get(), state));
+            }
+        }
+        return new BuildPlan(dimension, List.copyOf(entries));
+    }
+
+    private static CompoundTag writePreset(SelectionPreset preset) {
+        CompoundTag tag = new CompoundTag();
+        tag.put("offset", NbtUtils.writeBlockPos(preset.offset()));
+        tag.putString("shape", preset.shape().name());
+        return tag;
+    }
+
+    private static SelectionPreset readPreset(CompoundTag tag) {
+        return new SelectionPreset(
+                NbtUtils.readBlockPos(tag, "offset").orElse(BlockPos.ZERO),
+                readEnum(SelectionShape.class, tag.getString("shape"), SelectionShape.CUBOID));
+    }
+
+    private static ListTag writeUndoSnapshots(Deque<UndoSnapshot> snapshots) {
+        ListTag list = new ListTag();
+        if (snapshots == null) {
+            return list;
+        }
+        for (UndoSnapshot snapshot : snapshots) {
+            CompoundTag tag = new CompoundTag();
+            tag.putString("dimension", snapshot.dimension().location().toString());
+            ListTag entries = new ListTag();
+            for (UndoSnapshot.Entry entry : snapshot.entries()) {
+                CompoundTag entryTag = new CompoundTag();
+                entryTag.put("pos", NbtUtils.writeBlockPos(entry.pos()));
+                entryTag.put("previousState", NbtUtils.writeBlockState(entry.previousState()));
+                if (entry.previousBlockEntity() != null) {
+                    entryTag.put("previousBlockEntity", entry.previousBlockEntity().copy());
+                }
+                entryTag.put("redoneState", NbtUtils.writeBlockState(entry.redoneState()));
+                if (entry.redoneBlockEntity() != null) {
+                    entryTag.put("redoneBlockEntity", entry.redoneBlockEntity().copy());
+                }
+                entryTag.putBoolean("mayRestorePrevious", entry.mayRestorePrevious());
+                entries.add(entryTag);
+            }
+            tag.put("entries", entries);
+            tag.put("refund", writeRefund(snapshot.refund()));
+            list.add(tag);
+        }
+        return list;
+    }
+
+    private static Deque<UndoSnapshot> readUndoSnapshots(ListTag list, HolderLookup.Provider registries) {
+        Deque<UndoSnapshot> snapshots = new ArrayDeque<>();
+        for (int i = 0; i < list.size(); i++) {
+            CompoundTag tag = list.getCompound(i);
+            ResourceKey<Level> dimension = readDimension(tag.getString("dimension")).orElse(Level.OVERWORLD);
+            List<UndoSnapshot.Entry> entries = new ArrayList<>();
+            ListTag rawEntries = tag.getList("entries", Tag.TAG_COMPOUND);
+            for (int j = 0; j < rawEntries.size(); j++) {
+                CompoundTag entryTag = rawEntries.getCompound(j);
+                Optional<BlockPos> pos = NbtUtils.readBlockPos(entryTag, "pos");
+                if (pos.isEmpty()) {
+                    continue;
+                }
+                CompoundTag previousBlockEntity = entryTag.contains("previousBlockEntity", Tag.TAG_COMPOUND)
+                        ? entryTag.getCompound("previousBlockEntity").copy()
+                        : null;
+                CompoundTag redoneBlockEntity = entryTag.contains("redoneBlockEntity", Tag.TAG_COMPOUND)
+                        ? entryTag.getCompound("redoneBlockEntity").copy()
+                        : null;
+                entries.add(new UndoSnapshot.Entry(
+                        pos.get(),
+                        readBlockState(entryTag.getCompound("previousState"), registries),
+                        previousBlockEntity,
+                        readBlockState(entryTag.getCompound("redoneState"), registries),
+                        redoneBlockEntity,
+                        entryTag.getBoolean("mayRestorePrevious")));
+            }
+            if (!entries.isEmpty()) {
+                snapshots.addLast(new UndoSnapshot(dimension, List.copyOf(entries), readRefund(tag.getList("refund", Tag.TAG_COMPOUND))));
+            }
+        }
+        return snapshots;
+    }
+
+    private static ListTag writeRefund(Map<ItemStackKey, Integer> refund) {
+        ListTag list = new ListTag();
+        for (Map.Entry<ItemStackKey, Integer> entry : refund.entrySet()) {
+            CompoundTag tag = new CompoundTag();
+            tag.putString("item", entry.getKey().displayId());
+            tag.putInt("count", entry.getValue());
+            list.add(tag);
+        }
+        return list;
+    }
+
+    private static Map<ItemStackKey, Integer> readRefund(ListTag list) {
+        Map<ItemStackKey, Integer> refund = new HashMap<>();
+        for (int i = 0; i < list.size(); i++) {
+            CompoundTag tag = list.getCompound(i);
+            Item item = BuiltInRegistries.ITEM.getOptional(ResourceLocation.parse(tag.getString("item"))).orElse(Items.AIR);
+            if (item != Items.AIR) {
+                refund.put(new ItemStackKey(item), tag.getInt("count"));
+            }
+        }
+        return Map.copyOf(refund);
+    }
+
+    private static Optional<ResourceKey<Level>> readDimension(String id) {
+        if (id == null || id.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.of(ResourceKey.create(Registries.DIMENSION, ResourceLocation.parse(id)));
+    }
+
+    private static BlockState readBlockState(CompoundTag tag, HolderLookup.Provider registries) {
+        HolderLookup.RegistryLookup<Block> blocks = registries.lookupOrThrow(Registries.BLOCK);
+        return NbtUtils.readBlockState(blocks, tag);
+    }
+
+    private static Optional<ToolProfile> readProfile(String value) {
+        return Optional.ofNullable(readEnum(ToolProfile.class, value, null));
+    }
+
+    private static <E extends Enum<E>> E readEnum(Class<E> enumClass, String value, E fallback) {
+        try {
+            return value == null || value.isBlank() ? fallback : Enum.valueOf(enumClass, value);
+        } catch (IllegalArgumentException ignored) {
+            return fallback;
+        }
     }
 
     private static void transformBlueprint(ServerPlayer player, String messageKey, java.util.function.Function<BlockPos, BlockPos> transform) {

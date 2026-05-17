@@ -11,7 +11,7 @@
   "item.buildtools.builder_brush": "Builder Brush",
   "item.buildtools.builder_brush.tooltip": "Right-click previews/paints brush shapes. Left-click block opens brush menu.",
   "item.buildtools.area_breaker": "Area Breaker",
-  "item.buildtools.area_breaker.tooltip": "Right-click previews/breaks the selected area. Left-click block opens breaker menu.",
+  "item.buildtools.area_breaker.tooltip": "Right-click previews/removes the selected area without drops. Left-click block opens breaker menu.",
   "item.buildtools.blueprint_trowel": "Blueprint Trowel",
   "item.buildtools.blueprint_trowel.tooltip": "Right-click copies or sneak-pastes blueprints. Left-click block opens copy/paste controls.",
   "item.buildtools.undo_token": "Undo Token",

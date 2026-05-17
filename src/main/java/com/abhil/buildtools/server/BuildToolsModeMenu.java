@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.ChatFormatting;
+import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -46,7 +47,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
     public static void open(ServerPlayer player) {
         player.openMenu(new SimpleMenuProvider(
                 (containerId, inventory, ignored) -> new BuildToolsModeMenu(containerId, inventory, player),
-                Component.translatable("buildtools.menu.title")));
+                menuTitle(player)));
     }
 
     @Override
@@ -133,13 +134,13 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(1, utilityItem(Items.ENDER_EYE, "buildtools.menu.rotate_selection", "buildtools.menu.rotate_selection.description"));
         menuItems.setItem(2, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.save_preset", "buildtools.menu.save_preset.description"));
         menuItems.setItem(3, utilityItem(Items.BOOK, "buildtools.menu.load_preset", "buildtools.menu.load_preset.description"));
+        menuItems.setItem(4, utilityItem(Items.ARROW, "buildtools.menu.nudge_west", "buildtools.menu.nudge.description"));
+        menuItems.setItem(5, utilityItem(Items.ARROW, "buildtools.menu.nudge_east", "buildtools.menu.nudge.description"));
+        menuItems.setItem(6, utilityItem(Items.ARROW, "buildtools.menu.nudge_down", "buildtools.menu.nudge.description"));
+        menuItems.setItem(7, utilityItem(Items.ARROW, "buildtools.menu.nudge_up", "buildtools.menu.nudge.description"));
+        menuItems.setItem(8, utilityItem(Items.ARROW, "buildtools.menu.nudge_north", "buildtools.menu.nudge.description"));
         populateShapes(9);
-        menuItems.setItem(18, utilityItem(Items.ARROW, "buildtools.menu.nudge_west", "buildtools.menu.nudge.description"));
-        menuItems.setItem(19, utilityItem(Items.ARROW, "buildtools.menu.nudge_east", "buildtools.menu.nudge.description"));
-        menuItems.setItem(20, utilityItem(Items.ARROW, "buildtools.menu.nudge_down", "buildtools.menu.nudge.description"));
-        menuItems.setItem(21, utilityItem(Items.ARROW, "buildtools.menu.nudge_up", "buildtools.menu.nudge.description"));
-        menuItems.setItem(22, utilityItem(Items.ARROW, "buildtools.menu.nudge_north", "buildtools.menu.nudge.description"));
-        menuItems.setItem(23, utilityItem(Items.ARROW, "buildtools.menu.nudge_south", "buildtools.menu.nudge.description"));
+        menuItems.setItem(22, utilityItem(Items.ARROW, "buildtools.menu.nudge_south", "buildtools.menu.nudge.description"));
     }
 
     private void populateBrushMenu() {
@@ -156,7 +157,16 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
 
     private void populateBreakerMenu() {
         menuItems.setItem(0, utilityItem(Items.BARRIER, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
+        menuItems.setItem(1, utilityItem(Items.ENDER_EYE, "buildtools.menu.rotate_selection", "buildtools.menu.rotate_selection.description"));
+        menuItems.setItem(2, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.save_preset", "buildtools.menu.save_preset.description"));
+        menuItems.setItem(3, utilityItem(Items.BOOK, "buildtools.menu.load_preset", "buildtools.menu.load_preset.description"));
+        menuItems.setItem(4, utilityItem(Items.ARROW, "buildtools.menu.nudge_west", "buildtools.menu.nudge.description"));
+        menuItems.setItem(5, utilityItem(Items.ARROW, "buildtools.menu.nudge_east", "buildtools.menu.nudge.description"));
+        menuItems.setItem(6, utilityItem(Items.ARROW, "buildtools.menu.nudge_down", "buildtools.menu.nudge.description"));
+        menuItems.setItem(7, utilityItem(Items.ARROW, "buildtools.menu.nudge_up", "buildtools.menu.nudge.description"));
+        menuItems.setItem(8, utilityItem(Items.ARROW, "buildtools.menu.nudge_north", "buildtools.menu.nudge.description"));
         populateShapes(9);
+        menuItems.setItem(22, utilityItem(Items.ARROW, "buildtools.menu.nudge_south", "buildtools.menu.nudge.description"));
     }
 
     private void populateTrowelMenu() {
@@ -248,12 +258,12 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case 1 -> BuildToolsState.rotateSelection(player);
             case 2 -> BuildToolsState.savePreset(player);
             case 3 -> BuildToolsState.loadPreset(player);
-            case 18 -> BuildToolsState.nudgeSelection(player, net.minecraft.core.Direction.WEST);
-            case 19 -> BuildToolsState.nudgeSelection(player, net.minecraft.core.Direction.EAST);
-            case 20 -> BuildToolsState.nudgeSelection(player, net.minecraft.core.Direction.DOWN);
-            case 21 -> BuildToolsState.nudgeSelection(player, net.minecraft.core.Direction.UP);
-            case 22 -> BuildToolsState.nudgeSelection(player, net.minecraft.core.Direction.NORTH);
-            case 23 -> BuildToolsState.nudgeSelection(player, net.minecraft.core.Direction.SOUTH);
+            case 4 -> BuildToolsState.nudgeSelection(player, Direction.WEST);
+            case 5 -> BuildToolsState.nudgeSelection(player, Direction.EAST);
+            case 6 -> BuildToolsState.nudgeSelection(player, Direction.DOWN);
+            case 7 -> BuildToolsState.nudgeSelection(player, Direction.UP);
+            case 8 -> BuildToolsState.nudgeSelection(player, Direction.NORTH);
+            case 22 -> BuildToolsState.nudgeSelection(player, Direction.SOUTH);
             default -> {
                 return handleShapeClick(player, slotId, 9);
             }
@@ -277,11 +287,22 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
     }
 
     private boolean handleBreakerClick(ServerPlayer player, int slotId) {
-        if (slotId == 0) {
-            BuildToolsState.clearSelection(player);
-            return true;
+        switch (slotId) {
+            case 0 -> BuildToolsState.clearSelection(player);
+            case 1 -> BuildToolsState.rotateSelection(player);
+            case 2 -> BuildToolsState.savePreset(player);
+            case 3 -> BuildToolsState.loadPreset(player);
+            case 4 -> BuildToolsState.nudgeSelection(player, Direction.WEST);
+            case 5 -> BuildToolsState.nudgeSelection(player, Direction.EAST);
+            case 6 -> BuildToolsState.nudgeSelection(player, Direction.DOWN);
+            case 7 -> BuildToolsState.nudgeSelection(player, Direction.UP);
+            case 8 -> BuildToolsState.nudgeSelection(player, Direction.NORTH);
+            case 22 -> BuildToolsState.nudgeSelection(player, Direction.SOUTH);
+            default -> {
+                return handleShapeClick(player, slotId, 9);
+            }
         }
-        return handleShapeClick(player, slotId, 9);
+        return true;
     }
 
     private boolean handleTrowelClick(ServerPlayer player, int slotId) {
@@ -321,6 +342,24 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         ItemStack stack = new ItemStack(item);
         stack.set(DataComponents.CUSTOM_NAME, name);
         return stack;
+    }
+
+    private static Component menuTitle(ServerPlayer player) {
+        ItemStack heldTool = heldTool(player);
+        if (!heldTool.isEmpty()) {
+            return heldTool.getHoverName();
+        }
+        return Component.translatable("buildtools.menu.title");
+    }
+
+    private static ItemStack heldTool(ServerPlayer player) {
+        if (ToolProfile.isBuildTool(player.getMainHandItem())) {
+            return player.getMainHandItem();
+        }
+        if (ToolProfile.isBuildTool(player.getOffhandItem())) {
+            return player.getOffhandItem();
+        }
+        return ItemStack.EMPTY;
     }
 
     private ItemStack modeItem(net.minecraft.world.item.Item item, BuildMode mode) {
