@@ -119,6 +119,7 @@ public final class BuildOperationEngine {
         }
 
         boolean trackHistory = hasHistoryItems(player);
+        Map<ItemStackKey, Integer> producedDrops = dropsForChanges(player, level, undo);
         String label = advanced ? "advanced builder" : "builder";
         return previewOrConfirm(player, level, new PendingOperation(
                 level.dimension(),
@@ -127,7 +128,7 @@ public final class BuildOperationEngine {
                 List.copyOf(targets),
                 List.copyOf(undo),
                 Map.copyOf(refund),
-                trackHistory ? dropsForChanges(player, level, undo) : Map.of(),
+                producedDrops,
                 trackHistory,
                 false,
                 signature(label, level, positions, targets)));
@@ -171,6 +172,7 @@ public final class BuildOperationEngine {
         }
 
         boolean trackHistory = hasHistoryItems(player);
+        Map<ItemStackKey, Integer> producedDrops = dropsForChanges(player, level, undo);
         String label = "area break";
         return previewOrConfirm(player, level, new PendingOperation(
                 level.dimension(),
@@ -179,7 +181,7 @@ public final class BuildOperationEngine {
                 List.copyOf(targets),
                 List.copyOf(undo),
                 Map.of(),
-                trackHistory ? dropsForChanges(player, level, undo) : Map.of(),
+                producedDrops,
                 trackHistory,
                 true,
                 signature(label, level, positions, targets)));
@@ -273,6 +275,7 @@ public final class BuildOperationEngine {
         }
         String label = "build plan";
         boolean trackHistory = hasHistoryItems(player);
+        Map<ItemStackKey, Integer> producedDrops = dropsForChanges(player, level, undo);
         return previewOrConfirm(player, level, new PendingOperation(
                 level.dimension(),
                 label,
@@ -280,7 +283,7 @@ public final class BuildOperationEngine {
                 List.copyOf(targets),
                 List.copyOf(undo),
                 Map.copyOf(refund),
-                trackHistory ? dropsForChanges(player, level, undo) : Map.of(),
+                producedDrops,
                 trackHistory,
                 false,
                 signature(label, level, positions, targets)));
@@ -332,6 +335,7 @@ public final class BuildOperationEngine {
             refund.merge(new ItemStackKey(target.getBlock().asItem()), 1, Integer::sum);
         }
         boolean trackHistory = hasHistoryItems(player);
+        Map<ItemStackKey, Integer> producedDrops = dropsForChanges(player, level, undo);
         String label = "brush";
         return previewOrConfirm(player, level, new PendingOperation(
                 level.dimension(),
@@ -340,7 +344,7 @@ public final class BuildOperationEngine {
                 List.copyOf(targets),
                 List.copyOf(undo),
                 Map.copyOf(refund),
-                trackHistory ? dropsForChanges(player, level, undo) : Map.of(),
+                producedDrops,
                 trackHistory,
                 false,
                 signature(label + ":" + brushMode.name() + ":" + radius, level, positions, targets)));
@@ -404,6 +408,7 @@ public final class BuildOperationEngine {
             }
         }
         boolean trackHistory = hasHistoryItems(player);
+        Map<ItemStackKey, Integer> producedDrops = dropsForChanges(player, level, undo);
         String label = "smooth brush";
         return previewOrConfirm(player, level, new PendingOperation(
                 level.dimension(),
@@ -412,7 +417,7 @@ public final class BuildOperationEngine {
                 List.copyOf(targets),
                 List.copyOf(undo),
                 Map.copyOf(refund),
-                trackHistory ? dropsForChanges(player, level, undo) : Map.of(),
+                producedDrops,
                 trackHistory,
                 false,
                 signature(label + ":" + radius, level, positions, targets)));
@@ -480,7 +485,7 @@ public final class BuildOperationEngine {
             refund.merge(new ItemStackKey(entry.state().getBlock().asItem()), 1, Integer::sum);
         }
         boolean trackHistory = hasHistoryItems(player);
-        return enqueue(player, level, positions, targets, undo, refund, trackHistory ? dropsForChanges(player, level, undo) : Map.of(), trackHistory);
+        return enqueue(player, level, positions, targets, undo, refund, dropsForChanges(player, level, undo), trackHistory);
     }
 
     public static boolean previewOrConfirmBlueprintPaste(ServerPlayer player, BlockPos origin) {
@@ -622,7 +627,7 @@ public final class BuildOperationEngine {
         }
 
         boolean trackHistory = hasHistoryItems(player);
-        boolean queued = enqueue(player, level, positions, targets, List.copyOf(undoEntries), snapshot.refund(), trackHistory ? snapshot.producedDrops() : Map.of(), trackHistory);
+        boolean queued = enqueue(player, level, positions, targets, List.copyOf(undoEntries), snapshot.refund(), snapshot.producedDrops(), trackHistory);
         if (queued) {
             BuildToolsState.takeRedo(player);
         }
@@ -652,15 +657,22 @@ public final class BuildOperationEngine {
             if (operation.positions().isEmpty()) {
                 QUEUE.remove();
                 UndoSnapshot snapshot = new UndoSnapshot(operation.dimension(), operation.undoEntries(), operation.refund(), operation.producedDrops());
+                int drops = operation.producedDrops().values().stream().mapToInt(Integer::intValue).sum();
                 if (operation.trackHistory()) {
                     BuildToolsState.setUndo(operation.player(), snapshot);
                 } else {
+                    if (drops > 0 && !operation.player().gameMode.isCreative()) {
+                        BuildingStorageManager.depositOrGive(operation.player(), operation.producedDrops());
+                    }
                     BuildToolsState.clearHistory(operation.player());
                 }
-                int drops = operation.producedDrops().values().stream().mapToInt(Integer::intValue).sum();
-                operation.player().displayClientMessage(drops > 0
-                        ? Component.translatable("buildtools.message.applied_collected", operation.undoEntries().size(), drops)
-                        : Component.translatable("buildtools.message.applied", operation.undoEntries().size()), true);
+                Component message = Component.translatable("buildtools.message.applied", operation.undoEntries().size());
+                if (drops > 0) {
+                    message = operation.trackHistory()
+                            ? Component.translatable("buildtools.message.applied_collected", operation.undoEntries().size(), drops)
+                            : Component.translatable("buildtools.message.applied_deposited", operation.undoEntries().size(), drops);
+                }
+                operation.player().displayClientMessage(message, true);
             } else if (applied == 0) {
                 QUEUE.remove();
             }
@@ -704,10 +716,10 @@ public final class BuildOperationEngine {
     }
 
     private static String dropPreviewLine(PendingOperation operation) {
-        if (!operation.trackHistory()) {
-            return "No undo or redo token | drops behave normally";
-        }
         int drops = operation.producedDrops().values().stream().mapToInt(Integer::intValue).sum();
+        if (!operation.trackHistory()) {
+            return drops <= 0 ? "No undo or redo token | no history" : "Sends " + drops + " drops to linked storage";
+        }
         return drops <= 0 ? "" : "Stores " + drops + " drops in history";
     }
 
@@ -766,12 +778,12 @@ public final class BuildOperationEngine {
             BlockState target = operation.targetStates().remove(0);
             BlockState previous = operation.level().getBlockState(pos);
             if (target.isAir()) {
-                operation.level().destroyBlock(pos, !operation.trackHistory(), operation.player());
+                operation.level().destroyBlock(pos, false, operation.player());
                 applied++;
                 continue;
             }
             if (!previous.isAir() && !previous.canBeReplaced()) {
-                operation.level().destroyBlock(pos, !operation.trackHistory(), operation.player());
+                operation.level().destroyBlock(pos, false, operation.player());
             }
             restoreBlock(operation.level(), pos, target, entry.redoneBlockEntity());
             applied++;

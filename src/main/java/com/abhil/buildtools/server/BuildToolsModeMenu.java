@@ -1,6 +1,7 @@
 package com.abhil.buildtools.server;
 
 import com.abhil.buildtools.registry.ModMenus;
+import com.abhil.buildtools.registry.ModItems;
 import com.abhil.buildtools.shape.BrushMode;
 import com.abhil.buildtools.shape.BuildMode;
 import com.abhil.buildtools.shape.SelectionShape;
@@ -16,11 +17,14 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.SimpleMenuProvider;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.ItemLore;
@@ -226,8 +230,10 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
                     yield true;
                 }
                 if (slotId == 0 && BuildToolsState.undoCount(player) > 0) {
-                    BuildOperationEngine.undo(player);
-                    yield true;
+                    if (BuildOperationEngine.undo(player)) {
+                        damageHeldHistoryToken(player, ModItems.UNDO_TOKEN.get());
+                        yield true;
+                    }
                 }
                 yield false;
             }
@@ -236,13 +242,34 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
                     yield true;
                 }
                 if (slotId == 0 && BuildToolsState.redoCount(player) > 0) {
-                    BuildOperationEngine.redo(player);
-                    yield true;
+                    if (BuildOperationEngine.redo(player)) {
+                        damageHeldHistoryToken(player, ModItems.REDO_TOKEN.get());
+                        yield true;
+                    }
                 }
                 yield false;
             }
             default -> handleBuilderClick(player, slotId);
         };
+    }
+
+    private static void damageHeldHistoryToken(ServerPlayer player, Item item) {
+        if (player.gameMode.isCreative()) {
+            return;
+        }
+        if (!damageHeldHistoryToken(player, InteractionHand.MAIN_HAND, item)) {
+            damageHeldHistoryToken(player, InteractionHand.OFF_HAND, item);
+        }
+    }
+
+    private static boolean damageHeldHistoryToken(ServerPlayer player, InteractionHand hand, Item item) {
+        ItemStack stack = player.getItemInHand(hand);
+        if (!stack.is(item)) {
+            return false;
+        }
+        stack.hurtAndBreak(1, player.serverLevel(), player,
+                broken -> player.onEquippedItemBroken(broken, LivingEntity.getSlotForHand(hand)));
+        return true;
     }
 
     private boolean handleBuilderClick(ServerPlayer player, int slotId) {

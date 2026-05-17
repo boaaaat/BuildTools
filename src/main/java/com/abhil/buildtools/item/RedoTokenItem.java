@@ -4,6 +4,7 @@ import com.abhil.buildtools.server.BuildOperationEngine;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResultHolder;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -18,7 +19,8 @@ public final class RedoTokenItem extends BuildToolItem {
         ItemStack stack = player.getItemInHand(usedHand);
         if (player instanceof ServerPlayer serverPlayer) {
             if (BuildOperationEngine.redo(serverPlayer) && !serverPlayer.gameMode.isCreative()) {
-                stack.shrink(1);
+                stack.hurtAndBreak(1, serverPlayer.serverLevel(), serverPlayer,
+                        item -> serverPlayer.onEquippedItemBroken(item, LivingEntity.getSlotForHand(usedHand)));
             }
         }
         return InteractionResultHolder.sidedSuccess(stack, level.isClientSide());

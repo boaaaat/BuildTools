@@ -24,23 +24,23 @@ public final class ModItems {
     public static final DeferredItem<Item> ADVANCED_SELECTION_STAFF = ITEMS.register("advanced_selection_staff",
             () -> new AdvancedSelectionStaffItem(new Item.Properties().stacksTo(1)));
     public static final DeferredItem<Item> BUILDER_WAND = ITEMS.register("builder_wand",
-            () -> new BuilderWandItem(new Item.Properties().stacksTo(1).durability(512)));
+            () -> new BuilderWandItem(new Item.Properties().stacksTo(1).durability(128)));
     public static final DeferredItem<Item> ADVANCED_BUILDER_WAND = ITEMS.register("advanced_builder_wand",
-            () -> new AdvancedBuilderWandItem(new Item.Properties().stacksTo(1).durability(1024)));
+            () -> new AdvancedBuilderWandItem(new Item.Properties().stacksTo(1).durability(128)));
     public static final DeferredItem<Item> BUILDER_BRUSH = ITEMS.register("builder_brush",
-            () -> new BuilderBrushItem(new Item.Properties().stacksTo(1).durability(512)));
+            () -> new BuilderBrushItem(new Item.Properties().stacksTo(1).durability(128)));
     public static final DeferredItem<Item> AREA_BREAKER = ITEMS.register("area_breaker",
-            () -> new AreaBreakerItem(new Item.Properties().stacksTo(1).durability(512)));
+            () -> new AreaBreakerItem(new Item.Properties().stacksTo(1).durability(128)));
     public static final DeferredItem<Item> BLUEPRINT_TROWEL = ITEMS.register("blueprint_trowel",
-            () -> new BlueprintTrowelItem(new Item.Properties().stacksTo(1).durability(256)));
+            () -> new BlueprintTrowelItem(new Item.Properties().stacksTo(1).durability(128)));
     public static final DeferredItem<Item> UNDO_TOKEN = ITEMS.register("undo_token",
-            () -> new UndoTokenItem(new Item.Properties().stacksTo(16)));
+            () -> new UndoTokenItem(new Item.Properties().stacksTo(1).durability(10)));
     public static final DeferredItem<Item> REDO_TOKEN = ITEMS.register("redo_token",
-            () -> new RedoTokenItem(new Item.Properties().stacksTo(16)));
+            () -> new RedoTokenItem(new Item.Properties().stacksTo(1).durability(10)));
     public static final DeferredItem<Item> MAGNET = ITEMS.register("magnet",
             () -> new MagnetItem(new Item.Properties().stacksTo(1)));
     public static final DeferredItem<Item> STORAGE_LINK = ITEMS.register("storage_link",
-            () -> new StorageLinkItem(new Item.Properties().stacksTo(16)));
+            () -> new StorageLinkItem(new Item.Properties().stacksTo(4)));
 
     private ModItems() {
     }

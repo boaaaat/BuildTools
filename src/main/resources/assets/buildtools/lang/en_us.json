@@ -169,6 +169,7 @@
   "buildtools.message.queued": "Queued %s block changes.",
   "buildtools.message.applied": "Applied %s block changes.",
   "buildtools.message.applied_collected": "Applied %s block changes and stored %s drops in history.",
+  "buildtools.message.applied_deposited": "Applied %s block changes and sent %s drops to linked storage.",
   "buildtools.message.stored_drops_collected": "Collected %s stored drops and cleared undo/redo history.",
   "buildtools.message.copied": "Copied %s blocks.",
   "buildtools.message.paste_preview": "Previewing %s paste blocks. Sneak right-click the same spot again to confirm.",
