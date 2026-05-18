@@ -58,6 +58,7 @@ public final class BuildOperationEngine {
     private static final Queue<BuildOperation> QUEUE = new ArrayDeque<>();
     private static final Map<UUID, PendingOperation> PENDING_OPERATIONS = new HashMap<>();
     private static final ThreadLocal<DropCapture> ACTIVE_DROP_CAPTURE = new ThreadLocal<>();
+    private static final float HARD_MINING_DURABILITY_HARDNESS = 1.5F;
 
     private BuildOperationEngine() {
     }
@@ -783,7 +784,7 @@ public final class BuildOperationEngine {
         PacketDistributor.sendToPlayer(player, new ToolStatusPayload(true, "Preview Ready", List.of(
                 operation.label() + ": " + operation.positions().size() + " changes",
                 materialPreviewLine(player, operation),
-                durabilityPreviewLine(player, operation.positions().size()),
+                durabilityPreviewLine(player, operation),
                 dropPreviewLine(operation),
                 "Use the same tool again to confirm"), 0xF4C542));
         return false;
@@ -802,13 +803,17 @@ public final class BuildOperationEngine {
         return "Need " + required + " | missing " + missing;
     }
 
-    private static String durabilityPreviewLine(ServerPlayer player, int blockChanges) {
+    private static String durabilityPreviewLine(ServerPlayer player, PendingOperation operation) {
         ItemStack tool = activeDurabilityTool(player);
         if (tool.isEmpty() || !tool.isDamageableItem() || player.gameMode.isCreative()) {
             return "";
         }
-        int cost = durabilityCost(blockChanges);
+        int minedBlocks = minedBlockCount(player.serverLevel(), operation.undo());
+        int cost = operationDurabilityCost(operation.positions().size(), minedBlocks);
         int remaining = remainingDurability(tool);
+        if (minedBlocks > 0) {
+            return "Warning: " + minedBlocks + " hard blocks in the way | mining costs " + minedBlocks + " durability | total: " + cost + " | remaining: " + remaining;
+        }
         return "Durability cost: " + cost + " | remaining: " + remaining;
     }
 
@@ -840,7 +845,7 @@ public final class BuildOperationEngine {
             fail(player, "buildtools.error.no_targets");
             return false;
         }
-        int durabilityCost = durabilityCost(positions.size());
+        int durabilityCost = operationDurabilityCost(positions.size(), minedBlockCount(level, undo));
         if (!hasDurabilityForOperation(player, durabilityCost)) {
             return false;
         }
@@ -874,7 +879,7 @@ public final class BuildOperationEngine {
             fail(player, "buildtools.error.no_targets");
             return false;
         }
-        int durabilityCost = durabilityCost(positions.size());
+        int durabilityCost = operationDurabilityCost(positions.size(), minedBlockCount(level, undo));
         if (!hasDurabilityForOperation(player, durabilityCost)) {
             return false;
         }
@@ -986,7 +991,7 @@ public final class BuildOperationEngine {
     }
 
     private static boolean shouldCollectDrops(BlockState previous, BlockState redone) {
-        return !previous.isAir() && !previous.canBeReplaced() && !redone.is(previous.getBlock());
+        return minesBlock(previous, redone);
     }
 
     private static ItemStack preservedBlockEntityStack(BlockState state, BlockEntity blockEntity, ServerLevel level) {
@@ -1411,6 +1416,39 @@ public final class BuildOperationEngine {
 
     private static int durabilityCost(int blockChanges) {
         return 1 + Math.max(0, blockChanges) / 400;
+    }
+
+    private static int operationDurabilityCost(int blockChanges, int minedBlocks) {
+        int nonMiningChanges = Math.max(0, blockChanges - minedBlocks);
+        int cost = minedBlocks;
+        if (nonMiningChanges > 0) {
+            cost += durabilityCost(nonMiningChanges);
+        }
+        return Math.max(1, cost);
+    }
+
+    private static int minedBlockCount(ServerLevel level, List<UndoSnapshot.Entry> undo) {
+        int count = 0;
+        for (UndoSnapshot.Entry entry : undo) {
+            if (chargesMiningDurability(level, entry)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static boolean chargesMiningDurability(ServerLevel level, UndoSnapshot.Entry entry) {
+        if (!minesBlock(entry.previousState(), entry.redoneState())) {
+            return false;
+        }
+        float hardness = entry.previousState().getDestroySpeed(level, entry.pos());
+        return hardness >= HARD_MINING_DURABILITY_HARDNESS;
+    }
+
+    private static boolean minesBlock(BlockState previous, BlockState redone) {
+        return !previous.isAir()
+                && !previous.canBeReplaced()
+                && !redone.is(previous.getBlock());
     }
 
     private static boolean hasDurabilityForOperation(ServerPlayer player, int cost) {

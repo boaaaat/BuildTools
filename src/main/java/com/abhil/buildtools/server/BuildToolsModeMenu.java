@@ -173,11 +173,6 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(1, utilityItem(Items.ENDER_EYE, "buildtools.menu.rotate_selection", "buildtools.menu.rotate_selection.description"));
         menuItems.setItem(2, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.save_preset", "buildtools.menu.save_preset.description"));
         menuItems.setItem(3, utilityItem(Items.BOOK, "buildtools.menu.load_preset", "buildtools.menu.load_preset.description"));
-        menuItems.setItem(4, NudgeMenuItems.item(owner, Direction.WEST, "buildtools.menu.nudge.description"));
-        menuItems.setItem(5, NudgeMenuItems.item(owner, Direction.EAST, "buildtools.menu.nudge.description"));
-        menuItems.setItem(6, NudgeMenuItems.item(owner, Direction.DOWN, "buildtools.menu.nudge.description"));
-        menuItems.setItem(7, NudgeMenuItems.item(owner, Direction.UP, "buildtools.menu.nudge.description"));
-        menuItems.setItem(8, NudgeMenuItems.item(owner, Direction.NORTH, "buildtools.menu.nudge.description"));
         populateShapes(9);
     }
 
@@ -334,11 +329,6 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case 1 -> BuildToolsState.rotateSelection(player);
             case 2 -> BuildToolsState.savePreset(player);
             case 3 -> BuildToolsState.loadPreset(player);
-            case 4 -> BuildToolsState.nudgeSelection(player, Direction.WEST);
-            case 5 -> BuildToolsState.nudgeSelection(player, Direction.EAST);
-            case 6 -> BuildToolsState.nudgeSelection(player, Direction.DOWN);
-            case 7 -> BuildToolsState.nudgeSelection(player, Direction.UP);
-            case 8 -> BuildToolsState.nudgeSelection(player, Direction.NORTH);
             default -> {
                 return handleShapeClick(player, slotId, 9);
             }
