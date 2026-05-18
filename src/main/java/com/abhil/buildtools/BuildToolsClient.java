@@ -1,6 +1,7 @@
 package com.abhil.buildtools;
 
 import com.abhil.buildtools.client.AdvancedBuildToolsModeScreen;
+import com.abhil.buildtools.client.BlueprintLibraryScreen;
 import com.abhil.buildtools.client.BuildToolStatusOverlay;
 import com.abhil.buildtools.client.BuildToolsModeScreen;
 import com.abhil.buildtools.client.ClientSelectionRenderer;
@@ -40,6 +41,7 @@ public final class BuildToolsClient {
     private void registerScreens(RegisterMenuScreensEvent event) {
         event.register(ModMenus.MODE_MENU.get(), BuildToolsModeScreen::new);
         event.register(ModMenus.ADVANCED_MODE_MENU.get(), AdvancedBuildToolsModeScreen::new);
+        event.register(ModMenus.BLUEPRINT_LIBRARY_MENU.get(), BlueprintLibraryScreen::new);
     }
 
     @SubscribeEvent

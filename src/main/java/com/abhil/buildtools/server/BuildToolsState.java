@@ -6,9 +6,11 @@ import com.abhil.buildtools.network.SelectionSyncPayload;
 import com.abhil.buildtools.registry.ModItems;
 import com.abhil.buildtools.shape.BrushMode;
 import com.abhil.buildtools.shape.BuildMode;
+import com.abhil.buildtools.shape.CustomShapeMode;
 import com.abhil.buildtools.shape.Selection;
 import com.abhil.buildtools.shape.SelectionShape;
 import com.abhil.buildtools.shape.ShapeGenerator;
+import com.abhil.buildtools.shape.StairDirectionOverride;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -51,6 +53,9 @@ public final class BuildToolsState {
     private static final Map<UUID, Deque<UndoSnapshot>> UNDO = new HashMap<>();
     private static final Map<UUID, Deque<UndoSnapshot>> REDO = new HashMap<>();
     private static final Map<UUID, Blueprint> BLUEPRINTS = new HashMap<>();
+    private static final Map<UUID, String> ACTIVE_BLUEPRINT_NAMES = new HashMap<>();
+    private static final Map<UUID, List<SavedBlueprint>> SAVED_BLUEPRINTS = new HashMap<>();
+    private static final Map<UUID, Blueprint> PENDING_BLUEPRINT_CREATES = new HashMap<>();
     private static final Map<UUID, BlockPos> PENDING_PASTE_ORIGINS = new HashMap<>();
     private static final Map<UUID, BlockState> REPLACE_TARGETS = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, List<PaletteEntry>>> PALETTES = new HashMap<>();
@@ -63,12 +68,17 @@ public final class BuildToolsState {
     private static final Map<UUID, EnumMap<ToolProfile, GradientDirection>> GRADIENT_DIRECTIONS = new HashMap<>();
     private static final Map<UUID, List<BlockPos>> ADVANCED_POINTS = new HashMap<>();
     private static final Map<UUID, Boolean> SHARED_SELECTION_VISIBILITY = new HashMap<>();
+    private static final Map<UUID, CustomShapeMode> CUSTOM_SHAPE_MODES = new HashMap<>();
+    private static final Map<UUID, StairDirectionOverride> STAIR_DIRECTIONS = new HashMap<>();
+    private static final Map<UUID, AreaBreakerPreset> AREA_BREAKER_PRESETS = new HashMap<>();
     private static final int HISTORY_LIMIT = 10;
     private static final int MIN_BRUSH_RADIUS = 1;
     private static final int MAX_BRUSH_RADIUS = 8;
     private static final int ADVANCED_SELECTION_ACTION_COOLDOWN = 6;
     private static final double ADVANCED_SELECTION_DISTANCE = 100.0D;
     private static final double ADVANCED_POINT_PICK_DISTANCE_SQR = 6.25D;
+    public static final int MAX_SAVED_BLUEPRINTS = 45;
+    private static final int MAX_BLUEPRINT_NAME_LENGTH = 32;
 
     private BuildToolsState() {
     }
@@ -114,8 +124,32 @@ public final class BuildToolsState {
         return gradientDirections(player).getOrDefault(activeProfile(player), GradientDirection.Y);
     }
 
+    public static CustomShapeMode customShapeMode(ServerPlayer player) {
+        return CUSTOM_SHAPE_MODES.getOrDefault(player.getUUID(), CustomShapeMode.AUTO);
+    }
+
+    public static StairDirectionOverride stairDirectionOverride(ServerPlayer player) {
+        return STAIR_DIRECTIONS.getOrDefault(player.getUUID(), StairDirectionOverride.POINT_ORDER);
+    }
+
+    public static AreaBreakerPreset areaBreakerPreset(ServerPlayer player) {
+        return AREA_BREAKER_PRESETS.getOrDefault(player.getUUID(), AreaBreakerPreset.NORMAL);
+    }
+
+    public static List<BlockPos> generatedSelection(ServerPlayer player) {
+        return ShapeGenerator.generate(selection(player), customShapeMode(player), stairDirectionOverride(player));
+    }
+
     public static ToolProfile activeToolProfile(ServerPlayer player) {
         return activeProfile(player);
+    }
+
+    public static SelectionShape[] availableShapes(ServerPlayer player) {
+        return switch (activeProfile(player)) {
+            case ADVANCED_SELECTION -> SelectionShape.advancedSelectionShapes();
+            case ADVANCED_BUILDER, BREAKER -> SelectionShape.shapesWithStairs();
+            default -> SelectionShape.basicShapes();
+        };
     }
 
     public static boolean selectionVisibleToOthers(ServerPlayer player) {
@@ -177,7 +211,16 @@ public final class BuildToolsState {
     }
 
     public static void cycleShape(ServerPlayer player) {
-        setShape(player, shape(player).next());
+        SelectionShape[] shapes = availableShapes(player);
+        SelectionShape current = shape(player);
+        int currentIndex = 0;
+        for (int i = 0; i < shapes.length; i++) {
+            if (shapes[i] == current) {
+                currentIndex = i;
+                break;
+            }
+        }
+        setShape(player, shapes[(currentIndex + 1) % shapes.length]);
     }
 
     public static void setShape(ServerPlayer player, SelectionShape shape) {
@@ -187,6 +230,32 @@ public final class BuildToolsState {
         BuildOperationEngine.clearPendingOperation(player);
         sync(player);
         player.displayClientMessage(Component.translatable("buildtools.message.shape", selection.shape().displayName()), true);
+    }
+
+    public static void setCustomShapeMode(ServerPlayer player, CustomShapeMode mode) {
+        CUSTOM_SHAPE_MODES.put(player.getUUID(), mode);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.custom_shape_mode", mode.displayName()), true);
+        sendPreview(player);
+    }
+
+    public static void cycleCustomShapeMode(ServerPlayer player) {
+        setCustomShapeMode(player, customShapeMode(player).next());
+    }
+
+    public static void cycleStairDirection(ServerPlayer player, int step) {
+        StairDirectionOverride next = stairDirectionOverride(player).next(step);
+        STAIR_DIRECTIONS.put(player.getUUID(), next);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.stair_direction", next.displayName()), true);
+        sendPreview(player);
+    }
+
+    public static void setAreaBreakerPreset(ServerPlayer player, AreaBreakerPreset preset) {
+        AREA_BREAKER_PRESETS.put(player.getUUID(), preset);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.area_breaker_preset", preset.displayName()), true);
+        sendPreview(player);
     }
 
     public static void cycleMode(ServerPlayer player) {
@@ -296,6 +365,7 @@ public final class BuildToolsState {
 
     public static void setBlueprint(ServerPlayer player, Blueprint blueprint) {
         BLUEPRINTS.put(player.getUUID(), blueprint);
+        ACTIVE_BLUEPRINT_NAMES.remove(player.getUUID());
         PENDING_PASTE_ORIGINS.remove(player.getUUID());
         BuildOperationEngine.clearPendingOperation(player);
         sendPreview(player);
@@ -303,6 +373,98 @@ public final class BuildToolsState {
 
     public static Optional<Blueprint> blueprint(ServerPlayer player) {
         return Optional.ofNullable(BLUEPRINTS.get(player.getUUID()));
+    }
+
+    public static Optional<String> activeBlueprintName(ServerPlayer player) {
+        return Optional.ofNullable(ACTIVE_BLUEPRINT_NAMES.get(player.getUUID()));
+    }
+
+    public static List<SavedBlueprint> savedBlueprints(ServerPlayer player) {
+        return SAVED_BLUEPRINTS.getOrDefault(player.getUUID(), List.of());
+    }
+
+    public static boolean hasPendingBlueprintCreate(ServerPlayer player) {
+        return PENDING_BLUEPRINT_CREATES.containsKey(player.getUUID());
+    }
+
+    public static boolean beginBlueprintCreatePrompt(ServerPlayer player, Blueprint blueprint) {
+        List<SavedBlueprint> saved = savedBlueprints(player);
+        if (saved.size() >= MAX_SAVED_BLUEPRINTS) {
+            player.displayClientMessage(Component.translatable("buildtools.error.blueprint_library_full", MAX_SAVED_BLUEPRINTS), false);
+            return false;
+        }
+        PENDING_BLUEPRINT_CREATES.put(player.getUUID(), blueprint);
+        player.closeContainer();
+        player.displayClientMessage(Component.translatable("buildtools.message.blueprint_name_prompt"), false);
+        return true;
+    }
+
+    public static boolean completeBlueprintCreatePrompt(ServerPlayer player, String rawName) {
+        Blueprint blueprint = PENDING_BLUEPRINT_CREATES.remove(player.getUUID());
+        if (blueprint == null) {
+            return false;
+        }
+        String name = normalizeBlueprintName(rawName);
+        if (name.isBlank()) {
+            player.displayClientMessage(Component.translatable("buildtools.message.blueprint_create_cancelled"), false);
+            persist(player);
+            return true;
+        }
+        List<SavedBlueprint> saved = new ArrayList<>(savedBlueprints(player));
+        if (saved.size() >= MAX_SAVED_BLUEPRINTS) {
+            player.displayClientMessage(Component.translatable("buildtools.error.blueprint_library_full", MAX_SAVED_BLUEPRINTS), false);
+            persist(player);
+            return true;
+        }
+        String uniqueName = uniqueBlueprintName(saved, name);
+        saved.add(new SavedBlueprint(uniqueName, blueprint));
+        SAVED_BLUEPRINTS.put(player.getUUID(), List.copyOf(saved));
+        BLUEPRINTS.put(player.getUUID(), blueprint);
+        ACTIVE_BLUEPRINT_NAMES.put(player.getUUID(), uniqueName);
+        PENDING_PASTE_ORIGINS.remove(player.getUUID());
+        BuildOperationEngine.clearPendingOperation(player);
+        persist(player);
+        sendPreview(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.blueprint_saved", uniqueName), true);
+        BlueprintLibraryMenu.open(player);
+        return true;
+    }
+
+    public static void cancelBlueprintCreatePrompt(ServerPlayer player) {
+        PENDING_BLUEPRINT_CREATES.remove(player.getUUID());
+    }
+
+    public static void loadSavedBlueprint(ServerPlayer player, int index) {
+        List<SavedBlueprint> saved = savedBlueprints(player);
+        if (index < 0 || index >= saved.size()) {
+            return;
+        }
+        SavedBlueprint entry = saved.get(index);
+        BLUEPRINTS.put(player.getUUID(), entry.blueprint());
+        ACTIVE_BLUEPRINT_NAMES.put(player.getUUID(), entry.name());
+        PENDING_PASTE_ORIGINS.remove(player.getUUID());
+        BuildOperationEngine.clearPendingOperation(player);
+        persist(player);
+        sendPreview(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.blueprint_loaded", entry.name()), true);
+    }
+
+    public static void deleteSavedBlueprint(ServerPlayer player, int index) {
+        List<SavedBlueprint> saved = new ArrayList<>(savedBlueprints(player));
+        if (index < 0 || index >= saved.size()) {
+            return;
+        }
+        SavedBlueprint removed = saved.remove(index);
+        SAVED_BLUEPRINTS.put(player.getUUID(), List.copyOf(saved));
+        if (removed.name().equals(ACTIVE_BLUEPRINT_NAMES.get(player.getUUID()))) {
+            ACTIVE_BLUEPRINT_NAMES.remove(player.getUUID());
+            BLUEPRINTS.remove(player.getUUID());
+            PENDING_PASTE_ORIGINS.remove(player.getUUID());
+            BuildOperationEngine.clearPendingOperation(player);
+            sendPreview(player);
+        }
+        persist(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.blueprint_deleted", removed.name()), true);
     }
 
     public static void rotateBlueprint(ServerPlayer player) {
@@ -631,8 +793,7 @@ public final class BuildToolsState {
             PacketDistributor.sendToPlayer(viewer, removeSharedSelectionPayload(owner.getUUID()));
             return;
         }
-        List<BlockPos> preview = selection.isComplete()
-                && selection.dimension().equals(owner.level().dimension())
+        List<BlockPos> preview = selection.dimension().equals(owner.level().dimension())
                 ? filteredPreview(owner, selection)
                 : List.of();
         if (preview.size() > BuildToolsNetworking.MAX_PREVIEW_POSITIONS) {
@@ -790,11 +951,27 @@ public final class BuildToolsState {
     }
 
     private static List<BlockPos> filteredPreview(ServerPlayer player, Selection selection) {
-        List<BlockPos> generated = ShapeGenerator.generate(selection);
-        BuildMode mode = mode(player);
+        List<BlockPos> generated = ShapeGenerator.generate(selection, customShapeMode(player), stairDirectionOverride(player));
         if (generated.isEmpty()) {
             return generated;
         }
+        ToolProfile profile = activeProfile(player);
+        if (profile == ToolProfile.BREAKER && areaBreakerPreset(player) == AreaBreakerPreset.CLEAR_SNOW_CROPS) {
+            List<BlockPos> filtered = new ArrayList<>();
+            for (BlockPos pos : generated) {
+                if (BuildOperationEngine.isClearSnowCropsTarget(player.level().getBlockState(pos))) {
+                    filtered.add(pos);
+                }
+            }
+            return filtered;
+        }
+        if (profile == ToolProfile.SELECTION
+                || profile == ToolProfile.ADVANCED_SELECTION
+                || profile == ToolProfile.BREAKER
+                || profile == ToolProfile.TROWEL) {
+            return generated;
+        }
+        BuildMode mode = mode(player);
         if (mode == BuildMode.OVERWRITE) {
             return generated;
         }
@@ -940,11 +1117,24 @@ public final class BuildToolsState {
         tag.put("gradientDirections", writeEnumMap(GRADIENT_DIRECTIONS.get(uuid)));
         tag.put("palettes", writePaletteMap(PALETTES.get(uuid)));
         tag.putBoolean("selectionVisibleToOthers", SHARED_SELECTION_VISIBILITY.getOrDefault(uuid, false));
+        if (CUSTOM_SHAPE_MODES.containsKey(uuid)) {
+            tag.putString("customShapeMode", CUSTOM_SHAPE_MODES.get(uuid).name());
+        }
+        if (STAIR_DIRECTIONS.containsKey(uuid)) {
+            tag.putString("stairDirection", STAIR_DIRECTIONS.get(uuid).name());
+        }
+        if (AREA_BREAKER_PRESETS.containsKey(uuid)) {
+            tag.putString("areaBreakerPreset", AREA_BREAKER_PRESETS.get(uuid).name());
+        }
         tag.put("undo", writeUndoSnapshots(UNDO.get(uuid)));
         tag.put("redo", writeUndoSnapshots(REDO.get(uuid)));
         if (BLUEPRINTS.containsKey(uuid)) {
             tag.put("blueprint", writeBlueprint(BLUEPRINTS.get(uuid)));
         }
+        if (ACTIVE_BLUEPRINT_NAMES.containsKey(uuid)) {
+            tag.putString("activeBlueprintName", ACTIVE_BLUEPRINT_NAMES.get(uuid));
+        }
+        tag.put("savedBlueprints", writeSavedBlueprints(SAVED_BLUEPRINTS.get(uuid)));
         if (REPLACE_TARGETS.containsKey(uuid)) {
             tag.put("replaceTarget", NbtUtils.writeBlockState(REPLACE_TARGETS.get(uuid)));
         }
@@ -977,6 +1167,15 @@ public final class BuildToolsState {
         if (tag.contains("selectionVisibleToOthers", Tag.TAG_BYTE)) {
             SHARED_SELECTION_VISIBILITY.put(uuid, tag.getBoolean("selectionVisibleToOthers"));
         }
+        if (tag.contains("customShapeMode", Tag.TAG_STRING)) {
+            CUSTOM_SHAPE_MODES.put(uuid, readEnum(CustomShapeMode.class, tag.getString("customShapeMode"), CustomShapeMode.AUTO));
+        }
+        if (tag.contains("stairDirection", Tag.TAG_STRING)) {
+            STAIR_DIRECTIONS.put(uuid, readEnum(StairDirectionOverride.class, tag.getString("stairDirection"), StairDirectionOverride.POINT_ORDER));
+        }
+        if (tag.contains("areaBreakerPreset", Tag.TAG_STRING)) {
+            AREA_BREAKER_PRESETS.put(uuid, readEnum(AreaBreakerPreset.class, tag.getString("areaBreakerPreset"), AreaBreakerPreset.NORMAL));
+        }
         Deque<UndoSnapshot> undo = readUndoSnapshots(tag.getList("undo", Tag.TAG_COMPOUND), registries);
         if (!undo.isEmpty()) {
             UNDO.put(uuid, undo);
@@ -987,6 +1186,13 @@ public final class BuildToolsState {
         }
         if (tag.contains("blueprint", Tag.TAG_COMPOUND)) {
             BLUEPRINTS.put(uuid, readBlueprint(tag.getCompound("blueprint"), registries));
+        }
+        if (tag.contains("activeBlueprintName", Tag.TAG_STRING)) {
+            ACTIVE_BLUEPRINT_NAMES.put(uuid, tag.getString("activeBlueprintName"));
+        }
+        List<SavedBlueprint> savedBlueprints = readSavedBlueprints(tag.getList("savedBlueprints", Tag.TAG_COMPOUND), registries);
+        if (!savedBlueprints.isEmpty()) {
+            SAVED_BLUEPRINTS.put(uuid, savedBlueprints);
         }
         if (tag.contains("replaceTarget", Tag.TAG_COMPOUND)) {
             REPLACE_TARGETS.put(uuid, readBlockState(tag.getCompound("replaceTarget"), registries));
@@ -1011,6 +1217,9 @@ public final class BuildToolsState {
         UNDO.remove(uuid);
         REDO.remove(uuid);
         BLUEPRINTS.remove(uuid);
+        ACTIVE_BLUEPRINT_NAMES.remove(uuid);
+        SAVED_BLUEPRINTS.remove(uuid);
+        PENDING_BLUEPRINT_CREATES.remove(uuid);
         PENDING_PASTE_ORIGINS.remove(uuid);
         REPLACE_TARGETS.remove(uuid);
         PALETTES.remove(uuid);
@@ -1023,6 +1232,9 @@ public final class BuildToolsState {
         GRADIENT_DIRECTIONS.remove(uuid);
         ADVANCED_POINTS.remove(uuid);
         SHARED_SELECTION_VISIBILITY.remove(uuid);
+        CUSTOM_SHAPE_MODES.remove(uuid);
+        STAIR_DIRECTIONS.remove(uuid);
+        AREA_BREAKER_PRESETS.remove(uuid);
     }
 
     private static CompoundTag writeSelection(Selection selection) {
@@ -1233,6 +1445,36 @@ public final class BuildToolsState {
             }
         }
         return new Blueprint(List.copyOf(entries), readCapturedEntities(tag.getList("entities", Tag.TAG_COMPOUND)));
+    }
+
+    private static ListTag writeSavedBlueprints(List<SavedBlueprint> blueprints) {
+        ListTag list = new ListTag();
+        if (blueprints == null) {
+            return list;
+        }
+        for (SavedBlueprint saved : blueprints) {
+            CompoundTag tag = new CompoundTag();
+            tag.putString("name", saved.name());
+            tag.put("blueprint", writeBlueprint(saved.blueprint()));
+            list.add(tag);
+        }
+        return list;
+    }
+
+    private static List<SavedBlueprint> readSavedBlueprints(ListTag list, HolderLookup.Provider registries) {
+        List<SavedBlueprint> blueprints = new ArrayList<>();
+        for (int i = 0; i < list.size() && blueprints.size() < MAX_SAVED_BLUEPRINTS; i++) {
+            CompoundTag tag = list.getCompound(i);
+            if (!tag.contains("blueprint", Tag.TAG_COMPOUND)) {
+                continue;
+            }
+            String name = normalizeBlueprintName(tag.getString("name"));
+            if (name.isBlank()) {
+                name = "Blueprint " + (blueprints.size() + 1);
+            }
+            blueprints.add(new SavedBlueprint(uniqueBlueprintName(blueprints, name), readBlueprint(tag.getCompound("blueprint"), registries)));
+        }
+        return List.copyOf(blueprints);
     }
 
     private static CompoundTag writePlan(BuildPlan plan) {
@@ -1464,9 +1706,43 @@ public final class BuildToolsState {
         }
     }
 
+    private static String normalizeBlueprintName(String name) {
+        String normalized = name == null ? "" : name.strip();
+        if (normalized.length() > MAX_BLUEPRINT_NAME_LENGTH) {
+            normalized = normalized.substring(0, MAX_BLUEPRINT_NAME_LENGTH).strip();
+        }
+        return normalized;
+    }
+
+    private static String uniqueBlueprintName(List<SavedBlueprint> saved, String requestedName) {
+        String base = normalizeBlueprintName(requestedName);
+        if (base.isBlank()) {
+            base = "Blueprint";
+        }
+        String candidate = base;
+        int suffix = 2;
+        while (blueprintNameExists(saved, candidate)) {
+            String ending = " (" + suffix + ")";
+            int baseLimit = Math.max(1, MAX_BLUEPRINT_NAME_LENGTH - ending.length());
+            String trimmedBase = base.length() > baseLimit ? base.substring(0, baseLimit).strip() : base;
+            candidate = trimmedBase + ending;
+            suffix++;
+        }
+        return candidate;
+    }
+
+    private static boolean blueprintNameExists(List<SavedBlueprint> saved, String name) {
+        for (SavedBlueprint blueprint : saved) {
+            if (blueprint.name().equalsIgnoreCase(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static void transformBlueprint(ServerPlayer player, String messageKey, java.util.function.Function<BlockPos, BlockPos> transform) {
         Blueprint blueprint = BLUEPRINTS.get(player.getUUID());
-        if (blueprint == null || blueprint.entries().isEmpty()) {
+        if (blueprint == null || blueprint.entries().isEmpty() && blueprint.entities().isEmpty()) {
             player.displayClientMessage(Component.translatable("buildtools.error.no_blueprint"), false);
             return;
         }
@@ -1483,9 +1759,13 @@ public final class BuildToolsState {
                 })
                 .toList();
         BLUEPRINTS.put(player.getUUID(), new Blueprint(transformed, transformedEntities));
-        PENDING_PASTE_ORIGINS.remove(player.getUUID());
         BuildOperationEngine.clearPendingOperation(player);
         player.displayClientMessage(Component.translatable(messageKey), true);
-        sendPreview(player);
+        BlockPos origin = PENDING_PASTE_ORIGINS.get(player.getUUID());
+        if (origin != null) {
+            BuildOperationEngine.previewBlueprintPaste(player, origin);
+        } else {
+            sendPreview(player);
+        }
     }
 }

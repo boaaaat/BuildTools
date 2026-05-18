@@ -5,7 +5,7 @@ import com.abhil.buildtools.network.ToolStatusPayload;
 import com.abhil.buildtools.registry.ModItems;
 import com.abhil.buildtools.shape.BuildMode;
 import com.abhil.buildtools.shape.Selection;
-import com.abhil.buildtools.shape.ShapeGenerator;
+import com.abhil.buildtools.shape.SelectionShape;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -103,7 +103,13 @@ public final class BuildToolActionbar {
             return selectionMessage(player);
         }
         if (held.is(ModItems.ADVANCED_SELECTION_STAFF.get())) {
-            return Component.literal("Advanced Selection Staff | Points: " + BuildToolsState.advancedPointCount(player) + " | " + selectionMessage(player).getString());
+            String details = "";
+            if (BuildToolsState.selectionShape(player) == SelectionShape.CUSTOM_SMART) {
+                details = " | Custom: " + BuildToolsState.customShapeMode(player).displayName().getString();
+            } else if (BuildToolsState.selectionShape(player) == SelectionShape.STAIRS) {
+                details = " | Stairs: " + BuildToolsState.stairDirectionOverride(player).displayName().getString();
+            }
+            return Component.literal("Advanced Selection Staff | Points: " + BuildToolsState.advancedPointCount(player) + details + " | " + selectionMessage(player).getString());
         }
         if (held.is(ModItems.BUILDER_WAND.get())) {
             return builderMessage(player);
@@ -200,11 +206,18 @@ public final class BuildToolActionbar {
         if (!stats.valid()) {
             return Component.literal("Area Breaker | " + stats.status()).withStyle(ChatFormatting.RED);
         }
+        AreaBreakerPreset preset = BuildToolsState.areaBreakerPreset(player);
+        int willBreak = preset == AreaBreakerPreset.CLEAR_SNOW_CROPS
+                ? (int) BuildToolsState.generatedSelection(player).stream()
+                        .filter(pos -> BuildOperationEngine.isClearSnowCropsTarget(player.level().getBlockState(pos)))
+                        .count()
+                : stats.solid();
         return Component.literal("Area Breaker | " + stats.shapeName()
+                + " | Preset: " + preset.displayName().getString()
                 + " | Size: " + stats.dimensions()
                 + " | Area: " + stats.total()
                 + " | Air: " + stats.air()
-                + " | Will break: " + stats.solid()
+                + " | Will break: " + willBreak
                 + " | Drops stored if history is active"
                 + limitSuffix(stats));
     }
@@ -212,25 +225,26 @@ public final class BuildToolActionbar {
     private static Component trowelMessage(ServerPlayer player) {
         SelectionStats stats = selectionStats(player);
         Blueprint blueprint = BuildToolsState.blueprint(player).orElse(null);
-        String saved = blueprint == null ? "No blueprint" : "Saved: " + blueprint.entries().size();
+        String activeName = BuildToolsState.activeBlueprintName(player).orElse("Clipboard");
+        String saved = blueprint == null ? "No blueprint" : activeName + ": " + blueprint.entries().size();
 
         if (player.isShiftKeyDown()) {
-            if (blueprint == null || blueprint.entries().isEmpty()) {
-                return Component.literal("Blueprint Trowel | Paste: no blueprint copied").withStyle(ChatFormatting.YELLOW);
+            if (!stats.valid()) {
+                return Component.literal("Blueprint Trowel | Copy | " + stats.status() + " | " + saved).withStyle(ChatFormatting.YELLOW);
             }
-            BlockCostPlan costPlan = BlockCostPlan.create(player, blueprint.entries().stream().map(Blueprint.Entry::state).toList());
-            String confirm = BuildToolsState.pendingPasteOrigin(player).isPresent() ? " | Click same spot to confirm" : " | Click block face to preview";
-            return Component.literal("Blueprint Trowel | Paste | " + saved + costSuffix(player, costPlan) + confirm);
+            return Component.literal("Blueprint Trowel | Copy | Area: " + stats.total()
+                    + " | Size: " + stats.dimensions()
+                    + " | Air skipped: " + stats.air()
+                    + " | Copy blocks: " + stats.solid()
+                    + " | " + saved);
         }
 
-        if (!stats.valid()) {
-            return Component.literal("Blueprint Trowel | Copy | " + stats.status() + " | " + saved).withStyle(ChatFormatting.YELLOW);
+        if (blueprint == null || blueprint.entries().isEmpty() && blueprint.entities().isEmpty()) {
+            return Component.literal("Blueprint Trowel | Paste: no blueprint copied").withStyle(ChatFormatting.YELLOW);
         }
-        return Component.literal("Blueprint Trowel | Copy | Area: " + stats.total()
-                + " | Size: " + stats.dimensions()
-                + " | Air skipped: " + stats.air()
-                + " | Copy blocks: " + stats.solid()
-                + " | " + saved);
+        BlockCostPlan costPlan = BlockCostPlan.create(player, blueprint.entries().stream().map(Blueprint.Entry::state).toList());
+        String confirm = BuildToolsState.pendingPasteOrigin(player).isPresent() ? " | Click same spot to confirm" : " | Click block face to preview";
+        return Component.literal("Blueprint Trowel | Paste | " + saved + costSuffix(player, costPlan) + confirm + " | Sneak: copy");
     }
 
     private static Component historyMessage(String label, UndoSnapshot snapshot, ServerPlayer player) {
@@ -244,16 +258,17 @@ public final class BuildToolActionbar {
 
     private static SelectionStats selectionStats(ServerPlayer player) {
         Selection selection = BuildToolsState.selection(player);
-        if (!selection.isComplete() || selection.dimension() == null) {
+        if (selection.dimension() == null) {
             String first = selection.firstOptional().isPresent() ? "Pos 1 set" : "Pos 1 missing";
-            String second = selection.secondOptional().isPresent() ? "Pos 2 set" : "Pos 2 missing";
+            String second = selection.shape() == SelectionShape.CUSTOM_SMART ? "Custom points: " + BuildToolsState.advancedPointCount(player)
+                    : selection.secondOptional().isPresent() ? "Pos 2 set" : "Pos 2 missing";
             return SelectionStats.invalid(first + ", " + second);
         }
         if (!selection.dimension().equals(player.level().dimension())) {
             return SelectionStats.invalid("Selection is in another dimension");
         }
 
-        List<BlockPos> positions = ShapeGenerator.generate(selection);
+        List<BlockPos> positions = BuildToolsState.generatedSelection(player);
         if (positions.isEmpty()) {
             return SelectionStats.invalid("Selected shape is empty");
         }
@@ -279,7 +294,7 @@ public final class BuildToolActionbar {
                 true,
                 "",
                 selection.shape().displayName().getString(),
-                dimensions(selection),
+                dimensions(positions),
                 positions.size(),
                 air,
                 positions.size() - air,
@@ -288,10 +303,16 @@ public final class BuildToolActionbar {
                 positions.size() > BuildToolsConfig.MAX_OPERATION_VOLUME.get());
     }
 
-    private static String dimensions(Selection selection) {
-        int width = Math.abs(selection.second().getX() - selection.first().getX()) + 1;
-        int height = Math.abs(selection.second().getY() - selection.first().getY()) + 1;
-        int depth = Math.abs(selection.second().getZ() - selection.first().getZ()) + 1;
+    private static String dimensions(List<BlockPos> positions) {
+        int minX = positions.stream().mapToInt(BlockPos::getX).min().orElse(0);
+        int minY = positions.stream().mapToInt(BlockPos::getY).min().orElse(0);
+        int minZ = positions.stream().mapToInt(BlockPos::getZ).min().orElse(0);
+        int maxX = positions.stream().mapToInt(BlockPos::getX).max().orElse(0);
+        int maxY = positions.stream().mapToInt(BlockPos::getY).max().orElse(0);
+        int maxZ = positions.stream().mapToInt(BlockPos::getZ).max().orElse(0);
+        int width = maxX - minX + 1;
+        int height = maxY - minY + 1;
+        int depth = maxZ - minZ + 1;
         return width + "x" + height + "x" + depth;
     }
 

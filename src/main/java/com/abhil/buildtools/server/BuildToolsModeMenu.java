@@ -173,19 +173,22 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(1, utilityItem(Items.ENDER_EYE, "buildtools.menu.rotate_selection", "buildtools.menu.rotate_selection.description"));
         menuItems.setItem(2, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.save_preset", "buildtools.menu.save_preset.description"));
         menuItems.setItem(3, utilityItem(Items.BOOK, "buildtools.menu.load_preset", "buildtools.menu.load_preset.description"));
+        menuItems.setItem(4, breakerPresetItem(Items.IRON_PICKAXE, AreaBreakerPreset.NORMAL));
+        menuItems.setItem(5, breakerPresetItem(Items.WHEAT_SEEDS, AreaBreakerPreset.CLEAR_SNOW_CROPS));
         populateShapes(9);
     }
 
     private void populateTrowelMenu() {
         menuItems.setItem(0, utilityItem(Items.PAPER, "buildtools.menu.copy_blueprint", "buildtools.menu.copy_blueprint.description"));
-        menuItems.setItem(1, utilityItem(Items.ENDER_PEARL, "buildtools.menu.paste_blueprint_here", "buildtools.menu.paste_blueprint_here.description"));
-        menuItems.setItem(2, utilityItem(Items.ENDER_EYE, "buildtools.menu.paste_blueprint_selection", "buildtools.menu.paste_blueprint_selection.description"));
-        menuItems.setItem(3, utilityItem(Items.LIME_DYE, "buildtools.menu.confirm_paste", "buildtools.menu.confirm_paste.description"));
-        menuItems.setItem(4, utilityItem(Items.BARRIER, "buildtools.menu.cancel_paste", "buildtools.menu.cancel_paste.description"));
-        menuItems.setItem(5, utilityItem(Items.CLOCK, "buildtools.menu.rotate_blueprint", "buildtools.menu.rotate_blueprint.description"));
-        menuItems.setItem(6, utilityItem(Items.IRON_BARS, "buildtools.menu.mirror_blueprint_x", "buildtools.menu.mirror_blueprint.description"));
-        menuItems.setItem(7, utilityItem(Items.CHAIN, "buildtools.menu.mirror_blueprint_z", "buildtools.menu.mirror_blueprint.description"));
-        menuItems.setItem(8, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
+        menuItems.setItem(1, utilityItem(Items.BOOKSHELF, "buildtools.menu.blueprints", "buildtools.menu.blueprints.description"));
+        menuItems.setItem(2, utilityItem(Items.ENDER_PEARL, "buildtools.menu.paste_blueprint_here", "buildtools.menu.paste_blueprint_here.description"));
+        menuItems.setItem(3, utilityItem(Items.ENDER_EYE, "buildtools.menu.paste_blueprint_selection", "buildtools.menu.paste_blueprint_selection.description"));
+        menuItems.setItem(4, utilityItem(Items.LIME_DYE, "buildtools.menu.confirm_paste", "buildtools.menu.confirm_paste.description"));
+        menuItems.setItem(5, utilityItem(Items.BARRIER, "buildtools.menu.cancel_paste", "buildtools.menu.cancel_paste.description"));
+        menuItems.setItem(6, utilityItem(Items.CLOCK, "buildtools.menu.rotate_blueprint", "buildtools.menu.rotate_blueprint.description"));
+        menuItems.setItem(7, utilityItem(Items.IRON_BARS, "buildtools.menu.mirror_blueprint_x", "buildtools.menu.mirror_blueprint.description"));
+        menuItems.setItem(8, utilityItem(Items.CHAIN, "buildtools.menu.mirror_blueprint_z", "buildtools.menu.mirror_blueprint.description"));
+        menuItems.setItem(17, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
         menuItems.setItem(18, NudgeMenuItems.item(owner, Direction.WEST, "buildtools.menu.nudge_paste.description"));
         menuItems.setItem(19, NudgeMenuItems.item(owner, Direction.EAST, "buildtools.menu.nudge_paste.description"));
         menuItems.setItem(20, NudgeMenuItems.item(owner, Direction.DOWN, "buildtools.menu.nudge_paste.description"));
@@ -195,24 +198,9 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
     }
 
     private void populateShapes(int startSlot) {
-        SelectionShape[] shapes = SelectionShape.values();
-        ItemStack[] icons = new ItemStack[] {
-                new ItemStack(Items.STONE),
-                new ItemStack(Items.BRICKS),
-                new ItemStack(Items.OAK_PLANKS),
-                new ItemStack(Items.GLASS),
-                new ItemStack(Items.SCAFFOLDING),
-                new ItemStack(Items.STRING),
-                new ItemStack(Items.COPPER_BLOCK),
-                new ItemStack(Items.SNOWBALL),
-                new ItemStack(Items.SLIME_BALL),
-                new ItemStack(Items.GRAVEL),
-                new ItemStack(Items.RAIL),
-                new ItemStack(Items.STONE_BRICK_STAIRS),
-                new ItemStack(Items.GLASS)
-        };
+        SelectionShape[] shapes = visibleShapes();
         for (int i = 0; i < shapes.length; i++) {
-            ItemStack stack = icons[i].copy();
+            ItemStack stack = shapeIcon(shapes[i]);
             stack.set(DataComponents.CUSTOM_NAME, shapes[i].displayName());
             setSelected(stack, owner != null && BuildToolsState.selectionShape(owner) == shapes[i]);
             menuItems.setItem(startSlot + i, stack);
@@ -329,6 +317,8 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case 1 -> BuildToolsState.rotateSelection(player);
             case 2 -> BuildToolsState.savePreset(player);
             case 3 -> BuildToolsState.loadPreset(player);
+            case 4 -> BuildToolsState.setAreaBreakerPreset(player, AreaBreakerPreset.NORMAL);
+            case 5 -> BuildToolsState.setAreaBreakerPreset(player, AreaBreakerPreset.CLEAR_SNOW_CROPS);
             default -> {
                 return handleShapeClick(player, slotId, 9);
             }
@@ -339,14 +329,15 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
     private boolean handleTrowelClick(ServerPlayer player, int slotId) {
         switch (slotId) {
             case 0 -> BuildOperationEngine.copySelection(player);
-            case 1 -> BuildOperationEngine.previewBlueprintPasteAtPlayer(player);
-            case 2 -> BuildOperationEngine.previewBlueprintPasteAtSelection(player);
-            case 3 -> BuildOperationEngine.confirmPendingBlueprintPaste(player);
-            case 4 -> BuildToolsState.clearPendingPaste(player);
-            case 5 -> BuildToolsState.rotateBlueprint(player);
-            case 6 -> BuildToolsState.mirrorBlueprintX(player);
-            case 7 -> BuildToolsState.mirrorBlueprintZ(player);
-            case 8 -> BuildToolsState.clearSelection(player);
+            case 1 -> BlueprintLibraryMenu.open(player);
+            case 2 -> BuildOperationEngine.previewBlueprintPasteAtPlayer(player);
+            case 3 -> BuildOperationEngine.previewBlueprintPasteAtSelection(player);
+            case 4 -> BuildOperationEngine.confirmPendingBlueprintPaste(player);
+            case 5 -> BuildToolsState.clearPendingPaste(player);
+            case 6 -> BuildToolsState.rotateBlueprint(player);
+            case 7 -> BuildToolsState.mirrorBlueprintX(player);
+            case 8 -> BuildToolsState.mirrorBlueprintZ(player);
+            case 17 -> BuildToolsState.clearSelection(player);
             case 18 -> BuildOperationEngine.nudgePendingBlueprintPaste(player, net.minecraft.core.Direction.WEST);
             case 19 -> BuildOperationEngine.nudgePendingBlueprintPaste(player, net.minecraft.core.Direction.EAST);
             case 20 -> BuildOperationEngine.nudgePendingBlueprintPaste(player, net.minecraft.core.Direction.DOWN);
@@ -362,11 +353,36 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
 
     private boolean handleShapeClick(ServerPlayer player, int slotId, int startSlot) {
         int shapeIndex = slotId - startSlot;
-        if (shapeIndex >= 0 && shapeIndex < SelectionShape.values().length) {
-            BuildToolsState.setShape(player, SelectionShape.values()[shapeIndex]);
+        SelectionShape[] shapes = visibleShapes();
+        if (shapeIndex >= 0 && shapeIndex < shapes.length) {
+            BuildToolsState.setShape(player, shapes[shapeIndex]);
             return true;
         }
         return false;
+    }
+
+    private SelectionShape[] visibleShapes() {
+        return owner == null ? SelectionShape.basicShapes() : BuildToolsState.availableShapes(owner);
+    }
+
+    private static ItemStack shapeIcon(SelectionShape shape) {
+        return new ItemStack(switch (shape) {
+            case CUBOID -> Items.STONE;
+            case WALLS -> Items.BRICKS;
+            case FLOOR -> Items.OAK_PLANKS;
+            case CEILING -> Items.SMOOTH_STONE_SLAB;
+            case HOLLOW_BOX -> Items.GLASS;
+            case LINE -> Items.STRING;
+            case CYLINDER -> Items.GRAVEL;
+            case SPHERE -> Items.SNOWBALL;
+            case ELLIPSOID -> Items.SLIME_BALL;
+            case ROAD -> Items.RAIL;
+            case TUNNEL -> Items.RAIL;
+            case ARCH -> Items.STONE_BRICK_STAIRS;
+            case DOME -> Items.COPPER_BLOCK;
+            case CUSTOM_SMART -> Items.AMETHYST_SHARD;
+            case STAIRS -> Items.STONE_STAIRS;
+        });
     }
 
     private static ItemStack named(net.minecraft.world.item.Item item, Component name) {
@@ -419,6 +435,15 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
                 .withStyle(ChatFormatting.GRAY);
         stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
         setSelected(stack, mode == selectedMode);
+        return stack;
+    }
+
+    private ItemStack breakerPresetItem(net.minecraft.world.item.Item item, AreaBreakerPreset preset) {
+        ItemStack stack = named(item, preset.displayName());
+        Component description = Component.translatable("buildtools.area_breaker_preset." + preset.name().toLowerCase(java.util.Locale.ROOT) + ".description")
+                .withStyle(ChatFormatting.GRAY);
+        stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
+        setSelected(stack, owner != null && BuildToolsState.areaBreakerPreset(owner) == preset);
         return stack;
     }
 

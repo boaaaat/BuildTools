@@ -7,6 +7,7 @@ import com.abhil.buildtools.network.ToolStatusPayload;
 import com.abhil.buildtools.shape.BrushMode;
 import com.abhil.buildtools.shape.BuildMode;
 import com.abhil.buildtools.shape.Selection;
+import com.abhil.buildtools.shape.SelectionShape;
 import com.abhil.buildtools.shape.ShapeGenerator;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -19,6 +20,7 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.DoubleTag;
 import net.minecraft.nbt.CompoundTag;
@@ -27,6 +29,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
@@ -49,6 +52,12 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.BushBlock;
+import net.minecraft.world.level.block.CropBlock;
+import net.minecraft.world.level.block.LeavesBlock;
+import net.minecraft.world.level.block.SnowLayerBlock;
+import net.minecraft.world.level.block.StairBlock;
+import net.minecraft.world.level.block.VineBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
@@ -93,7 +102,7 @@ public final class BuildOperationEngine {
 
     private static boolean executeBuilder(ServerPlayer player, boolean advanced) {
         Selection selection = BuildToolsState.selection(player);
-        if (!selection.isComplete() || selection.dimension() == null) {
+        if (selection.dimension() == null) {
             fail(player, "buildtools.error.incomplete_selection");
             return false;
         }
@@ -116,7 +125,7 @@ public final class BuildOperationEngine {
             return false;
         }
 
-        List<BlockPos> generated = ShapeGenerator.generate(selection);
+        List<BlockPos> generated = BuildToolsState.generatedSelection(player);
         if (generated.isEmpty()) {
             fail(player, "buildtools.error.empty_shape");
             return false;
@@ -136,7 +145,7 @@ public final class BuildOperationEngine {
         List<ItemStack> refund = new ArrayList<>();
         ServerLevel level = player.serverLevel();
 
-        BlockState replaceMatch = advanced ? BuildToolsState.replaceTarget(player) : level.getBlockState(selection.first());
+        BlockState replaceMatch = advanced ? BuildToolsState.replaceTarget(player) : level.getBlockState(selection.firstOptional().orElse(generated.getFirst()));
         for (BlockPos pos : generated) {
             BlockState previous = level.getBlockState(pos);
             if (!canTouch(player, level, pos, previous)) {
@@ -148,7 +157,7 @@ public final class BuildOperationEngine {
             if (mode == BuildMode.REPLACE && !(advanced ? BuildToolsState.matchesReplaceTargets(player, previous, replaceMatch) : previous.is(replaceMatch.getBlock()))) {
                 continue;
             }
-            BlockState targetState = materialTarget(selection, pos, target, palette, paletteMode, gradientDirection);
+            BlockState targetState = orientStairTarget(player, selection, materialTarget(selection, pos, target, palette, paletteMode, gradientDirection));
             positions.add(pos.immutable());
             targets.add(targetState);
             targetBlockEntities.add(null);
@@ -179,7 +188,7 @@ public final class BuildOperationEngine {
 
     public static boolean executeBreaker(ServerPlayer player) {
         Selection selection = BuildToolsState.selection(player);
-        if (!selection.isComplete() || selection.dimension() == null) {
+        if (selection.dimension() == null) {
             fail(player, "buildtools.error.incomplete_selection");
             return false;
         }
@@ -187,7 +196,7 @@ public final class BuildOperationEngine {
             fail(player, "buildtools.error.dimension_mismatch");
             return false;
         }
-        List<BlockPos> generated = ShapeGenerator.generate(selection);
+        List<BlockPos> generated = BuildToolsState.generatedSelection(player);
         if (generated.isEmpty()) {
             fail(player, "buildtools.error.empty_shape");
             return false;
@@ -198,6 +207,7 @@ public final class BuildOperationEngine {
         }
 
         ServerLevel level = player.serverLevel();
+        AreaBreakerPreset preset = BuildToolsState.areaBreakerPreset(player);
         List<BlockPos> positions = new ArrayList<>();
         List<BlockState> targets = new ArrayList<>();
         List<CompoundTag> targetBlockEntities = new ArrayList<>();
@@ -205,6 +215,9 @@ public final class BuildOperationEngine {
         for (BlockPos pos : generated) {
             BlockState previous = level.getBlockState(pos);
             if (previous.isAir() && previous.getFluidState().isEmpty()) {
+                continue;
+            }
+            if (preset == AreaBreakerPreset.CLEAR_SNOW_CROPS && !isClearSnowCropsTarget(previous)) {
                 continue;
             }
             if (!canTouch(player, level, pos, previous)) {
@@ -215,9 +228,15 @@ public final class BuildOperationEngine {
             targetBlockEntities.add(null);
             undo.add(undoEntry(level, pos, previous, Blocks.AIR.defaultBlockState(), false));
         }
+        if (positions.isEmpty()) {
+            fail(player, "buildtools.error.no_targets");
+            return false;
+        }
 
         boolean trackHistory = hasHistoryItems(player);
-        List<CapturedEntity> removedEntities = captureDecorEntities(level, BlockPos.ZERO, generated);
+        List<CapturedEntity> removedEntities = preset == AreaBreakerPreset.CLEAR_SNOW_CROPS
+                ? List.of()
+                : captureDecorEntities(level, BlockPos.ZERO, generated);
         List<ItemStack> producedDrops = withEntityDrops(dropsForChanges(player, level, undo), removedEntities);
         String label = "area break";
         return previewOrConfirm(player, level, new PendingOperation(
@@ -238,7 +257,7 @@ public final class BuildOperationEngine {
 
     public static boolean createPlan(ServerPlayer player) {
         Selection selection = BuildToolsState.selection(player);
-        if (!selection.isComplete() || selection.dimension() == null) {
+        if (selection.dimension() == null) {
             fail(player, "buildtools.error.incomplete_selection");
             return false;
         }
@@ -261,7 +280,7 @@ public final class BuildOperationEngine {
             return false;
         }
 
-        List<BlockPos> generated = ShapeGenerator.generate(selection);
+        List<BlockPos> generated = BuildToolsState.generatedSelection(player);
         if (generated.isEmpty()) {
             fail(player, "buildtools.error.empty_shape");
             return false;
@@ -285,7 +304,7 @@ public final class BuildOperationEngine {
             if (mode == BuildMode.REPLACE && !BuildToolsState.matchesReplaceTargets(player, previous, replaceMatch)) {
                 continue;
             }
-            entries.add(new BuildPlan.Entry(pos.immutable(), materialTarget(selection, pos, target, palette, paletteMode, gradientDirection)));
+            entries.add(new BuildPlan.Entry(pos.immutable(), orientStairTarget(player, selection, materialTarget(selection, pos, target, palette, paletteMode, gradientDirection))));
         }
         if (entries.isEmpty()) {
             fail(player, "buildtools.error.no_targets");
@@ -491,18 +510,41 @@ public final class BuildOperationEngine {
     }
 
     public static boolean copySelection(ServerPlayer player) {
-        Selection selection = BuildToolsState.selection(player);
-        if (!selection.isComplete() || selection.dimension() == null || !selection.dimension().equals(player.level().dimension())) {
-            fail(player, "buildtools.error.incomplete_selection");
+        Blueprint blueprint = captureSelectionBlueprint(player);
+        if (blueprint == null) {
             return false;
         }
-        List<BlockPos> positions = ShapeGenerator.generate(selection);
+        BuildToolsState.setBlueprint(player, blueprint);
+        player.displayClientMessage(Component.translatable("buildtools.message.copied", blueprint.entries().size() + blueprint.entities().size()), true);
+        return true;
+    }
+
+    public static boolean beginSavedBlueprintCreate(ServerPlayer player) {
+        if (BuildToolsState.savedBlueprints(player).size() >= BuildToolsState.MAX_SAVED_BLUEPRINTS) {
+            fail(player, Component.translatable("buildtools.error.blueprint_library_full", BuildToolsState.MAX_SAVED_BLUEPRINTS));
+            return false;
+        }
+        Blueprint blueprint = captureSelectionBlueprint(player);
+        return blueprint != null && BuildToolsState.beginBlueprintCreatePrompt(player, blueprint);
+    }
+
+    private static Blueprint captureSelectionBlueprint(ServerPlayer player) {
+        Selection selection = BuildToolsState.selection(player);
+        if (selection.dimension() == null || !selection.dimension().equals(player.level().dimension())) {
+            fail(player, "buildtools.error.incomplete_selection");
+            return null;
+        }
+        List<BlockPos> positions = BuildToolsState.generatedSelection(player);
+        if (positions.isEmpty()) {
+            fail(player, "buildtools.error.empty_shape");
+            return null;
+        }
         if (positions.size() > BuildToolsConfig.MAX_COPY_VOLUME.get()) {
             fail(player, Component.translatable("buildtools.error.copy_too_large", positions.size(), BuildToolsConfig.MAX_COPY_VOLUME.get()));
-            return false;
+            return null;
         }
         ServerLevel level = player.serverLevel();
-        BlockPos origin = selection.first();
+        BlockPos origin = player.blockPosition();
         List<Blueprint.Entry> entries = new ArrayList<>();
         for (BlockPos pos : positions) {
             BlockState state = level.getBlockState(pos);
@@ -511,22 +553,20 @@ public final class BuildOperationEngine {
             }
             if (!isSupportedTarget(state)) {
                 fail(player, "buildtools.error.copy_unsupported");
-                return false;
+                return null;
             }
             entries.add(new Blueprint.Entry(pos.subtract(origin), state, captureBlockEntity(level, pos)));
         }
         List<CapturedEntity> entities = captureDecorEntities(level, origin, positions);
         if (entries.isEmpty() && entities.isEmpty()) {
             fail(player, "buildtools.error.no_targets");
-            return false;
+            return null;
         }
         if (entries.size() > BuildToolsConfig.MAX_COPY_VOLUME.get()) {
             fail(player, Component.translatable("buildtools.error.copy_too_large", entries.size(), BuildToolsConfig.MAX_COPY_VOLUME.get()));
-            return false;
+            return null;
         }
-        BuildToolsState.setBlueprint(player, new Blueprint(List.copyOf(entries), entities));
-        player.displayClientMessage(Component.translatable("buildtools.message.copied", entries.size() + entities.size()), true);
-        return true;
+        return new Blueprint(List.copyOf(entries), entities);
     }
 
     public static boolean pasteBlueprint(ServerPlayer player, BlockPos origin) {
@@ -583,7 +623,7 @@ public final class BuildOperationEngine {
 
     public static boolean previewBlueprintPasteAtSelection(ServerPlayer player) {
         Selection selection = BuildToolsState.selection(player);
-        if (!selection.isComplete() || selection.dimension() == null || !selection.dimension().equals(player.level().dimension())) {
+        if (selection.dimension() == null || !selection.dimension().equals(player.level().dimension()) || selection.firstOptional().isEmpty()) {
             fail(player, "buildtools.error.incomplete_selection");
             return false;
         }
@@ -614,7 +654,7 @@ public final class BuildOperationEngine {
         return true;
     }
 
-    private static void previewBlueprintPaste(ServerPlayer player, BlockPos origin) {
+    public static void previewBlueprintPaste(ServerPlayer player, BlockPos origin) {
         Blueprint blueprint = BuildToolsState.blueprint(player).orElse(null);
         if (blueprint == null || blueprint.entries().isEmpty() && blueprint.entities().isEmpty()) {
             fail(player, "buildtools.error.no_blueprint");
@@ -1267,6 +1307,30 @@ public final class BuildOperationEngine {
             return gradientTarget(selection, pos, fallback, gradientPalette(fallback, palette), gradientDirection);
         }
         return fallback;
+    }
+
+    private static BlockState orientStairTarget(ServerPlayer player, Selection selection, BlockState state) {
+        if (selection.shape() != SelectionShape.STAIRS || !(state.getBlock() instanceof StairBlock) || !state.hasProperty(StairBlock.FACING)) {
+            return state;
+        }
+        Direction direction = ShapeGenerator.stairDirection(selection, BuildToolsState.stairDirectionOverride(player));
+        return state.setValue(StairBlock.FACING, direction);
+    }
+
+    public static boolean isClearSnowCropsTarget(BlockState state) {
+        if (state.isAir()) {
+            return false;
+        }
+        Block block = state.getBlock();
+        return block instanceof SnowLayerBlock
+                || block instanceof CropBlock
+                || block instanceof BushBlock
+                || block instanceof VineBlock
+                || block instanceof LeavesBlock
+                || state.is(BlockTags.CROPS)
+                || state.is(BlockTags.FLOWERS)
+                || state.is(Blocks.VINE)
+                || state.is(Blocks.GLOW_LICHEN);
     }
 
     private static List<BlockState> gradientPalette(BlockState fallback, List<PaletteEntry> entries) {

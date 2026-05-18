@@ -3,6 +3,7 @@ package com.abhil.buildtools.network;
 import com.abhil.buildtools.BuildTools;
 import com.abhil.buildtools.registry.ModItems;
 import com.abhil.buildtools.server.BuildToolsState;
+import com.abhil.buildtools.shape.SelectionShape;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -31,15 +32,31 @@ public record ScrollToolPayload(int direction) implements CustomPacketPayload {
         int step = payload.direction() >= 0 ? 1 : -1;
         ItemStack held = player.getMainHandItem();
         if (held.is(ModItems.ADVANCED_SELECTION_STAFF.get())) {
+            if (BuildToolsState.selectionShape(player) == SelectionShape.STAIRS) {
+                BuildToolsState.cycleStairDirection(player, step);
+                return;
+            }
             int orderDelta = payload.direction() >= 0 ? -1 : 1;
             if (!BuildToolsState.moveAdvancedPointAtLook(player, orderDelta)) {
                 BuildToolsState.cycleShape(player);
             }
-        } else if (held.is(ModItems.SELECTION_STAFF.get()) || held.is(ModItems.AREA_BREAKER.get())) {
+        } else if (held.is(ModItems.AREA_BREAKER.get())) {
+            if (BuildToolsState.selectionShape(player) == SelectionShape.STAIRS) {
+                BuildToolsState.cycleStairDirection(player, step);
+            } else {
+                BuildToolsState.cycleShape(player);
+            }
+        } else if (held.is(ModItems.SELECTION_STAFF.get())) {
             BuildToolsState.cycleShape(player);
         } else if (held.is(ModItems.BUILDER_BRUSH.get())) {
             BuildToolsState.changeBrushRadius(player, step);
-        } else if (held.is(ModItems.BUILDER_WAND.get()) || held.is(ModItems.ADVANCED_BUILDER_WAND.get())) {
+        } else if (held.is(ModItems.ADVANCED_BUILDER_WAND.get())) {
+            if (BuildToolsState.selectionShape(player) == SelectionShape.STAIRS) {
+                BuildToolsState.cycleStairDirection(player, step);
+            } else {
+                BuildToolsState.cycleMode(player);
+            }
+        } else if (held.is(ModItems.BUILDER_WAND.get())) {
             BuildToolsState.cycleMode(player);
         }
     }

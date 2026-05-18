@@ -5,6 +5,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.util.Mth;
 
 public final class ShapeGenerator {
@@ -12,6 +13,13 @@ public final class ShapeGenerator {
     }
 
     public static List<BlockPos> generate(Selection selection) {
+        return generate(selection, CustomShapeMode.AUTO, StairDirectionOverride.POINT_ORDER);
+    }
+
+    public static List<BlockPos> generate(Selection selection, CustomShapeMode customMode, StairDirectionOverride stairDirection) {
+        if (selection.shape() == SelectionShape.CUSTOM_SMART) {
+            return customSmart(selection.points(), customMode);
+        }
         if (!selection.isComplete()) {
             return List.of();
         }
@@ -34,6 +42,8 @@ public final class ShapeGenerator {
             case TUNNEL -> tunnel(a, b);
             case ARCH -> arch(a, b);
             case DOME -> dome(a, b);
+            case CUSTOM_SMART -> customSmart(selection.points(), customMode);
+            case STAIRS -> stairs(selection, stairDirection);
         };
     }
 
@@ -231,6 +241,348 @@ public final class ShapeGenerator {
             }
         }
         return shell;
+    }
+
+    public static List<BlockPos> customSmart(List<BlockPos> points, CustomShapeMode mode) {
+        if (points.isEmpty()) {
+            return List.of();
+        }
+        if (points.size() == 1) {
+            return List.of(points.getFirst().immutable());
+        }
+        CustomShapeMode resolved = mode == CustomShapeMode.AUTO ? inferCustomMode(points) : mode;
+        return switch (resolved) {
+            case AUTO, LINE -> polyline(points);
+            case POLYGON_FILL -> polygonFill(points);
+            case SURFACE -> customSurface(points);
+            case VOLUME -> convexVolume(points);
+        };
+    }
+
+    public static List<BlockPos> stairs(Selection selection, StairDirectionOverride override) {
+        if (!selection.isComplete()) {
+            return List.of();
+        }
+        BlockPos a = selection.first();
+        BlockPos b = selection.second();
+        int minX = Math.min(a.getX(), b.getX());
+        int minY = Math.min(a.getY(), b.getY());
+        int minZ = Math.min(a.getZ(), b.getZ());
+        int maxX = Math.max(a.getX(), b.getX());
+        int maxY = Math.max(a.getY(), b.getY());
+        int maxZ = Math.max(a.getZ(), b.getZ());
+        Direction direction = stairDirection(selection, override);
+        int length = direction.getAxis() == Direction.Axis.X ? maxX - minX + 1 : maxZ - minZ + 1;
+        int height = maxY - minY + 1;
+        Set<BlockPos> positions = new LinkedHashSet<>();
+
+        for (int along = 0; along < length; along++) {
+            int topY = minY + Mth.floor((double) along * (double) (height - 1) / (double) Math.max(1, length - 1));
+            if (direction == Direction.EAST || direction == Direction.WEST) {
+                int x = direction == Direction.EAST ? minX + along : maxX - along;
+                for (int z = minZ; z <= maxZ; z++) {
+                    positions.add(new BlockPos(x, topY, z));
+                }
+            } else {
+                int z = direction == Direction.SOUTH ? minZ + along : maxZ - along;
+                for (int x = minX; x <= maxX; x++) {
+                    positions.add(new BlockPos(x, topY, z));
+                }
+            }
+        }
+        return List.copyOf(positions);
+    }
+
+    public static Direction stairDirection(Selection selection, StairDirectionOverride override) {
+        if (override.direction() != null) {
+            return override.direction();
+        }
+        List<BlockPos> points = selection.points();
+        if (points.size() >= 2) {
+            Direction fromPoints = horizontalDirection(points.getFirst(), points.getLast());
+            if (fromPoints != null) {
+                return fromPoints;
+            }
+        }
+        if (!selection.isComplete()) {
+            return Direction.NORTH;
+        }
+        int dx = selection.second().getX() - selection.first().getX();
+        int dz = selection.second().getZ() - selection.first().getZ();
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            return dx >= 0 ? Direction.EAST : Direction.WEST;
+        }
+        return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+    }
+
+    private static CustomShapeMode inferCustomMode(List<BlockPos> points) {
+        if (points.size() <= 2) {
+            return CustomShapeMode.LINE;
+        }
+        return isAxisCoplanar(points) ? CustomShapeMode.POLYGON_FILL : CustomShapeMode.VOLUME;
+    }
+
+    private static boolean isAxisCoplanar(List<BlockPos> points) {
+        int x = points.getFirst().getX();
+        int y = points.getFirst().getY();
+        int z = points.getFirst().getZ();
+        boolean sameX = true;
+        boolean sameY = true;
+        boolean sameZ = true;
+        for (BlockPos point : points) {
+            sameX &= point.getX() == x;
+            sameY &= point.getY() == y;
+            sameZ &= point.getZ() == z;
+        }
+        return sameX || sameY || sameZ;
+    }
+
+    private static List<BlockPos> polygonFill(List<BlockPos> points) {
+        if (!isAxisCoplanar(points)) {
+            return polyline(points);
+        }
+        Set<BlockPos> positions = new LinkedHashSet<>(polyline(closed(points)));
+        int minX = points.stream().mapToInt(BlockPos::getX).min().orElse(0);
+        int minY = points.stream().mapToInt(BlockPos::getY).min().orElse(0);
+        int minZ = points.stream().mapToInt(BlockPos::getZ).min().orElse(0);
+        int maxX = points.stream().mapToInt(BlockPos::getX).max().orElse(0);
+        int maxY = points.stream().mapToInt(BlockPos::getY).max().orElse(0);
+        int maxZ = points.stream().mapToInt(BlockPos::getZ).max().orElse(0);
+        if (minX == maxX) {
+            fill2D(points, positions, Plane.X, minX, minY, maxY, minZ, maxZ);
+        } else if (minY == maxY) {
+            fill2D(points, positions, Plane.Y, minY, minX, maxX, minZ, maxZ);
+        } else {
+            fill2D(points, positions, Plane.Z, minZ, minX, maxX, minY, maxY);
+        }
+        return List.copyOf(positions);
+    }
+
+    private static void fill2D(List<BlockPos> points, Set<BlockPos> positions, Plane plane, int fixed, int minA, int maxA, int minB, int maxB) {
+        for (int a = minA; a <= maxA; a++) {
+            for (int b = minB; b <= maxB; b++) {
+                if (insidePolygon(points, plane, a + 0.5D, b + 0.5D)) {
+                    positions.add(plane.pos(fixed, a, b));
+                }
+            }
+        }
+    }
+
+    private static boolean insidePolygon(List<BlockPos> points, Plane plane, double a, double b) {
+        boolean inside = false;
+        for (int i = 0, j = points.size() - 1; i < points.size(); j = i++) {
+            double ai = plane.a(points.get(i));
+            double bi = plane.b(points.get(i));
+            double aj = plane.a(points.get(j));
+            double bj = plane.b(points.get(j));
+            if ((bi > b) != (bj > b) && a < (aj - ai) * (b - bi) / (bj - bi) + ai) {
+                inside = !inside;
+            }
+        }
+        return inside;
+    }
+
+    private static List<BlockPos> customSurface(List<BlockPos> points) {
+        if (isAxisCoplanar(points)) {
+            return polygonFill(points);
+        }
+        Set<BlockPos> volume = new LinkedHashSet<>(convexVolume(points));
+        Set<BlockPos> surface = new LinkedHashSet<>();
+        for (BlockPos pos : volume) {
+            for (Direction direction : Direction.values()) {
+                if (!volume.contains(pos.relative(direction))) {
+                    surface.add(pos);
+                    break;
+                }
+            }
+        }
+        return List.copyOf(surface);
+    }
+
+    private static List<BlockPos> convexVolume(List<BlockPos> points) {
+        if (points.size() < 4) {
+            return polygonFill(points);
+        }
+        List<HullPlane> planes = hullPlanes(points);
+        if (planes.isEmpty()) {
+            return cuboid(boundsMin(points), boundsMax(points), Filter.ALL);
+        }
+        int minX = points.stream().mapToInt(BlockPos::getX).min().orElse(0);
+        int minY = points.stream().mapToInt(BlockPos::getY).min().orElse(0);
+        int minZ = points.stream().mapToInt(BlockPos::getZ).min().orElse(0);
+        int maxX = points.stream().mapToInt(BlockPos::getX).max().orElse(0);
+        int maxY = points.stream().mapToInt(BlockPos::getY).max().orElse(0);
+        int maxZ = points.stream().mapToInt(BlockPos::getZ).max().orElse(0);
+        List<BlockPos> positions = new ArrayList<>();
+        for (int y = minY; y <= maxY; y++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                for (int x = minX; x <= maxX; x++) {
+                    if (insideHull(planes, x + 0.5D, y + 0.5D, z + 0.5D)) {
+                        positions.add(new BlockPos(x, y, z));
+                    }
+                }
+            }
+        }
+        positions.addAll(points);
+        return List.copyOf(new LinkedHashSet<>(positions));
+    }
+
+    private static List<HullPlane> hullPlanes(List<BlockPos> points) {
+        List<HullPlane> planes = new ArrayList<>();
+        for (int i = 0; i < points.size() - 2; i++) {
+            for (int j = i + 1; j < points.size() - 1; j++) {
+                for (int k = j + 1; k < points.size(); k++) {
+                    HullPlane plane = HullPlane.of(points.get(i), points.get(j), points.get(k), points);
+                    if (plane != null && planes.stream().noneMatch(plane::samePlane)) {
+                        planes.add(plane);
+                    }
+                }
+            }
+        }
+        return planes;
+    }
+
+    private static boolean insideHull(List<HullPlane> planes, double x, double y, double z) {
+        for (HullPlane plane : planes) {
+            if (!plane.inside(x, y, z)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static List<BlockPos> closed(List<BlockPos> points) {
+        List<BlockPos> closed = new ArrayList<>(points);
+        if (!closed.getFirst().equals(closed.getLast())) {
+            closed.add(closed.getFirst());
+        }
+        return closed;
+    }
+
+    private static BlockPos boundsMin(List<BlockPos> points) {
+        return new BlockPos(
+                points.stream().mapToInt(BlockPos::getX).min().orElse(0),
+                points.stream().mapToInt(BlockPos::getY).min().orElse(0),
+                points.stream().mapToInt(BlockPos::getZ).min().orElse(0));
+    }
+
+    private static BlockPos boundsMax(List<BlockPos> points) {
+        return new BlockPos(
+                points.stream().mapToInt(BlockPos::getX).max().orElse(0),
+                points.stream().mapToInt(BlockPos::getY).max().orElse(0),
+                points.stream().mapToInt(BlockPos::getZ).max().orElse(0));
+    }
+
+    private static Direction horizontalDirection(BlockPos from, BlockPos to) {
+        int dx = to.getX() - from.getX();
+        int dz = to.getZ() - from.getZ();
+        if (dx == 0 && dz == 0) {
+            return null;
+        }
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            return dx >= 0 ? Direction.EAST : Direction.WEST;
+        }
+        return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+    }
+
+    private enum Plane {
+        X {
+            @Override
+            double a(BlockPos pos) {
+                return pos.getY();
+            }
+
+            @Override
+            double b(BlockPos pos) {
+                return pos.getZ();
+            }
+
+            @Override
+            BlockPos pos(int fixed, int a, int b) {
+                return new BlockPos(fixed, a, b);
+            }
+        },
+        Y {
+            @Override
+            double a(BlockPos pos) {
+                return pos.getX();
+            }
+
+            @Override
+            double b(BlockPos pos) {
+                return pos.getZ();
+            }
+
+            @Override
+            BlockPos pos(int fixed, int a, int b) {
+                return new BlockPos(a, fixed, b);
+            }
+        },
+        Z {
+            @Override
+            double a(BlockPos pos) {
+                return pos.getX();
+            }
+
+            @Override
+            double b(BlockPos pos) {
+                return pos.getY();
+            }
+
+            @Override
+            BlockPos pos(int fixed, int a, int b) {
+                return new BlockPos(a, b, fixed);
+            }
+        };
+
+        abstract double a(BlockPos pos);
+
+        abstract double b(BlockPos pos);
+
+        abstract BlockPos pos(int fixed, int a, int b);
+    }
+
+    private record HullPlane(double nx, double ny, double nz, double d, int side) {
+        private static HullPlane of(BlockPos a, BlockPos b, BlockPos c, List<BlockPos> points) {
+            double ux = b.getX() - a.getX();
+            double uy = b.getY() - a.getY();
+            double uz = b.getZ() - a.getZ();
+            double vx = c.getX() - a.getX();
+            double vy = c.getY() - a.getY();
+            double vz = c.getZ() - a.getZ();
+            double nx = uy * vz - uz * vy;
+            double ny = uz * vx - ux * vz;
+            double nz = ux * vy - uy * vx;
+            double length = Math.sqrt(nx * nx + ny * ny + nz * nz);
+            if (length <= 0.0001D) {
+                return null;
+            }
+            nx /= length;
+            ny /= length;
+            nz /= length;
+            double d = -(nx * a.getX() + ny * a.getY() + nz * a.getZ());
+            boolean positive = false;
+            boolean negative = false;
+            for (BlockPos point : points) {
+                double signed = nx * point.getX() + ny * point.getY() + nz * point.getZ() + d;
+                positive |= signed > 0.001D;
+                negative |= signed < -0.001D;
+            }
+            if (positive && negative) {
+                return null;
+            }
+            return new HullPlane(nx, ny, nz, d, positive ? 1 : -1);
+        }
+
+        private boolean inside(double x, double y, double z) {
+            double signed = nx * x + ny * y + nz * z + d;
+            return side >= 0 ? signed >= -0.501D : signed <= 0.501D;
+        }
+
+        private boolean samePlane(HullPlane other) {
+            return Math.abs(Math.abs(nx * other.nx + ny * other.ny + nz * other.nz) - 1.0D) < 0.001D
+                    && Math.abs(Math.abs(d) - Math.abs(other.d)) < 0.001D;
+        }
     }
 
     public enum Filter {
