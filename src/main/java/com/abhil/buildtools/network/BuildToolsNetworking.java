@@ -19,5 +19,7 @@ public final class BuildToolsNetworking {
         registrar.playToServer(RequestPreviewPayload.TYPE, RequestPreviewPayload.STREAM_CODEC, RequestPreviewPayload::handle);
         registrar.playToServer(ScrollToolPayload.TYPE, ScrollToolPayload.STREAM_CODEC, ScrollToolPayload::handle);
         registrar.playToServer(OpenToolMenuPayload.TYPE, OpenToolMenuPayload.STREAM_CODEC, OpenToolMenuPayload::handle);
+        registrar.playToServer(ShortcutActionPayload.TYPE, ShortcutActionPayload.STREAM_CODEC, ShortcutActionPayload::handle);
+        registrar.playToServer(BlueprintLibraryQueryPayload.TYPE, BlueprintLibraryQueryPayload.STREAM_CODEC, BlueprintLibraryQueryPayload::handle);
     }
 }

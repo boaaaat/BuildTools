@@ -1,6 +1,7 @@
 package com.abhil.buildtools.client;
 
 import com.abhil.buildtools.shape.SelectionShape;
+import com.abhil.buildtools.config.BuildToolsClientConfig;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import java.util.HashSet;
@@ -36,11 +37,15 @@ public final class ClientSelectionRenderer {
         poseStack.pushPose();
         poseStack.translate(-camera.x, -camera.y, -camera.z);
 
+        Color self = Color.of(BuildToolsClientConfig.SELF_PREVIEW_COLOR.get());
+        Color shared = Color.of(BuildToolsClientConfig.SHARED_PREVIEW_COLOR.get());
         ClientSelectionData.first().ifPresent(pos -> renderBox(poseStack, lines, new AABB(pos), 0.1F, 0.8F, 1.0F, 1.0F));
         ClientSelectionData.second().ifPresent(pos -> renderBox(poseStack, lines, new AABB(pos), 1.0F, 0.7F, 0.1F, 1.0F));
         renderSelectionHandles(poseStack, lines);
         renderAdvancedPointBoxes(poseStack, lines);
-        renderSharedSelections(poseStack, lines);
+        if (BuildToolsClientConfig.SHOW_SHARED_SELECTIONS.get()) {
+            renderSharedSelections(poseStack, lines, shared);
+        }
 
         List<BlockPos> preview = ClientSelectionData.preview();
         if (!preview.isEmpty()) {
@@ -50,21 +55,23 @@ public final class ClientSelectionRenderer {
             }
 
             if (rendersAffectedBlocks(ClientSelectionData.shape(), ClientSelectionData.detailedPreview())) {
-                renderAffectedEdges(poseStack, lines, preview, 0.2F, 1.0F, 0.25F, 0.9F);
+                renderAffectedEdges(poseStack, lines, preview, self.red(), self.green(), self.blue(), 0.9F);
             } else if (bounds != null) {
-                renderBox(poseStack, lines, bounds.inflate(0.03D), 0.2F, 1.0F, 0.25F, 1.0F);
+                renderBox(poseStack, lines, bounds.inflate(0.03D), self.red(), self.green(), self.blue(), 1.0F);
             }
         }
 
         buffers.endBatch(RenderType.lines());
         renderAdvancedPointLabels(event, poseStack, buffers);
-        renderSharedPointLabels(event, poseStack, buffers);
+        if (BuildToolsClientConfig.SHOW_SHARED_SELECTIONS.get()) {
+            renderSharedPointLabels(event, poseStack, buffers);
+        }
         poseStack.popPose();
         buffers.endBatch();
     }
 
     private static boolean rendersAffectedBlocks(SelectionShape shape, boolean detailedPreview) {
-        return detailedPreview || shape != SelectionShape.CUBOID;
+        return BuildToolsClientConfig.DETAILED_PREVIEW.get() && (detailedPreview || shape != SelectionShape.CUBOID);
     }
 
     private static void renderBox(PoseStack poseStack, VertexConsumer lines, AABB box, float red, float green, float blue, float alpha) {
@@ -118,7 +125,7 @@ public final class ClientSelectionRenderer {
         }
     }
 
-    private static void renderSharedSelections(PoseStack poseStack, VertexConsumer lines) {
+    private static void renderSharedSelections(PoseStack poseStack, VertexConsumer lines, Color color) {
         for (ClientSelectionData.SharedSelection selection : ClientSelectionData.sharedSelections()) {
             selection.first().ifPresent(pos -> renderBox(poseStack, lines, new AABB(pos), 0.45F, 0.95F, 1.0F, 0.8F));
             selection.second().ifPresent(pos -> renderBox(poseStack, lines, new AABB(pos), 1.0F, 0.85F, 0.35F, 0.8F));
@@ -132,9 +139,9 @@ public final class ClientSelectionRenderer {
                     bounds = bounds == null ? new AABB(pos) : bounds.minmax(new AABB(pos));
                 }
                 if (rendersAffectedBlocks(selection.shape(), selection.detailedPreview())) {
-                    renderAffectedEdges(poseStack, lines, selection.preview(), 0.6F, 0.9F, 1.0F, 0.55F);
+                    renderAffectedEdges(poseStack, lines, selection.preview(), color.red(), color.green(), color.blue(), 0.55F);
                 } else if (bounds != null) {
-                    renderBox(poseStack, lines, bounds.inflate(0.03D), 0.6F, 0.9F, 1.0F, 0.65F);
+                    renderBox(poseStack, lines, bounds.inflate(0.03D), color.red(), color.green(), color.blue(), 0.65F);
                 }
             }
         }
@@ -283,6 +290,12 @@ public final class ClientSelectionRenderer {
                 return ay > by;
             }
             return az > bz;
+        }
+    }
+
+    private record Color(float red, float green, float blue) {
+        private static Color of(int rgb) {
+            return new Color(((rgb >> 16) & 0xFF) / 255.0F, ((rgb >> 8) & 0xFF) / 255.0F, (rgb & 0xFF) / 255.0F);
         }
     }
 }

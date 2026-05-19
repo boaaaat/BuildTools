@@ -76,6 +76,20 @@ public final class BuildOperationEngine {
         PENDING_OPERATIONS.remove(player.getUUID());
     }
 
+    public static boolean confirmPendingOperation(ServerPlayer player) {
+        PendingOperation operation = PENDING_OPERATIONS.remove(player.getUUID());
+        if (operation == null) {
+            return false;
+        }
+        if (!operation.dimension().equals(player.level().dimension())) {
+            fail(player, "buildtools.error.dimension_mismatch");
+            return false;
+        }
+        return operation.free()
+                ? enqueueFree(player, player.serverLevel(), operation.positions(), operation.targets(), operation.targetBlockEntities(), operation.undo(), operation.refund(), operation.producedDrops(), operation.removedEntities(), operation.addedEntities(), operation.trackHistory())
+                : enqueue(player, player.serverLevel(), operation.positions(), operation.targets(), operation.targetBlockEntities(), operation.undo(), operation.refund(), operation.producedDrops(), operation.removedEntities(), operation.addedEntities(), operation.trackHistory());
+    }
+
     static void captureToolDrop(EntityJoinLevelEvent event) {
         DropCapture capture = ACTIVE_DROP_CAPTURE.get();
         if (capture == null || event.getLevel() != capture.level()) {
@@ -132,6 +146,9 @@ public final class BuildOperationEngine {
         }
         if (generated.size() > BuildToolsConfig.MAX_OPERATION_VOLUME.get()) {
             fail(player, Component.translatable("buildtools.error.too_large", generated.size(), BuildToolsConfig.MAX_OPERATION_VOLUME.get()));
+            return false;
+        }
+        if (!validatePositions(player, player.serverLevel(), generated)) {
             return false;
         }
 
@@ -203,6 +220,9 @@ public final class BuildOperationEngine {
         }
         if (generated.size() > BuildToolsConfig.MAX_OPERATION_VOLUME.get()) {
             fail(player, Component.translatable("buildtools.error.too_large", generated.size(), BuildToolsConfig.MAX_OPERATION_VOLUME.get()));
+            return false;
+        }
+        if (!validatePositions(player, player.serverLevel(), generated)) {
             return false;
         }
 
@@ -289,6 +309,9 @@ public final class BuildOperationEngine {
             fail(player, Component.translatable("buildtools.error.too_large", generated.size(), BuildToolsConfig.MAX_OPERATION_VOLUME.get()));
             return false;
         }
+        if (!validatePositions(player, player.serverLevel(), generated)) {
+            return false;
+        }
 
         BuildMode mode = BuildToolsState.mode(player);
         PaletteMode paletteMode = BuildToolsState.paletteMode(player);
@@ -326,6 +349,9 @@ public final class BuildOperationEngine {
         }
 
         ServerLevel level = player.serverLevel();
+        if (!validatePositions(player, level, plan.entries().stream().map(BuildPlan.Entry::pos).toList())) {
+            return false;
+        }
         List<BlockPos> positions = new ArrayList<>();
         List<BlockState> targets = new ArrayList<>();
         List<CompoundTag> targetBlockEntities = new ArrayList<>();
@@ -386,6 +412,9 @@ public final class BuildOperationEngine {
                 ? ShapeGenerator.cylinder(origin.offset(-radius, 0, -radius), origin.offset(radius, 0, radius))
                 : ShapeGenerator.sphere(origin.offset(-radius, -radius, -radius), origin.offset(radius, radius, radius), true);
         ServerLevel level = player.serverLevel();
+        if (!validatePositions(player, level, generated)) {
+            return false;
+        }
         BlockState replaceTarget = BuildToolsState.replaceTarget(player);
         List<BlockPos> positions = new ArrayList<>();
         List<BlockState> targets = new ArrayList<>();
@@ -581,6 +610,12 @@ public final class BuildOperationEngine {
         }
 
         ServerLevel level = player.serverLevel();
+        List<BlockPos> blueprintPositions = blueprint.entries().stream()
+                .map(entry -> origin.offset(entry.offset()).immutable())
+                .toList();
+        if (!validatePositions(player, level, blueprintPositions)) {
+            return false;
+        }
         List<BlockPos> positions = new ArrayList<>();
         List<BlockState> targets = new ArrayList<>();
         List<CompoundTag> targetBlockEntities = new ArrayList<>();
@@ -668,12 +703,10 @@ public final class BuildOperationEngine {
         ServerLevel level = player.serverLevel();
         List<BlockPos> positions = new ArrayList<>();
         for (Blueprint.Entry entry : blueprint.entries()) {
-            BlockPos pos = origin.offset(entry.offset());
-            BlockState previous = level.getBlockState(pos);
-            if (!canTouch(player, level, pos, previous)) {
-                return;
-            }
-            positions.add(pos.immutable());
+            positions.add(origin.offset(entry.offset()).immutable());
+        }
+        if (!validatePositions(player, level, positions)) {
+            return;
         }
         for (CapturedEntity entity : blueprint.entities()) {
             positions.add(BlockPos.containing(origin.getX() + entity.offsetX(), origin.getY() + entity.offsetY(), origin.getZ() + entity.offsetZ()));
@@ -823,11 +856,28 @@ public final class BuildOperationEngine {
         PacketDistributor.sendToPlayer(player, new PreviewPayload(preview, true));
         PacketDistributor.sendToPlayer(player, new ToolStatusPayload(true, "Preview Ready", List.of(
                 operation.label() + ": " + operation.positions().size() + " changes",
+                operationStatsLine(operation),
                 materialPreviewLine(player, operation),
                 durabilityPreviewLine(player, operation),
                 dropPreviewLine(operation),
                 "Use the same tool again to confirm"), 0xF4C542));
         return false;
+    }
+
+    private static String operationStatsLine(PendingOperation operation) {
+        int placed = 0;
+        int removed = 0;
+        int replaced = 0;
+        for (UndoSnapshot.Entry entry : operation.undo()) {
+            if (entry.redoneState().isAir()) {
+                removed++;
+            } else if (entry.previousState().isAir() || entry.previousState().canBeReplaced()) {
+                placed++;
+            } else {
+                replaced++;
+            }
+        }
+        return "Placed: " + placed + " | Removed: " + removed + " | Replaced: " + replaced;
     }
 
     private static String materialPreviewLine(ServerPlayer player, PendingOperation operation) {
@@ -1260,6 +1310,66 @@ public final class BuildOperationEngine {
         return true;
     }
 
+    private static boolean validatePositions(ServerPlayer player, ServerLevel level, List<BlockPos> positions) {
+        if (positions.isEmpty()) {
+            return true;
+        }
+        int outOfWorld = 0;
+        int unloaded = 0;
+        int tooFar = 0;
+        BlockPos firstOutOfWorld = null;
+        ChunkPos firstUnloaded = null;
+        BlockPos firstTooFar = null;
+        List<BlockPos> valid = new ArrayList<>();
+        int maxDistanceSqr = BuildToolsConfig.MAX_OPERATION_DISTANCE.get() * BuildToolsConfig.MAX_OPERATION_DISTANCE.get();
+        for (BlockPos pos : positions) {
+            if (!Level.isInSpawnableBounds(pos)) {
+                outOfWorld++;
+                if (firstOutOfWorld == null) {
+                    firstOutOfWorld = pos;
+                }
+                continue;
+            }
+            ChunkPos chunk = new ChunkPos(pos);
+            if (!level.hasChunk(chunk.x, chunk.z)) {
+                unloaded++;
+                if (firstUnloaded == null) {
+                    firstUnloaded = chunk;
+                }
+                continue;
+            }
+            if (player.blockPosition().distSqr(pos) > maxDistanceSqr) {
+                tooFar++;
+                if (firstTooFar == null) {
+                    firstTooFar = pos;
+                }
+                continue;
+            }
+            valid.add(pos);
+        }
+        if (outOfWorld == 0 && unloaded == 0 && tooFar == 0) {
+            return true;
+        }
+        List<BlockPos> preview = valid.size() > BuildToolsNetworking.MAX_PREVIEW_POSITIONS
+                ? valid.subList(0, BuildToolsNetworking.MAX_PREVIEW_POSITIONS)
+                : valid;
+        PacketDistributor.sendToPlayer(player, new PreviewPayload(preview, true));
+        List<String> lines = new ArrayList<>();
+        lines.add("Valid blocks previewed: " + valid.size());
+        if (outOfWorld > 0) {
+            lines.add("Out of world: " + outOfWorld + " first " + firstOutOfWorld.toShortString());
+        }
+        if (unloaded > 0) {
+            lines.add("Unloaded chunks: " + unloaded + " first " + firstUnloaded.x + "," + firstUnloaded.z);
+        }
+        if (tooFar > 0) {
+            lines.add("Too far: " + tooFar + " first " + firstTooFar.toShortString());
+        }
+        PacketDistributor.sendToPlayer(player, new ToolStatusPayload(true, "BuildTools Warning", lines, 0xF05A4F));
+        fail(player, Component.translatable("buildtools.error.invalid_positions", outOfWorld + unloaded + tooFar));
+        return false;
+    }
+
     private static boolean canTouch(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState previous) {
         if (!Level.isInSpawnableBounds(pos)) {
             fail(player, "buildtools.error.out_of_world");
@@ -1503,6 +1613,9 @@ public final class BuildOperationEngine {
 
     private static boolean chargesMiningDurability(ServerLevel level, UndoSnapshot.Entry entry) {
         if (!minesBlock(entry.previousState(), entry.redoneState())) {
+            return false;
+        }
+        if (!entry.previousState().is(BlockTags.MINEABLE_WITH_PICKAXE)) {
             return false;
         }
         float hardness = entry.previousState().getDestroySpeed(level, entry.pos());

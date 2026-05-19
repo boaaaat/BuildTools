@@ -82,9 +82,9 @@ public final class BuildToolServerEvents {
     @SubscribeEvent
     public static void chat(ServerChatEvent event) {
         ServerPlayer player = event.getPlayer();
-        if (BuildToolsState.hasPendingBlueprintCreate(player)) {
+        if (BuildToolsState.hasPendingTextPrompt(player)) {
             event.setCanceled(true);
-            BuildToolsState.completeBlueprintCreatePrompt(player, event.getRawText());
+            BuildToolsState.completePendingTextPrompt(player, event.getRawText());
         }
     }
 

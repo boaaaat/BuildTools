@@ -117,12 +117,14 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         Map<ItemStackKey, Integer> storedDrops = owner == null ? Map.of() : BuildToolsState.storedDrops(owner);
         if (history.isEmpty()) {
             menuItems.setItem(0, emptyHistoryItem(undo));
+            menuItems.setItem(25, utilityItem(Items.BARRIER, "buildtools.menu.clear_history", "buildtools.menu.clear_history.description"));
             menuItems.setItem(26, collectDropsItem(storedDrops));
             return;
         }
         for (int i = 0; i < Math.min(MENU_SIZE - 1, history.size()); i++) {
             menuItems.setItem(i, historyItem(undo, i, history.get(i)));
         }
+        menuItems.setItem(25, utilityItem(Items.BARRIER, "buildtools.menu.clear_history", "buildtools.menu.clear_history.description"));
         menuItems.setItem(26, collectDropsItem(storedDrops));
     }
 
@@ -132,7 +134,9 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(2, modeItem(Items.RED_STAINED_GLASS, BuildMode.OVERWRITE));
         menuItems.setItem(3, utilityItem(Items.BARRIER, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
         menuItems.setItem(4, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.save_preset", "buildtools.menu.save_preset.description"));
-        menuItems.setItem(5, utilityItem(Items.BOOK, "buildtools.menu.load_preset", "buildtools.menu.load_preset.description"));
+        menuItems.setItem(5, utilityItem(Items.BOOK, "buildtools.menu.presets", "buildtools.menu.presets.description"));
+        menuItems.setItem(6, utilityItem(Items.CHEST, "buildtools.menu.material_checklist", "buildtools.menu.material_checklist.description"));
+        menuItems.setItem(8, utilityItem(Items.KNOWLEDGE_BOOK, "buildtools.menu.help", "buildtools.menu.help.description"));
         populateShapes(9);
     }
 
@@ -153,7 +157,8 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
                 shared));
         populateShapes(9);
         menuItems.setItem(22, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.save_preset", "buildtools.menu.save_preset.description"));
-        menuItems.setItem(23, utilityItem(Items.BOOK, "buildtools.menu.load_preset", "buildtools.menu.load_preset.description"));
+        menuItems.setItem(23, utilityItem(Items.BOOK, "buildtools.menu.presets", "buildtools.menu.presets.description"));
+        menuItems.setItem(24, utilityItem(Items.KNOWLEDGE_BOOK, "buildtools.menu.help", "buildtools.menu.help.description"));
     }
 
     private void populateBrushMenu() {
@@ -172,9 +177,10 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(0, utilityItem(Items.BARRIER, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
         menuItems.setItem(1, utilityItem(Items.ENDER_EYE, "buildtools.menu.rotate_selection", "buildtools.menu.rotate_selection.description"));
         menuItems.setItem(2, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.save_preset", "buildtools.menu.save_preset.description"));
-        menuItems.setItem(3, utilityItem(Items.BOOK, "buildtools.menu.load_preset", "buildtools.menu.load_preset.description"));
+        menuItems.setItem(3, utilityItem(Items.BOOK, "buildtools.menu.presets", "buildtools.menu.presets.description"));
         menuItems.setItem(4, breakerPresetItem(Items.IRON_PICKAXE, AreaBreakerPreset.NORMAL));
         menuItems.setItem(5, breakerPresetItem(Items.WHEAT_SEEDS, AreaBreakerPreset.CLEAR_SNOW_CROPS));
+        menuItems.setItem(8, utilityItem(Items.KNOWLEDGE_BOOK, "buildtools.menu.help", "buildtools.menu.help.description"));
         populateShapes(9);
     }
 
@@ -188,6 +194,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(6, utilityItem(Items.CLOCK, "buildtools.menu.rotate_blueprint", "buildtools.menu.rotate_blueprint.description"));
         menuItems.setItem(7, utilityItem(Items.IRON_BARS, "buildtools.menu.mirror_blueprint_x", "buildtools.menu.mirror_blueprint.description"));
         menuItems.setItem(8, utilityItem(Items.CHAIN, "buildtools.menu.mirror_blueprint_z", "buildtools.menu.mirror_blueprint.description"));
+        menuItems.setItem(16, utilityItem(Items.CHEST, "buildtools.menu.material_checklist", "buildtools.menu.material_checklist.description"));
         menuItems.setItem(17, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
         menuItems.setItem(18, NudgeMenuItems.item(owner, Direction.WEST, "buildtools.menu.nudge_paste.description"));
         menuItems.setItem(19, NudgeMenuItems.item(owner, Direction.EAST, "buildtools.menu.nudge_paste.description"));
@@ -195,6 +202,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(21, NudgeMenuItems.item(owner, Direction.UP, "buildtools.menu.nudge_paste.description"));
         menuItems.setItem(22, NudgeMenuItems.item(owner, Direction.NORTH, "buildtools.menu.nudge_paste.description"));
         menuItems.setItem(23, NudgeMenuItems.item(owner, Direction.SOUTH, "buildtools.menu.nudge_paste.description"));
+        menuItems.setItem(26, utilityItem(Items.KNOWLEDGE_BOOK, "buildtools.menu.help", "buildtools.menu.help.description"));
     }
 
     private void populateShapes(int startSlot) {
@@ -217,6 +225,10 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
                 if (slotId == 26 && BuildOperationEngine.collectStoredDrops(player)) {
                     yield true;
                 }
+                if (slotId == 25) {
+                    BuildToolsState.clearHistory(player);
+                    yield true;
+                }
                 if (slotId == 0 && BuildToolsState.undoCount(player) > 0) {
                     if (BuildOperationEngine.undo(player)) {
                         damageHeldHistoryToken(player, ModItems.UNDO_TOKEN.get());
@@ -227,6 +239,10 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             }
             case REDO -> {
                 if (slotId == 26 && BuildOperationEngine.collectStoredDrops(player)) {
+                    yield true;
+                }
+                if (slotId == 25) {
+                    BuildToolsState.clearHistory(player);
                     yield true;
                 }
                 if (slotId == 0 && BuildToolsState.redoCount(player) > 0) {
@@ -268,7 +284,9 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         switch (slotId) {
             case 3 -> BuildToolsState.clearSelection(player);
             case 4 -> BuildToolsState.savePreset(player);
-            case 5 -> BuildToolsState.loadPreset(player);
+            case 5 -> PresetLibraryMenu.open(player);
+            case 6 -> MaterialChecklistMenu.open(player);
+            case 8 -> HelpMenu.open(player);
             default -> {
                 return handleShapeClick(player, slotId, 9);
             }
@@ -288,7 +306,8 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case 7 -> BuildToolsState.rotateSelection(player);
             case 8 -> BuildToolsState.toggleSelectionVisibility(player);
             case 22 -> BuildToolsState.savePreset(player);
-            case 23 -> BuildToolsState.loadPreset(player);
+            case 23 -> PresetLibraryMenu.open(player);
+            case 24 -> HelpMenu.open(player);
             default -> {
                 return handleShapeClick(player, slotId, 9);
             }
@@ -316,9 +335,10 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case 0 -> BuildToolsState.clearSelection(player);
             case 1 -> BuildToolsState.rotateSelection(player);
             case 2 -> BuildToolsState.savePreset(player);
-            case 3 -> BuildToolsState.loadPreset(player);
+            case 3 -> PresetLibraryMenu.open(player);
             case 4 -> BuildToolsState.setAreaBreakerPreset(player, AreaBreakerPreset.NORMAL);
             case 5 -> BuildToolsState.setAreaBreakerPreset(player, AreaBreakerPreset.CLEAR_SNOW_CROPS);
+            case 8 -> HelpMenu.open(player);
             default -> {
                 return handleShapeClick(player, slotId, 9);
             }
@@ -337,6 +357,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case 6 -> BuildToolsState.rotateBlueprint(player);
             case 7 -> BuildToolsState.mirrorBlueprintX(player);
             case 8 -> BuildToolsState.mirrorBlueprintZ(player);
+            case 16 -> MaterialChecklistMenu.open(player);
             case 17 -> BuildToolsState.clearSelection(player);
             case 18 -> BuildOperationEngine.nudgePendingBlueprintPaste(player, net.minecraft.core.Direction.WEST);
             case 19 -> BuildOperationEngine.nudgePendingBlueprintPaste(player, net.minecraft.core.Direction.EAST);
@@ -344,6 +365,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case 21 -> BuildOperationEngine.nudgePendingBlueprintPaste(player, net.minecraft.core.Direction.UP);
             case 22 -> BuildOperationEngine.nudgePendingBlueprintPaste(player, net.minecraft.core.Direction.NORTH);
             case 23 -> BuildOperationEngine.nudgePendingBlueprintPaste(player, net.minecraft.core.Direction.SOUTH);
+            case 26 -> HelpMenu.open(player);
             default -> {
                 return false;
             }

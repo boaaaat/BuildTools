@@ -26,7 +26,11 @@ public final class ClientToolStatusData {
     }
 
     public static boolean visible() {
-        return !title.isEmpty() && System.currentTimeMillis() - updatedAtMillis < 1500L;
+        if (title.isEmpty()) {
+            return false;
+        }
+        int autoHideSeconds = com.abhil.buildtools.config.BuildToolsClientConfig.OVERLAY_AUTO_HIDE_SECONDS.get();
+        return autoHideSeconds == 0 || System.currentTimeMillis() - updatedAtMillis < autoHideSeconds * 1000L;
     }
 
     public static String title() {

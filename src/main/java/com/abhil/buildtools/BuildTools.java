@@ -1,6 +1,7 @@
 package com.abhil.buildtools;
 
 import com.abhil.buildtools.config.BuildToolsConfig;
+import com.abhil.buildtools.config.BuildToolsClientConfig;
 import com.abhil.buildtools.network.BuildToolsNetworking;
 import com.abhil.buildtools.registry.ModCreativeTabs;
 import com.abhil.buildtools.registry.ModItems;
@@ -28,6 +29,7 @@ public final class BuildTools {
 
         NeoForge.EVENT_BUS.register(BuildToolServerEvents.class);
         modContainer.registerConfig(ModConfig.Type.COMMON, BuildToolsConfig.SPEC);
+        modContainer.registerConfig(ModConfig.Type.CLIENT, BuildToolsClientConfig.SPEC);
     }
 
     public static ResourceLocation id(String path) {

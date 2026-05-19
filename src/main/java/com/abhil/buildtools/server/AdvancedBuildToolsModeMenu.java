@@ -157,7 +157,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(0, modeItem(Items.LIME_STAINED_GLASS, BuildMode.FILL));
         menuItems.setItem(1, modeItem(Items.ORANGE_STAINED_GLASS, BuildMode.REPLACE));
         menuItems.setItem(2, modeItem(Items.RED_STAINED_GLASS, BuildMode.OVERWRITE));
-        menuItems.setItem(3, utilityItem(Items.PAPER, "buildtools.menu.materials", "buildtools.menu.materials.description"));
+        menuItems.setItem(3, utilityItem(Items.CHEST, "buildtools.menu.material_checklist", "buildtools.menu.material_checklist.description"));
         menuItems.setItem(4, utilityItem(Items.POWDER_SNOW_BUCKET, "buildtools.menu.gradient", "buildtools.menu.gradient.description",
                 owner != null && BuildToolsState.paletteMode(owner) == PaletteMode.GRADIENT));
         menuItems.setItem(5, utilityItem(Items.MAP, "buildtools.menu.save_plan", "buildtools.menu.save_plan.description"));
@@ -172,6 +172,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
                     .append(": ")
                     .append(BuildToolsState.gradientDirection(owner).displayName()));
         }
+        menuItems.setItem(40, utilityItem(Items.BOOKSHELF, "buildtools.menu.palettes", "buildtools.menu.palettes.description"));
         menuItems.setItem(41, gradientDirection);
         menuItems.setItem(42, stateItem(
                 Items.STONE_STAIRS,
@@ -185,6 +186,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
 
         menuItems.setItem(43, utilityItem(Items.CHEST, "buildtools.menu.replace_palette", "buildtools.menu.replace_palette.description"));
         populatePaletteItems();
+        menuItems.setItem(39, utilityItem(Items.KNOWLEDGE_BOOK, "buildtools.menu.help", "buildtools.menu.help.description"));
     }
 
     private void populateAdvancedSelectionMenu() {
@@ -193,7 +195,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(1, utilityItem(Items.RED_DYE, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
         menuItems.setItem(2, utilityItem(Items.ENDER_EYE, "buildtools.menu.rotate_selection", "buildtools.menu.rotate_selection.description"));
         menuItems.setItem(3, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.save_preset", "buildtools.menu.save_preset.description"));
-        menuItems.setItem(4, utilityItem(Items.BOOK, "buildtools.menu.load_preset", "buildtools.menu.load_preset.description"));
+        menuItems.setItem(4, utilityItem(Items.BOOK, "buildtools.menu.presets", "buildtools.menu.presets.description"));
         menuItems.setItem(5, stateItem(
                 Items.AMETHYST_SHARD,
                 Component.translatable("buildtools.menu.custom_shape_mode").append(": ").append(owner == null
@@ -220,6 +222,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
                 "buildtools.menu.selection_visibility",
                 "buildtools.menu.selection_visibility.description",
                 shared));
+        menuItems.setItem(53, utilityItem(Items.KNOWLEDGE_BOOK, "buildtools.menu.help", "buildtools.menu.help.description"));
     }
 
     private void populateShapes(int startSlot) {
@@ -292,14 +295,16 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
 
     private static boolean handleUtilityClick(ServerPlayer player, int slotId) {
         switch (slotId) {
-            case 3 -> BuildToolsState.sendPreview(player);
+            case 3 -> MaterialChecklistMenu.open(player);
             case 4 -> BuildToolsState.toggleGradient(player);
             case 5 -> BuildOperationEngine.createPlan(player);
             case 6 -> BuildOperationEngine.applyPlan(player);
             case 7 -> BuildToolsState.toggleRandomPattern(player);
             case 8 -> returnPalette(player);
+            case 40 -> PaletteLibraryMenu.open(player);
             case 41 -> BuildToolsState.cycleGradientDirection(player);
             case 42 -> BuildToolsState.cycleStairDirection(player, 1);
+            case 39 -> HelpMenu.open(player);
             default -> {
                 return false;
             }
@@ -313,7 +318,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             case 1 -> BuildToolsState.clearSelection(player);
             case 2 -> BuildToolsState.rotateSelection(player);
             case 3 -> BuildToolsState.savePreset(player);
-            case 4 -> BuildToolsState.loadPreset(player);
+            case 4 -> PresetLibraryMenu.open(player);
             case 5 -> BuildToolsState.cycleCustomShapeMode(player);
             case 6 -> BuildToolsState.cycleStairDirection(player, 1);
             case 27 -> BuildToolsState.nudgeSelection(player, Direction.WEST);
@@ -323,6 +328,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             case 31 -> BuildToolsState.nudgeSelection(player, Direction.NORTH);
             case 32 -> BuildToolsState.nudgeSelection(player, Direction.SOUTH);
             case 33 -> BuildToolsState.toggleSelectionVisibility(player);
+            case 53 -> HelpMenu.open(player);
             default -> {
                 int shapeIndex = shapeIndex(slotId);
                 SelectionShape[] shapes = visibleShapes();

@@ -14,10 +14,18 @@ import net.minecraft.world.level.block.state.BlockState;
 
 public final class BlockCostPlan {
     private final Map<ItemStackKey, Integer> required;
+    private final Map<ItemStackKey, Integer> inventoryAvailable;
+    private final Map<ItemStackKey, Integer> storageAvailable;
     private final Map<ItemStackKey, Integer> missing;
 
-    private BlockCostPlan(Map<ItemStackKey, Integer> required, Map<ItemStackKey, Integer> missing) {
+    private BlockCostPlan(
+            Map<ItemStackKey, Integer> required,
+            Map<ItemStackKey, Integer> inventoryAvailable,
+            Map<ItemStackKey, Integer> storageAvailable,
+            Map<ItemStackKey, Integer> missing) {
         this.required = required;
+        this.inventoryAvailable = inventoryAvailable;
+        this.storageAvailable = storageAvailable;
         this.missing = missing;
     }
 
@@ -36,17 +44,31 @@ public final class BlockCostPlan {
             }
         }
 
+        Map<ItemStackKey, Integer> inventoryAvailable = new LinkedHashMap<>();
+        Map<ItemStackKey, Integer> storageAvailable = new LinkedHashMap<>();
         Map<ItemStackKey, Integer> missing = new LinkedHashMap<>();
         if (!isCreative(player)) {
             for (Map.Entry<ItemStackKey, Integer> entry : required.entrySet()) {
-                int available = BuildingStorageManager.count(player, entry.getKey())
-                        + count(player.getInventory(), entry.getKey());
+                int inventory = count(player.getInventory(), entry.getKey());
+                int storage = BuildingStorageManager.count(player, entry.getKey());
+                inventoryAvailable.put(entry.getKey(), inventory);
+                storageAvailable.put(entry.getKey(), storage);
+                int available = storage + inventory;
                 if (available < entry.getValue()) {
                     missing.put(entry.getKey(), entry.getValue() - available);
                 }
             }
+        } else {
+            for (ItemStackKey key : required.keySet()) {
+                inventoryAvailable.put(key, 0);
+                storageAvailable.put(key, 0);
+            }
         }
-        return new BlockCostPlan(required, missing);
+        return new BlockCostPlan(
+                Map.copyOf(required),
+                Map.copyOf(inventoryAvailable),
+                Map.copyOf(storageAvailable),
+                Map.copyOf(missing));
     }
 
     public boolean canAfford() {
@@ -59,6 +81,25 @@ public final class BlockCostPlan {
 
     public Map<ItemStackKey, Integer> missing() {
         return missing;
+    }
+
+    public Map<ItemStackKey, Integer> inventoryAvailable() {
+        return inventoryAvailable;
+    }
+
+    public Map<ItemStackKey, Integer> storageAvailable() {
+        return storageAvailable;
+    }
+
+    public List<MaterialLine> lines() {
+        return required.entrySet().stream()
+                .map(entry -> new MaterialLine(
+                        entry.getKey(),
+                        entry.getValue(),
+                        inventoryAvailable.getOrDefault(entry.getKey(), 0),
+                        storageAvailable.getOrDefault(entry.getKey(), 0),
+                        missing.getOrDefault(entry.getKey(), 0)))
+                .toList();
     }
 
     public void consume(ServerPlayer player) {
@@ -124,5 +165,11 @@ public final class BlockCostPlan {
             return new ItemStack(Items.LAVA_BUCKET);
         }
         return new ItemStack(state.getBlock().asItem());
+    }
+
+    public record MaterialLine(ItemStackKey key, int required, int inventoryAvailable, int storageAvailable, int missing) {
+        public int totalAvailable() {
+            return inventoryAvailable + storageAvailable;
+        }
     }
 }
