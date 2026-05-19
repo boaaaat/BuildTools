@@ -276,6 +276,7 @@ public final class BuildToolActionbar {
         int air = 0;
         int fillTargets = 0;
         int replaceTargets = 0;
+        int surfaceTargets = 0;
         BlockState replaceMatch = BuildToolsState.replaceTarget(player);
         for (BlockPos pos : positions) {
             BlockState state = player.level().getBlockState(pos);
@@ -285,10 +286,11 @@ public final class BuildToolActionbar {
             if (state.canBeReplaced()) {
                 fillTargets++;
             }
-            if (BuildToolsState.matchesReplaceTargets(player, state, replaceMatch)) {
+            if (state.canBeReplaced() && touchesMatchingBlock(player, pos, replaceMatch)) {
                 replaceTargets++;
             }
         }
+        surfaceTargets = SurfacePlacementSupport.candidates(player.level(), positions).size();
 
         return new SelectionStats(
                 true,
@@ -300,7 +302,20 @@ public final class BuildToolActionbar {
                 positions.size() - air,
                 fillTargets,
                 replaceTargets,
+                surfaceTargets,
                 positions.size() > BuildToolsConfig.MAX_OPERATION_VOLUME.get());
+    }
+
+    private static boolean touchesMatchingBlock(ServerPlayer player, BlockPos pos, BlockState match) {
+        if (match == null || match.isAir()) {
+            return false;
+        }
+        for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.values()) {
+            if (player.level().getBlockState(pos.relative(direction)).is(match.getBlock())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String dimensions(List<BlockPos> positions) {
@@ -356,13 +371,18 @@ public final class BuildToolActionbar {
             int solid,
             int fillTargets,
             int replaceTargets,
+            int surfaceTargets,
             boolean tooLarge) {
         private static SelectionStats invalid(String status) {
-            return new SelectionStats(false, status, "", "", 0, 0, 0, 0, 0, false);
+            return new SelectionStats(false, status, "", "", 0, 0, 0, 0, 0, 0, false);
         }
 
         private int targetsFor(BuildMode mode) {
-            return fillTargets;
+            return switch (mode) {
+                case FILL -> fillTargets;
+                case REPLACE -> replaceTargets;
+                case SURFACE -> surfaceTargets;
+            };
         }
     }
 }

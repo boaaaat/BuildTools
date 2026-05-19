@@ -131,7 +131,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
     private void populateBuilderMenu() {
         menuItems.setItem(0, modeItem(Items.LIME_STAINED_GLASS, BuildMode.FILL));
         menuItems.setItem(1, modeItem(Items.ORANGE_STAINED_GLASS, BuildMode.REPLACE));
-        menuItems.setItem(2, modeItem(Items.RED_STAINED_GLASS, BuildMode.OVERWRITE));
+        menuItems.setItem(2, modeItem(Items.LIGHT_BLUE_STAINED_GLASS, BuildMode.SURFACE));
         menuItems.setItem(3, utilityItem(Items.BARRIER, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
         menuItems.setItem(4, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.save_preset", "buildtools.menu.save_preset.description"));
         menuItems.setItem(5, utilityItem(Items.BOOK, "buildtools.menu.presets", "buildtools.menu.presets.description"));

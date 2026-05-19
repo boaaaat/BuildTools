@@ -947,9 +947,38 @@ public final class BuildToolsState {
     public static BlockState replaceTarget(ServerPlayer player) {
         return replaceTargets(player).stream().findFirst()
                 .orElseGet(() -> Optional.ofNullable(REPLACE_TARGETS.get(player.getUUID()))
-                .orElseGet(() -> selection(player).firstOptional()
-                        .map(pos -> player.level().getBlockState(pos))
-                        .orElse(player.level().getBlockState(player.blockPosition()))));
+                .orElseGet(() -> inferredReplaceTarget(player)));
+    }
+
+    private static BlockState inferredReplaceTarget(ServerPlayer player) {
+        Selection selection = selection(player);
+        BlockState first = selection.firstOptional()
+                .map(pos -> player.level().getBlockState(pos))
+                .orElse(player.level().getBlockState(player.blockPosition()));
+        if (isReplaceTargetCandidate(first)) {
+            return first;
+        }
+        if (selection.dimension() != null && selection.dimension().equals(player.level().dimension())) {
+            for (BlockPos pos : generatedSelection(player)) {
+                BlockState state = player.level().getBlockState(pos);
+                if (isReplaceTargetCandidate(state)) {
+                    return state;
+                }
+            }
+            for (BlockPos pos : generatedSelection(player)) {
+                for (Direction direction : Direction.values()) {
+                    BlockState state = player.level().getBlockState(pos.relative(direction));
+                    if (isReplaceTargetCandidate(state)) {
+                        return state;
+                    }
+                }
+            }
+        }
+        return first;
+    }
+
+    private static boolean isReplaceTargetCandidate(BlockState state) {
+        return !state.isAir() && !state.canBeReplaced();
     }
 
     public static List<BlockState> replaceTargets(ServerPlayer player) {
@@ -1267,21 +1296,39 @@ public final class BuildToolsState {
             return generated;
         }
         BuildMode mode = mode(player);
-        if (mode == BuildMode.OVERWRITE) {
-            return generated;
-        }
-
+        List<BlockPos> previewCandidates = mode == BuildMode.SURFACE ? SurfacePlacementSupport.candidates(player.level(), generated) : generated;
         List<BlockPos> filtered = new ArrayList<>();
         BlockState replaceMatch = replaceTarget(player);
-        for (BlockPos pos : generated) {
+        for (BlockPos pos : previewCandidates) {
             BlockState state = player.level().getBlockState(pos);
-            if (mode == BuildMode.FILL && state.canBeReplaced()) {
-                filtered.add(pos);
-            } else if (mode == BuildMode.REPLACE && matchesReplaceTargets(player, state, replaceMatch)) {
+            if (canPreviewPlace(player, pos, state, mode, replaceMatch)) {
                 filtered.add(pos);
             }
         }
         return filtered;
+    }
+
+    private static boolean canPreviewPlace(ServerPlayer player, BlockPos pos, BlockState state, BuildMode mode, BlockState replaceMatch) {
+        if (!state.canBeReplaced()) {
+            return false;
+        }
+        return switch (mode) {
+            case FILL -> true;
+            case REPLACE -> touchesMatchingBlock(player, pos, replaceMatch);
+            case SURFACE -> SurfacePlacementSupport.touchesSolidBlock(player.level(), pos);
+        };
+    }
+
+    private static boolean touchesMatchingBlock(ServerPlayer player, BlockPos pos, BlockState match) {
+        if (match == null || match.isAir()) {
+            return false;
+        }
+        for (Direction direction : Direction.values()) {
+            if (player.level().getBlockState(pos.relative(direction)).is(match.getBlock())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String format(BlockPos pos) {
@@ -1630,7 +1677,20 @@ public final class BuildToolsState {
     }
 
     private static Optional<EnumMap<ToolProfile, BuildMode>> readBuildModes(ListTag list) {
-        return readEnumMap(list, BuildMode.class);
+        EnumMap<ToolProfile, BuildMode> map = new EnumMap<>(ToolProfile.class);
+        for (int i = 0; i < list.size(); i++) {
+            CompoundTag tag = list.getCompound(i);
+            readProfile(tag.getString("profile")).ifPresent(profile -> {
+                String value = tag.getString("value");
+                BuildMode mode = "OVERWRITE".equals(value)
+                        ? BuildMode.SURFACE
+                        : readEnum(BuildMode.class, value, null);
+                if (mode != null) {
+                    map.put(profile, mode);
+                }
+            });
+        }
+        return map.isEmpty() ? Optional.empty() : Optional.of(map);
     }
 
     private static Optional<EnumMap<ToolProfile, SelectionShape>> readShapes(ListTag list) {

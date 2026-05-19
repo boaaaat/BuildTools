@@ -156,7 +156,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
     private void populateAdvancedBuilderMenu() {
         menuItems.setItem(0, modeItem(Items.LIME_STAINED_GLASS, BuildMode.FILL));
         menuItems.setItem(1, modeItem(Items.ORANGE_STAINED_GLASS, BuildMode.REPLACE));
-        menuItems.setItem(2, modeItem(Items.RED_STAINED_GLASS, BuildMode.OVERWRITE));
+        menuItems.setItem(2, modeItem(Items.LIGHT_BLUE_STAINED_GLASS, BuildMode.SURFACE));
         menuItems.setItem(3, utilityItem(Items.CHEST, "buildtools.menu.material_checklist", "buildtools.menu.material_checklist.description"));
         menuItems.setItem(4, utilityItem(Items.POWDER_SNOW_BUCKET, "buildtools.menu.gradient", "buildtools.menu.gradient.description",
                 owner != null && BuildToolsState.paletteMode(owner) == PaletteMode.GRADIENT));

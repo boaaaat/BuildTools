@@ -1,10 +1,12 @@
 package com.abhil.buildtools.server;
 
 import com.abhil.buildtools.registry.ModItems;
+import com.abhil.buildtools.shape.BuildMode;
 import com.abhil.buildtools.shape.Selection;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.core.Direction;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -41,15 +43,41 @@ public final class MaterialChecklist {
         if (fallback == null) {
             return List.of();
         }
+        BuildMode mode = BuildToolsState.mode(player);
+        BlockState replaceMatch = BuildToolsState.replaceTarget(player);
+        List<net.minecraft.core.BlockPos> placementCandidates = mode == BuildMode.SURFACE ? SurfacePlacementSupport.candidates(player.level(), generated) : generated;
         List<BlockState> targets = new ArrayList<>();
-        for (net.minecraft.core.BlockPos pos : generated) {
+        for (net.minecraft.core.BlockPos pos : placementCandidates) {
             BlockState previous = player.level().getBlockState(pos);
-            if (!previous.canBeReplaced()) {
+            if (!canPlaceForMode(player, pos, previous, mode, replaceMatch)) {
                 continue;
             }
             targets.add(fallback);
         }
         return targets;
+    }
+
+    private static boolean canPlaceForMode(ServerPlayer player, net.minecraft.core.BlockPos pos, BlockState previous, BuildMode mode, BlockState replaceMatch) {
+        if (!previous.canBeReplaced()) {
+            return false;
+        }
+        return switch (mode) {
+            case FILL -> true;
+            case REPLACE -> touchesMatchingBlock(player, pos, replaceMatch);
+            case SURFACE -> SurfacePlacementSupport.touchesSolidBlock(player.level(), pos);
+        };
+    }
+
+    private static boolean touchesMatchingBlock(ServerPlayer player, net.minecraft.core.BlockPos pos, BlockState match) {
+        if (match == null || match.isAir()) {
+            return false;
+        }
+        for (Direction direction : Direction.values()) {
+            if (player.level().getBlockState(pos.relative(direction)).is(match.getBlock())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static List<BlockState> repeated(BlockState target, int count) {

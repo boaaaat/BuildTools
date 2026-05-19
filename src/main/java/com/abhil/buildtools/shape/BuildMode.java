@@ -5,7 +5,7 @@ import net.minecraft.network.chat.Component;
 public enum BuildMode {
     FILL("fill"),
     REPLACE("replace"),
-    OVERWRITE("overwrite");
+    SURFACE("surface");
 
     private final String key;
 

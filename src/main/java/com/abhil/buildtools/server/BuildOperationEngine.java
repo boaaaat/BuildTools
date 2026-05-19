@@ -162,13 +162,14 @@ public final class BuildOperationEngine {
         List<ItemStack> refund = new ArrayList<>();
         ServerLevel level = player.serverLevel();
 
-        BlockState replaceMatch = advanced ? BuildToolsState.replaceTarget(player) : level.getBlockState(selection.firstOptional().orElse(generated.getFirst()));
-        for (BlockPos pos : generated) {
+        BlockState replaceMatch = advanced ? BuildToolsState.replaceTarget(player) : inferredReplaceMatch(level, selection, generated);
+        List<BlockPos> placementCandidates = mode == BuildMode.SURFACE ? SurfacePlacementSupport.candidates(level, generated) : generated;
+        for (BlockPos pos : placementCandidates) {
             BlockState previous = level.getBlockState(pos);
             if (!canTouch(player, level, pos, previous)) {
                 return false;
             }
-            if (!previous.canBeReplaced()) {
+            if (!canPlaceForMode(level, pos, previous, mode, replaceMatch)) {
                 continue;
             }
             BlockState targetState = orientStairTarget(player, selection, materialTarget(selection, pos, target, palette, paletteMode, gradientDirection));
@@ -180,7 +181,7 @@ public final class BuildOperationEngine {
             addUndoRefund(refund, targetState);
         }
         if (positions.isEmpty()) {
-            fail(player, "buildtools.error.blocks_in_way");
+            failNoPlacementTargets(player, level, generated, mode, replaceMatch);
             return false;
         }
 
@@ -243,10 +244,6 @@ public final class BuildOperationEngine {
                 continue;
             }
             if (!canTouch(player, level, pos, previous)) {
-                return false;
-            }
-            if (!previous.canBeReplaced()) {
-                fail(player, "buildtools.error.blocks_in_way");
                 return false;
             }
             positions.add(pos.immutable());
@@ -326,15 +323,16 @@ public final class BuildOperationEngine {
         BlockState replaceMatch = BuildToolsState.replaceTarget(player);
         List<BuildPlan.Entry> entries = new ArrayList<>();
         ServerLevel level = player.serverLevel();
-        for (BlockPos pos : generated) {
+        List<BlockPos> placementCandidates = mode == BuildMode.SURFACE ? SurfacePlacementSupport.candidates(level, generated) : generated;
+        for (BlockPos pos : placementCandidates) {
             BlockState previous = level.getBlockState(pos);
-            if (!previous.canBeReplaced()) {
+            if (!canPlaceForMode(level, pos, previous, mode, replaceMatch)) {
                 continue;
             }
             entries.add(new BuildPlan.Entry(pos.immutable(), orientStairTarget(player, selection, materialTarget(selection, pos, target, palette, paletteMode, gradientDirection))));
         }
         if (entries.isEmpty()) {
-            fail(player, "buildtools.error.blocks_in_way");
+            failNoPlacementTargets(player, level, generated, mode, replaceMatch);
             return false;
         }
         BuildToolsState.setPlan(player, new BuildPlan(level.dimension(), List.copyOf(entries)));
@@ -1475,6 +1473,70 @@ public final class BuildOperationEngine {
                 || state.is(BlockTags.FLOWERS)
                 || state.is(Blocks.VINE)
                 || state.is(Blocks.GLOW_LICHEN);
+    }
+
+    private static boolean canPlaceForMode(ServerLevel level, BlockPos pos, BlockState previous, BuildMode mode, BlockState replaceMatch) {
+        if (!previous.canBeReplaced()) {
+            return false;
+        }
+        return switch (mode) {
+            case FILL -> true;
+            case REPLACE -> touchesMatchingBlock(level, pos, replaceMatch);
+            case SURFACE -> SurfacePlacementSupport.touchesSolidBlock(level, pos);
+        };
+    }
+
+    private static void failNoPlacementTargets(ServerPlayer player, ServerLevel level, List<BlockPos> generated, BuildMode mode, BlockState replaceMatch) {
+        boolean hasReplaceable = generated.stream().anyMatch(pos -> level.getBlockState(pos).canBeReplaced());
+        if (!hasReplaceable) {
+            fail(player, "buildtools.error.blocks_in_way");
+            return;
+        }
+        switch (mode) {
+            case REPLACE -> fail(player, Component.translatable("buildtools.error.no_edge_match", replaceMatch.getBlock().getName()));
+            case SURFACE -> fail(player, "buildtools.error.no_surface_targets");
+            case FILL -> fail(player, "buildtools.error.no_targets");
+        }
+    }
+
+    private static BlockState inferredReplaceMatch(ServerLevel level, Selection selection, List<BlockPos> generated) {
+        BlockState selected = selection.firstOptional()
+                .map(level::getBlockState)
+                .orElse(Blocks.AIR.defaultBlockState());
+        if (isMatchCandidate(selected)) {
+            return selected;
+        }
+        for (BlockPos pos : generated) {
+            BlockState state = level.getBlockState(pos);
+            if (isMatchCandidate(state)) {
+                return state;
+            }
+        }
+        for (BlockPos pos : generated) {
+            for (Direction direction : Direction.values()) {
+                BlockState state = level.getBlockState(pos.relative(direction));
+                if (isMatchCandidate(state)) {
+                    return state;
+                }
+            }
+        }
+        return selected;
+    }
+
+    private static boolean isMatchCandidate(BlockState state) {
+        return !state.isAir() && !state.canBeReplaced();
+    }
+
+    private static boolean touchesMatchingBlock(ServerLevel level, BlockPos pos, BlockState match) {
+        if (match == null || match.isAir()) {
+            return false;
+        }
+        for (Direction direction : Direction.values()) {
+            if (level.getBlockState(pos.relative(direction)).is(match.getBlock())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static List<BlockState> gradientPalette(BlockState fallback, List<PaletteEntry> entries) {
