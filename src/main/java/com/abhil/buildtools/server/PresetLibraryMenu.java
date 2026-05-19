@@ -133,7 +133,7 @@ public final class PresetLibraryMenu extends AbstractContainerMenu {
             case DELETE_SLOT -> deleteMode = toggleExclusive(deleteMode, 1);
             case MOVE_UP_SLOT -> moveUpMode = toggleExclusive(moveUpMode, 2);
             case MOVE_DOWN_SLOT -> moveDownMode = toggleExclusive(moveDownMode, 3);
-            case BACK_SLOT -> BuildToolsModeMenu.open(player);
+            case BACK_SLOT -> ToolMenuNavigation.openActiveToolMenu(player);
             default -> {
                 return false;
             }

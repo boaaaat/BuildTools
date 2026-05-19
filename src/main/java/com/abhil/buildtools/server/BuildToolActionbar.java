@@ -362,11 +362,7 @@ public final class BuildToolActionbar {
         }
 
         private int targetsFor(BuildMode mode) {
-            return switch (mode) {
-                case FILL -> fillTargets;
-                case REPLACE -> replaceTargets;
-                case OVERWRITE -> total;
-            };
+            return fillTargets;
         }
     }
 }

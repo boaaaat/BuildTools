@@ -38,7 +38,7 @@ public final class HelpMenu extends AbstractContainerMenu {
     @Override
     public void clicked(int slotId, int button, ClickType clickType, Player player) {
         if (slotId == BACK_SLOT && player instanceof ServerPlayer serverPlayer) {
-            BuildToolsModeMenu.open(serverPlayer);
+            ToolMenuNavigation.openActiveToolMenu(serverPlayer);
             return;
         }
         if (slotId >= MENU_SIZE) {

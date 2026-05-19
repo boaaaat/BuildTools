@@ -86,8 +86,8 @@ public final class BuildOperationEngine {
             return false;
         }
         return operation.free()
-                ? enqueueFree(player, player.serverLevel(), operation.positions(), operation.targets(), operation.targetBlockEntities(), operation.undo(), operation.refund(), operation.producedDrops(), operation.removedEntities(), operation.addedEntities(), operation.trackHistory())
-                : enqueue(player, player.serverLevel(), operation.positions(), operation.targets(), operation.targetBlockEntities(), operation.undo(), operation.refund(), operation.producedDrops(), operation.removedEntities(), operation.addedEntities(), operation.trackHistory());
+                ? enqueueFree(player, player.serverLevel(), operation.positions(), operation.targets(), operation.targetBlockEntities(), operation.undo(), operation.refund(), operation.producedDrops(), operation.removedEntities(), operation.addedEntities(), operation.trackHistory(), operation.canBreak())
+                : enqueue(player, player.serverLevel(), operation.positions(), operation.targets(), operation.targetBlockEntities(), operation.undo(), operation.refund(), operation.producedDrops(), operation.removedEntities(), operation.addedEntities(), operation.trackHistory(), operation.canBreak());
     }
 
     static void captureToolDrop(EntityJoinLevelEvent event) {
@@ -168,10 +168,7 @@ public final class BuildOperationEngine {
             if (!canTouch(player, level, pos, previous)) {
                 return false;
             }
-            if (mode == BuildMode.FILL && !previous.canBeReplaced()) {
-                continue;
-            }
-            if (mode == BuildMode.REPLACE && !(advanced ? BuildToolsState.matchesReplaceTargets(player, previous, replaceMatch) : previous.is(replaceMatch.getBlock()))) {
+            if (!previous.canBeReplaced()) {
                 continue;
             }
             BlockState targetState = orientStairTarget(player, selection, materialTarget(selection, pos, target, palette, paletteMode, gradientDirection));
@@ -181,6 +178,10 @@ public final class BuildOperationEngine {
             boolean restore = previous.isAir() || mode == BuildMode.FILL;
             undo.add(undoEntry(level, pos, previous, targetState, restore));
             addUndoRefund(refund, targetState);
+        }
+        if (positions.isEmpty()) {
+            fail(player, "buildtools.error.blocks_in_way");
+            return false;
         }
 
         boolean trackHistory = hasHistoryItems(player);
@@ -199,6 +200,7 @@ public final class BuildOperationEngine {
                 removedEntities,
                 List.of(),
                 trackHistory,
+                false,
                 false,
                 signature(label, level, positions, targets)));
     }
@@ -243,6 +245,10 @@ public final class BuildOperationEngine {
             if (!canTouch(player, level, pos, previous)) {
                 return false;
             }
+            if (!previous.canBeReplaced()) {
+                fail(player, "buildtools.error.blocks_in_way");
+                return false;
+            }
             positions.add(pos.immutable());
             targets.add(Blocks.AIR.defaultBlockState());
             targetBlockEntities.add(null);
@@ -271,6 +277,7 @@ public final class BuildOperationEngine {
                 removedEntities,
                 List.of(),
                 trackHistory,
+                true,
                 true,
                 signature(label, level, positions, targets)));
     }
@@ -321,16 +328,13 @@ public final class BuildOperationEngine {
         ServerLevel level = player.serverLevel();
         for (BlockPos pos : generated) {
             BlockState previous = level.getBlockState(pos);
-            if (mode == BuildMode.FILL && !previous.canBeReplaced()) {
-                continue;
-            }
-            if (mode == BuildMode.REPLACE && !BuildToolsState.matchesReplaceTargets(player, previous, replaceMatch)) {
+            if (!previous.canBeReplaced()) {
                 continue;
             }
             entries.add(new BuildPlan.Entry(pos.immutable(), orientStairTarget(player, selection, materialTarget(selection, pos, target, palette, paletteMode, gradientDirection))));
         }
         if (entries.isEmpty()) {
-            fail(player, "buildtools.error.no_targets");
+            fail(player, "buildtools.error.blocks_in_way");
             return false;
         }
         BuildToolsState.setPlan(player, new BuildPlan(level.dimension(), List.copyOf(entries)));
@@ -362,6 +366,10 @@ public final class BuildOperationEngine {
             if (!canTouch(player, level, entry.pos(), previous)) {
                 return false;
             }
+            if (!previous.canBeReplaced()) {
+                fail(player, "buildtools.error.blocks_in_way");
+                return false;
+            }
             positions.add(entry.pos().immutable());
             targets.add(entry.state());
             targetBlockEntities.add(entry.blockEntity());
@@ -384,6 +392,7 @@ public final class BuildOperationEngine {
                 removedEntities,
                 List.of(),
                 trackHistory,
+                false,
                 false,
                 signature(label, level, positions, targets)));
     }
@@ -415,7 +424,6 @@ public final class BuildOperationEngine {
         if (!validatePositions(player, level, generated)) {
             return false;
         }
-        BlockState replaceTarget = BuildToolsState.replaceTarget(player);
         List<BlockPos> positions = new ArrayList<>();
         List<BlockState> targets = new ArrayList<>();
         List<CompoundTag> targetBlockEntities = new ArrayList<>();
@@ -426,10 +434,7 @@ public final class BuildOperationEngine {
             if (!canTouch(player, level, pos, previous)) {
                 return false;
             }
-            if (brushMode == BrushMode.REPLACE && !previous.is(replaceTarget.getBlock())) {
-                continue;
-            }
-            if (brushMode != BrushMode.REPLACE && !previous.canBeReplaced()) {
+            if (!previous.canBeReplaced()) {
                 continue;
             }
             positions.add(pos.immutable());
@@ -437,6 +442,10 @@ public final class BuildOperationEngine {
             targetBlockEntities.add(null);
             undo.add(undoEntry(level, pos, previous, target, previous.isAir() || previous.canBeReplaced()));
             addUndoRefund(refund, target);
+        }
+        if (positions.isEmpty()) {
+            fail(player, "buildtools.error.blocks_in_way");
+            return false;
         }
         boolean trackHistory = hasHistoryItems(player);
         List<CapturedEntity> removedEntities = captureDecorEntities(level, BlockPos.ZERO, positions);
@@ -454,6 +463,7 @@ public final class BuildOperationEngine {
                 removedEntities,
                 List.of(),
                 trackHistory,
+                false,
                 false,
                 signature(label + ":" + brushMode.name() + ":" + radius, level, positions, targets)));
     }
@@ -487,21 +497,7 @@ public final class BuildOperationEngine {
             int x = entry.getKey().getX();
             int z = entry.getKey().getZ();
             int topY = entry.getValue();
-            if (topY > average) {
-                for (int y = average + 1; y <= topY; y++) {
-                    BlockPos pos = new BlockPos(x, y, z);
-                    BlockState previous = level.getBlockState(pos);
-                    if (!previous.isAir()) {
-                        if (!canTouch(player, level, pos, previous)) {
-                            return false;
-                        }
-                        positions.add(pos);
-                        targets.add(Blocks.AIR.defaultBlockState());
-                        targetBlockEntities.add(null);
-                        undo.add(undoEntry(level, pos, previous, Blocks.AIR.defaultBlockState(), false));
-                    }
-                }
-            } else if (topY < average) {
+            if (topY < average) {
                 for (int y = topY + 1; y <= average; y++) {
                     BlockPos pos = new BlockPos(x, y, z);
                     BlockState previous = level.getBlockState(pos);
@@ -534,6 +530,7 @@ public final class BuildOperationEngine {
                 removedEntities,
                 List.of(),
                 trackHistory,
+                false,
                 false,
                 signature(label + ":" + radius, level, positions, targets)));
     }
@@ -636,7 +633,7 @@ public final class BuildOperationEngine {
         boolean trackHistory = hasHistoryItems(player);
         List<CapturedEntity> addedEntities = absoluteEntities(blueprint.entities(), origin);
         List<CapturedEntity> removedEntities = captureDecorEntities(level, BlockPos.ZERO, positions);
-        return enqueue(player, level, positions, targets, copyBlockEntities(targetBlockEntities), undo, refund, withEntityDrops(dropsForChanges(player, level, undo), removedEntities), removedEntities, addedEntities, trackHistory);
+        return enqueue(player, level, positions, targets, copyBlockEntities(targetBlockEntities), undo, refund, withEntityDrops(dropsForChanges(player, level, undo), removedEntities), removedEntities, addedEntities, trackHistory, false);
     }
 
     public static boolean previewOrConfirmBlueprintPaste(ServerPlayer player, BlockPos origin) {
@@ -786,7 +783,7 @@ public final class BuildOperationEngine {
         }
 
         boolean trackHistory = hasHistoryItems(player);
-        boolean queued = enqueue(player, level, positions, targets, copyBlockEntities(targetBlockEntities), List.copyOf(undoEntries), snapshot.refund(), snapshot.producedDrops(), snapshot.removedEntities(), snapshot.addedEntities(), trackHistory);
+        boolean queued = enqueue(player, level, positions, targets, copyBlockEntities(targetBlockEntities), List.copyOf(undoEntries), snapshot.refund(), snapshot.producedDrops(), snapshot.removedEntities(), snapshot.addedEntities(), trackHistory, true);
         if (queued) {
             BuildToolsState.takeRedo(player);
         }
@@ -812,6 +809,10 @@ public final class BuildOperationEngine {
         while (batch > 0 && !QUEUE.isEmpty()) {
             BuildOperation operation = QUEUE.peek();
             int applied = applyBatch(operation, batch);
+            if (applied < 0) {
+                QUEUE.remove();
+                continue;
+            }
             batch -= applied;
             if (operation.positions().isEmpty()) {
                 QUEUE.remove();
@@ -844,8 +845,8 @@ public final class BuildOperationEngine {
         if (pending != null && pending.signature().equals(operation.signature())) {
             PENDING_OPERATIONS.remove(player.getUUID());
             return operation.free()
-                    ? enqueueFree(player, level, operation.positions(), operation.targets(), operation.targetBlockEntities(), operation.undo(), operation.refund(), operation.producedDrops(), operation.removedEntities(), operation.addedEntities(), operation.trackHistory())
-                    : enqueue(player, level, operation.positions(), operation.targets(), operation.targetBlockEntities(), operation.undo(), operation.refund(), operation.producedDrops(), operation.removedEntities(), operation.addedEntities(), operation.trackHistory());
+                    ? enqueueFree(player, level, operation.positions(), operation.targets(), operation.targetBlockEntities(), operation.undo(), operation.refund(), operation.producedDrops(), operation.removedEntities(), operation.addedEntities(), operation.trackHistory(), operation.canBreak())
+                    : enqueue(player, level, operation.positions(), operation.targets(), operation.targetBlockEntities(), operation.undo(), operation.refund(), operation.producedDrops(), operation.removedEntities(), operation.addedEntities(), operation.trackHistory(), operation.canBreak());
         }
 
         PENDING_OPERATIONS.put(player.getUUID(), operation);
@@ -930,9 +931,14 @@ public final class BuildOperationEngine {
             List<ItemStack> producedDrops,
             List<CapturedEntity> removedEntities,
             List<CapturedEntity> addedEntities,
-            boolean trackHistory) {
+            boolean trackHistory,
+            boolean canBreak) {
         if (positions.isEmpty() && removedEntities.isEmpty() && addedEntities.isEmpty()) {
             fail(player, "buildtools.error.no_targets");
+            return false;
+        }
+        if (!canBreak && hasBlockingBlocks(level, positions, targets)) {
+            fail(player, "buildtools.error.blocks_in_way");
             return false;
         }
         int durabilityCost = operationDurabilityCost(positions.size(), minedBlockCount(level, undo));
@@ -946,9 +952,11 @@ public final class BuildOperationEngine {
         }
         costPlan.consume(player);
         damageOperationTool(player, durabilityCost);
-        removeCapturedEntities(level, removedEntities);
+        if (canBreak) {
+            removeCapturedEntities(level, removedEntities);
+        }
         List<ItemStack> storedDrops = StoredItems.copyOf(producedDrops);
-        QUEUE.add(new BuildOperation(player, level, level.dimension(), new ArrayList<>(positions), new ArrayList<>(targets), new ArrayList<>(copyBlockEntities(targetBlockEntities)), List.copyOf(undo), StoredItems.copyOf(refund), new ArrayList<>(storedDrops), new ArrayList<>(storedDrops), List.copyOf(removedEntities), List.copyOf(addedEntities), trackHistory));
+        QUEUE.add(new BuildOperation(player, level, level.dimension(), new ArrayList<>(positions), new ArrayList<>(targets), new ArrayList<>(copyBlockEntities(targetBlockEntities)), List.copyOf(undo), StoredItems.copyOf(refund), new ArrayList<>(storedDrops), new ArrayList<>(storedDrops), canBreak ? List.copyOf(removedEntities) : List.of(), List.copyOf(addedEntities), trackHistory, canBreak));
         player.displayClientMessage(Component.translatable("buildtools.message.queued", positions.size()), true);
         return true;
     }
@@ -964,9 +972,14 @@ public final class BuildOperationEngine {
             List<ItemStack> producedDrops,
             List<CapturedEntity> removedEntities,
             List<CapturedEntity> addedEntities,
-            boolean trackHistory) {
+            boolean trackHistory,
+            boolean canBreak) {
         if (positions.isEmpty() && removedEntities.isEmpty() && addedEntities.isEmpty()) {
             fail(player, "buildtools.error.no_targets");
+            return false;
+        }
+        if (!canBreak && hasBlockingBlocks(level, positions, targets)) {
+            fail(player, "buildtools.error.blocks_in_way");
             return false;
         }
         int durabilityCost = operationDurabilityCost(positions.size(), minedBlockCount(level, undo));
@@ -974,9 +987,11 @@ public final class BuildOperationEngine {
             return false;
         }
         damageOperationTool(player, durabilityCost);
-        removeCapturedEntities(level, removedEntities);
+        if (canBreak) {
+            removeCapturedEntities(level, removedEntities);
+        }
         List<ItemStack> storedDrops = StoredItems.copyOf(producedDrops);
-        QUEUE.add(new BuildOperation(player, level, level.dimension(), new ArrayList<>(positions), new ArrayList<>(targets), new ArrayList<>(copyBlockEntities(targetBlockEntities)), List.copyOf(undo), StoredItems.copyOf(refund), new ArrayList<>(storedDrops), new ArrayList<>(storedDrops), List.copyOf(removedEntities), List.copyOf(addedEntities), trackHistory));
+        QUEUE.add(new BuildOperation(player, level, level.dimension(), new ArrayList<>(positions), new ArrayList<>(targets), new ArrayList<>(copyBlockEntities(targetBlockEntities)), List.copyOf(undo), StoredItems.copyOf(refund), new ArrayList<>(storedDrops), new ArrayList<>(storedDrops), canBreak ? List.copyOf(removedEntities) : List.of(), List.copyOf(addedEntities), trackHistory, canBreak));
         player.displayClientMessage(Component.translatable("buildtools.message.queued", positions.size()), true);
         return true;
     }
@@ -991,17 +1006,36 @@ public final class BuildOperationEngine {
             CompoundTag targetBlockEntity = operation.targetBlockEntities().remove(0);
             BlockState previous = operation.level().getBlockState(pos);
             if (target.isAir()) {
+                if (!operation.canBreak()) {
+                    operation.player().displayClientMessage(Component.translatable("buildtools.error.blocks_in_way"), false);
+                    return -1;
+                }
                 appendCapturedDrops(operation, clearBlockWithoutDrops(operation.level(), pos, Blocks.AIR.defaultBlockState()));
                 applied++;
                 continue;
             }
             if (!previous.isAir() && !previous.canBeReplaced()) {
+                if (!operation.canBreak()) {
+                    operation.player().displayClientMessage(Component.translatable("buildtools.error.blocks_in_way"), false);
+                    return -1;
+                }
                 appendCapturedDrops(operation, clearBlockWithoutDrops(operation.level(), pos, Blocks.AIR.defaultBlockState()));
             }
             appendCapturedDrops(operation, restoreBlock(operation.level(), pos, target, targetBlockEntity == null ? entry.redoneBlockEntity() : targetBlockEntity));
             applied++;
         }
         return applied;
+    }
+
+    private static boolean hasBlockingBlocks(ServerLevel level, List<BlockPos> positions, List<BlockState> targets) {
+        for (int i = 0; i < positions.size(); i++) {
+            BlockState target = targets.get(i);
+            BlockState previous = level.getBlockState(positions.get(i));
+            if (target.isAir() || !previous.isAir() && !previous.canBeReplaced()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static UndoSnapshot.Entry undoEntry(ServerLevel level, BlockPos pos, BlockState previous, BlockState redone, boolean mayRestorePrevious) {
@@ -1712,6 +1746,7 @@ public final class BuildOperationEngine {
             List<CapturedEntity> removedEntities,
             List<CapturedEntity> addedEntities,
             boolean trackHistory,
+            boolean canBreak,
             boolean free,
             String signature) {
     }

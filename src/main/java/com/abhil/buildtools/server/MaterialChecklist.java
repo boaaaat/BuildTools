@@ -1,7 +1,6 @@
 package com.abhil.buildtools.server;
 
 import com.abhil.buildtools.registry.ModItems;
-import com.abhil.buildtools.shape.BuildMode;
 import com.abhil.buildtools.shape.Selection;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,14 +41,10 @@ public final class MaterialChecklist {
         if (fallback == null) {
             return List.of();
         }
-        BuildMode mode = BuildToolsState.mode(player);
         List<BlockState> targets = new ArrayList<>();
         for (net.minecraft.core.BlockPos pos : generated) {
             BlockState previous = player.level().getBlockState(pos);
-            if (mode == BuildMode.FILL && !previous.canBeReplaced()) {
-                continue;
-            }
-            if (mode == BuildMode.REPLACE && !BuildToolsState.matchesReplaceTargets(player, previous, BuildToolsState.replaceTarget(player))) {
+            if (!previous.canBeReplaced()) {
                 continue;
             }
             targets.add(fallback);

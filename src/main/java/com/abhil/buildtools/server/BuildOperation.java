@@ -23,5 +23,6 @@ public record BuildOperation(
         List<ItemStack> expectedDropBudget,
         List<CapturedEntity> removedEntities,
         List<CapturedEntity> addedEntities,
-        boolean trackHistory) {
+        boolean trackHistory,
+        boolean canBreak) {
 }

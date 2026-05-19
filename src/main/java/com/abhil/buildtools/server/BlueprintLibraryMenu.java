@@ -208,7 +208,7 @@ public final class BlueprintLibraryMenu extends AbstractContainerMenu {
                 return true;
             }
             case BACK_SLOT -> {
-                BuildToolsModeMenu.open(player);
+                ToolMenuNavigation.openActiveToolMenu(player);
                 return true;
             }
             default -> {
