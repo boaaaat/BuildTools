@@ -1,7 +1,7 @@
 {
   "type": "minecraft:crafting_shaped",
   "pattern": [
-    "RIR",
+    "RER",
     "ICI",
     "RIR"
   ],
@@ -9,11 +9,14 @@
     "C": {
       "item": "minecraft:compass"
     },
+    "E": {
+      "item": "minecraft:ender_pearl"
+    },
     "I": {
-      "item": "minecraft:iron_ingot"
+      "tag": "c:ingots/iron"
     },
     "R": {
-      "item": "minecraft:redstone"
+      "tag": "c:dusts/redstone"
     }
   },
   "result": {

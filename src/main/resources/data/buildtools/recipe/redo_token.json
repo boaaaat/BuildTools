@@ -3,21 +3,24 @@
   "pattern": [
     " R ",
     "PAP",
-    " R "
+    " L "
   ],
   "key": {
     "R": {
-      "item": "minecraft:redstone"
+      "tag": "c:dusts/redstone"
     },
     "P": {
       "item": "minecraft:paper"
     },
     "A": {
-      "item": "minecraft:amethyst_shard"
+      "tag": "c:gems/amethyst"
+    },
+    "L": {
+      "tag": "c:gems/lapis"
     }
   },
   "result": {
     "id": "buildtools:redo_token",
-    "count": 2
+    "count": 1
   }
 }

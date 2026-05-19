@@ -60,6 +60,7 @@ import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.VineBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.neoforged.neoforge.common.Tags;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
@@ -242,6 +243,9 @@ public final class BuildOperationEngine {
             }
             if (preset == AreaBreakerPreset.CLEAR_SNOW_CROPS && !isClearSnowCropsTarget(previous)) {
                 continue;
+            }
+            if (!canBreakState(player, level, pos, previous)) {
+                return false;
             }
             if (!canTouch(player, level, pos, previous)) {
                 return false;
@@ -511,6 +515,14 @@ public final class BuildOperationEngine {
                     }
                 }
             }
+        }
+        if (positions.isEmpty()) {
+            fail(player, "buildtools.error.no_targets");
+            return false;
+        }
+        if (positions.size() > BuildToolsConfig.MAX_OPERATION_VOLUME.get()) {
+            fail(player, Component.translatable("buildtools.error.too_large", positions.size(), BuildToolsConfig.MAX_OPERATION_VOLUME.get()));
+            return false;
         }
         boolean trackHistory = hasHistoryItems(player);
         List<CapturedEntity> removedEntities = captureDecorEntities(level, BlockPos.ZERO, positions);
@@ -808,6 +820,7 @@ public final class BuildOperationEngine {
             BuildOperation operation = QUEUE.peek();
             int applied = applyBatch(operation, batch);
             if (applied < 0) {
+                rollbackAbortedOperation(operation);
                 QUEUE.remove();
                 continue;
             }
@@ -897,11 +910,11 @@ public final class BuildOperationEngine {
         if (tool.isEmpty() || !tool.isDamageableItem() || player.gameMode.isCreative()) {
             return "";
         }
-        int minedBlocks = minedBlockCount(player.serverLevel(), operation.undo());
-        int cost = operationDurabilityCost(operation.positions().size(), minedBlocks);
+        DurabilityBreakdown breakdown = durabilityBreakdown(player.serverLevel(), operation.undo(), operation.positions().size());
+        int cost = breakdown.totalCost();
         int remaining = remainingDurability(tool);
-        if (minedBlocks > 0) {
-            return "Warning: " + minedBlocks + " hard blocks in the way | mining costs " + minedBlocks + " durability | total: " + cost + " | remaining: " + remaining;
+        if (breakdown.miningBlocks() > 0) {
+            return "Break cost: " + breakdown.softBlocks() + " soft, " + breakdown.hardBlocks() + " hard, " + breakdown.resourceBlocks() + " ore/log | total: " + cost + " | remaining: " + remaining;
         }
         return "Durability cost: " + cost + " | remaining: " + remaining;
     }
@@ -939,7 +952,7 @@ public final class BuildOperationEngine {
             fail(player, "buildtools.error.blocks_in_way");
             return false;
         }
-        int durabilityCost = operationDurabilityCost(positions.size(), minedBlockCount(level, undo));
+        int durabilityCost = durabilityBreakdown(level, undo, positions.size()).totalCost();
         if (!hasDurabilityForOperation(player, durabilityCost)) {
             return false;
         }
@@ -980,7 +993,7 @@ public final class BuildOperationEngine {
             fail(player, "buildtools.error.blocks_in_way");
             return false;
         }
-        int durabilityCost = operationDurabilityCost(positions.size(), minedBlockCount(level, undo));
+        int durabilityCost = durabilityBreakdown(level, undo, positions.size()).totalCost();
         if (!hasDurabilityForOperation(player, durabilityCost)) {
             return false;
         }
@@ -999,15 +1012,18 @@ public final class BuildOperationEngine {
         while (applied < budget && !operation.positions().isEmpty()) {
             int entryIndex = operation.undoEntries().size() - operation.positions().size();
             UndoSnapshot.Entry entry = operation.undoEntries().get(entryIndex);
-            BlockPos pos = operation.positions().remove(0);
-            BlockState target = operation.targetStates().remove(0);
-            CompoundTag targetBlockEntity = operation.targetBlockEntities().remove(0);
+            BlockPos pos = operation.positions().get(0);
+            BlockState target = operation.targetStates().get(0);
+            CompoundTag targetBlockEntity = operation.targetBlockEntities().get(0);
             BlockState previous = operation.level().getBlockState(pos);
             if (target.isAir()) {
                 if (!operation.canBreak()) {
                     operation.player().displayClientMessage(Component.translatable("buildtools.error.blocks_in_way"), false);
                     return -1;
                 }
+                operation.positions().remove(0);
+                operation.targetStates().remove(0);
+                operation.targetBlockEntities().remove(0);
                 appendCapturedDrops(operation, clearBlockWithoutDrops(operation.level(), pos, Blocks.AIR.defaultBlockState()));
                 applied++;
                 continue;
@@ -1019,10 +1035,24 @@ public final class BuildOperationEngine {
                 }
                 appendCapturedDrops(operation, clearBlockWithoutDrops(operation.level(), pos, Blocks.AIR.defaultBlockState()));
             }
+            operation.positions().remove(0);
+            operation.targetStates().remove(0);
+            operation.targetBlockEntities().remove(0);
             appendCapturedDrops(operation, restoreBlock(operation.level(), pos, target, targetBlockEntity == null ? entry.redoneBlockEntity() : targetBlockEntity));
             applied++;
         }
         return applied;
+    }
+
+    private static void rollbackAbortedOperation(BuildOperation operation) {
+        int appliedEntries = operation.undoEntries().size() - operation.positions().size();
+        for (int i = appliedEntries - 1; i >= 0; i--) {
+            UndoSnapshot.Entry entry = operation.undoEntries().get(i);
+            restoreBlock(operation.level(), entry.pos(), entry.previousState(), entry.previousBlockEntity());
+        }
+        if (!operation.player().gameMode.isCreative()) {
+            BuildingStorageManager.depositOrGive(operation.player(), operation.refund());
+        }
     }
 
     private static boolean hasBlockingBlocks(ServerLevel level, List<BlockPos> positions, List<BlockState> targets) {
@@ -1418,6 +1448,17 @@ public final class BuildOperationEngine {
         return true;
     }
 
+    private static boolean canBreakState(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState state) {
+        if (state.isAir()) {
+            return true;
+        }
+        if (state.getDestroySpeed(level, pos) < 0.0F) {
+            fail(player, "buildtools.error.protected_state");
+            return false;
+        }
+        return true;
+    }
+
     private static BlockState materialState(ItemStack stack) {
         if (stack.getItem() instanceof BlockItem blockItem) {
             return blockItem.getBlock().defaultBlockState();
@@ -1688,34 +1729,41 @@ public final class BuildOperationEngine {
         return 1 + Math.max(0, blockChanges) / 400;
     }
 
-    private static int operationDurabilityCost(int blockChanges, int minedBlocks) {
-        int nonMiningChanges = Math.max(0, blockChanges - minedBlocks);
-        int cost = minedBlocks;
+    private static DurabilityBreakdown durabilityBreakdown(ServerLevel level, List<UndoSnapshot.Entry> undo, int blockChanges) {
+        int softBlocks = 0;
+        int hardBlocks = 0;
+        int resourceBlocks = 0;
+        for (UndoSnapshot.Entry entry : undo) {
+            if (!minesBlock(entry.previousState(), entry.redoneState())) {
+                continue;
+            }
+            if (isResourceBreak(entry.previousState())) {
+                resourceBlocks++;
+            } else if (isHardBreak(level, entry)) {
+                hardBlocks++;
+            } else {
+                softBlocks++;
+            }
+        }
+        int miningBlocks = softBlocks + hardBlocks + resourceBlocks;
+        int nonMiningChanges = Math.max(0, blockChanges - miningBlocks);
+        int cost = resourceBlocks * 2 + hardBlocks + (softBlocks + 9) / 10;
         if (nonMiningChanges > 0) {
             cost += durabilityCost(nonMiningChanges);
         }
-        return Math.max(1, cost);
+        return new DurabilityBreakdown(Math.max(1, cost), softBlocks, hardBlocks, resourceBlocks);
     }
 
-    private static int minedBlockCount(ServerLevel level, List<UndoSnapshot.Entry> undo) {
-        int count = 0;
-        for (UndoSnapshot.Entry entry : undo) {
-            if (chargesMiningDurability(level, entry)) {
-                count++;
-            }
-        }
-        return count;
-    }
-
-    private static boolean chargesMiningDurability(ServerLevel level, UndoSnapshot.Entry entry) {
-        if (!minesBlock(entry.previousState(), entry.redoneState())) {
-            return false;
-        }
-        if (!entry.previousState().is(BlockTags.MINEABLE_WITH_PICKAXE)) {
-            return false;
-        }
+    private static boolean isHardBreak(ServerLevel level, UndoSnapshot.Entry entry) {
         float hardness = entry.previousState().getDestroySpeed(level, entry.pos());
-        return hardness >= HARD_MINING_DURABILITY_HARDNESS;
+        return hardness >= HARD_MINING_DURABILITY_HARDNESS
+                || entry.previousState().is(BlockTags.NEEDS_STONE_TOOL)
+                || entry.previousState().is(BlockTags.NEEDS_IRON_TOOL)
+                || entry.previousState().is(BlockTags.NEEDS_DIAMOND_TOOL);
+    }
+
+    private static boolean isResourceBreak(BlockState state) {
+        return state.is(BlockTags.LOGS) || state.is(Tags.Blocks.ORES);
     }
 
     private static boolean minesBlock(BlockState previous, BlockState redone) {
@@ -1777,6 +1825,12 @@ public final class BuildOperationEngine {
 
     private static int remainingDurability(ItemStack stack) {
         return stack.getMaxDamage() - stack.getDamageValue();
+    }
+
+    private record DurabilityBreakdown(int totalCost, int softBlocks, int hardBlocks, int resourceBlocks) {
+        int miningBlocks() {
+            return softBlocks + hardBlocks + resourceBlocks;
+        }
     }
 
     private static boolean hasInventoryItem(ServerPlayer player, Item item) {

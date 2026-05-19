@@ -1,22 +1,25 @@
 {
   "type": "minecraft:crafting_shaped",
   "pattern": [
-    " C ",
-    "IPI",
-    " S "
+    "CAC",
+    "IBI",
+    " M "
   ],
   "key": {
+    "A": {
+      "tag": "c:gems/amethyst"
+    },
     "C": {
-      "item": "minecraft:copper_ingot"
+      "tag": "c:ingots/copper"
     },
     "I": {
-      "item": "minecraft:iron_ingot"
+      "tag": "c:ingots/iron"
     },
-    "P": {
-      "item": "minecraft:paper"
+    "B": {
+      "item": "minecraft:book"
     },
-    "S": {
-      "item": "minecraft:scaffolding"
+    "M": {
+      "item": "minecraft:map"
     }
   },
   "result": {

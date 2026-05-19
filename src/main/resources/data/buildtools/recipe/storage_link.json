@@ -2,8 +2,8 @@
   "type": "minecraft:crafting_shaped",
   "pattern": [
     " A ",
-    " R ",
-    " C "
+    "RCR",
+    " E "
   ],
   "key": {
     "A": {
@@ -13,10 +13,14 @@
       "tag": "c:dusts/redstone"
     },
     "C": {
-      "tag": "c:ingots/copper"
+      "tag": "c:chests/wooden"
+    },
+    "E": {
+      "item": "minecraft:ender_pearl"
     }
   },
   "result": {
-    "id": "buildtools:selection_staff"
+    "id": "buildtools:storage_link",
+    "count": 1
   }
 }

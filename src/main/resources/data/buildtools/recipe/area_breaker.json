@@ -1,16 +1,22 @@
 {
   "type": "minecraft:crafting_shaped",
   "pattern": [
-    " I ",
-    "IRI",
+    " A ",
+    "PRH",
     " S "
   ],
   "key": {
-    "I": {
-      "item": "minecraft:iron_ingot"
+    "A": {
+      "tag": "c:gems/amethyst"
+    },
+    "P": {
+      "item": "minecraft:diamond_pickaxe"
     },
     "R": {
-      "item": "minecraft:redstone_block"
+      "tag": "c:storage_blocks/redstone"
+    },
+    "H": {
+      "item": "minecraft:shears"
     },
     "S": {
       "item": "minecraft:scaffolding"

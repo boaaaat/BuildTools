@@ -3,21 +3,24 @@
   "pattern": [
     " R ",
     "PEP",
-    " R "
+    " L "
   ],
   "key": {
     "R": {
-      "item": "minecraft:redstone"
+      "tag": "c:dusts/redstone"
     },
     "P": {
       "item": "minecraft:paper"
     },
     "E": {
       "item": "minecraft:ender_pearl"
+    },
+    "L": {
+      "tag": "c:gems/lapis"
     }
   },
   "result": {
     "id": "buildtools:undo_token",
-    "count": 2
+    "count": 1
   }
 }

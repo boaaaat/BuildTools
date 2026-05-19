@@ -698,6 +698,13 @@ public final class BuildToolsState {
             return;
         }
         BlockPos offset = BlockPos.ZERO.offset(direction.getNormal());
+        if (!selection.points().isEmpty()) {
+            setAdvancedPoints(player, selection.points().stream()
+                    .map(point -> point.offset(offset))
+                    .toList());
+            player.displayClientMessage(Component.translatable("buildtools.message.selection_nudged", direction.getName()), true);
+            return;
+        }
         SELECTIONS.put(player.getUUID(), new Selection(
                 player.getUUID(),
                 selection.dimension(),
@@ -1255,6 +1262,17 @@ public final class BuildToolsState {
         }
         BlockPos offset = selection.second().subtract(selection.first());
         BlockPos rotated = new BlockPos(-offset.getZ(), offset.getY(), offset.getX());
+        if (!selection.points().isEmpty()) {
+            BlockPos origin = selection.first();
+            setAdvancedPoints(player, selection.points().stream()
+                    .map(point -> {
+                        BlockPos relative = point.subtract(origin);
+                        return origin.offset(-relative.getZ(), relative.getY(), relative.getX());
+                    })
+                    .toList());
+            player.displayClientMessage(Component.translatable("buildtools.message.selection_rotated"), true);
+            return;
+        }
         SELECTIONS.put(player.getUUID(), new Selection(player.getUUID(), selection.dimension(), selection.first(), selection.first().offset(rotated), shape(player)));
         BuildOperationEngine.clearPendingOperation(player);
         sync(player);

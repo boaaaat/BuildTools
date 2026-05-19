@@ -1,6 +1,7 @@
 package com.abhil.buildtools.server;
 
 import com.abhil.buildtools.registry.ModItems;
+import com.abhil.buildtools.item.MagnetItem;
 import java.util.List;
 import java.util.UUID;
 import net.minecraft.server.MinecraftServer;
@@ -55,7 +56,8 @@ public final class MagnetCollector {
 
     private static boolean hasMagnet(ServerPlayer player) {
         for (int slot = 0; slot < player.getInventory().getContainerSize(); slot++) {
-            if (player.getInventory().getItem(slot).is(ModItems.MAGNET.get())) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (stack.is(ModItems.MAGNET.get()) && MagnetItem.isEnabled(stack)) {
                 return true;
             }
         }
