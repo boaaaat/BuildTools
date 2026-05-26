@@ -6,7 +6,7 @@ public final class BuildToolsConfig {
     private static final ModConfigSpec.Builder BUILDER = new ModConfigSpec.Builder();
 
     public static final ModConfigSpec.IntValue MAX_OPERATION_VOLUME = BUILDER
-            .comment("Maximum number of blocks a Builder Wand operation may touch.")
+            .comment("Maximum number of blocks a BuildTools operation may change.")
             .defineInRange("maxOperationVolume", 4096, 1, 262144);
 
     public static final ModConfigSpec.IntValue MAX_COPY_VOLUME = BUILDER

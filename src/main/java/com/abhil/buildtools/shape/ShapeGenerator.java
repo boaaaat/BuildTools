@@ -223,10 +223,35 @@ public final class ShapeGenerator {
 
     public static List<BlockPos> dome(BlockPos a, BlockPos b) {
         List<BlockPos> shell = new ArrayList<>();
-        Set<BlockPos> all = new LinkedHashSet<>(sphere(a, b, false));
-        int centerY = Math.min(a.getY(), b.getY()) + Math.abs(a.getY() - b.getY()) / 2;
+        Set<BlockPos> all = new LinkedHashSet<>();
+        int minX = Math.min(a.getX(), b.getX());
+        int baseY = Math.min(a.getY(), b.getY());
+        int minZ = Math.min(a.getZ(), b.getZ());
+        int maxX = Math.max(a.getX(), b.getX());
+        int topY = Math.max(a.getY(), b.getY());
+        int maxZ = Math.max(a.getZ(), b.getZ());
+        double centerX = (minX + maxX) / 2.0D;
+        double centerY = baseY;
+        double centerZ = (minZ + maxZ) / 2.0D;
+        double radiusX = Math.max(0.5D, (maxX - minX + 1) / 2.0D);
+        double radiusY = Math.max(0.5D, topY - baseY + 0.5D);
+        double radiusZ = Math.max(0.5D, (maxZ - minZ + 1) / 2.0D);
+
+        for (int y = baseY - Mth.ceil(radiusY); y <= topY; y++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                for (int x = minX; x <= maxX; x++) {
+                    double nx = (x - centerX) / radiusX;
+                    double ny = (y - centerY) / radiusY;
+                    double nz = (z - centerZ) / radiusZ;
+                    if (nx * nx + ny * ny + nz * nz <= 1.0D) {
+                        all.add(new BlockPos(x, y, z));
+                    }
+                }
+            }
+        }
+
         for (BlockPos pos : all) {
-            if (pos.getY() < centerY) {
+            if (pos.getY() < baseY) {
                 continue;
             }
             boolean edge = false;

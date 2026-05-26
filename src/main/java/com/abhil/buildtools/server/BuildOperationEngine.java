@@ -145,10 +145,6 @@ public final class BuildOperationEngine {
             fail(player, "buildtools.error.empty_shape");
             return false;
         }
-        if (generated.size() > BuildToolsConfig.MAX_OPERATION_VOLUME.get()) {
-            fail(player, Component.translatable("buildtools.error.too_large", generated.size(), BuildToolsConfig.MAX_OPERATION_VOLUME.get()));
-            return false;
-        }
         if (!validatePositions(player, player.serverLevel(), generated)) {
             return false;
         }
@@ -183,6 +179,9 @@ public final class BuildOperationEngine {
         }
         if (positions.isEmpty()) {
             failNoPlacementTargets(player, level, generated, mode, replaceMatch);
+            return false;
+        }
+        if (!validateOperationSize(player, positions.size())) {
             return false;
         }
 
@@ -222,10 +221,6 @@ public final class BuildOperationEngine {
             fail(player, "buildtools.error.empty_shape");
             return false;
         }
-        if (generated.size() > BuildToolsConfig.MAX_OPERATION_VOLUME.get()) {
-            fail(player, Component.translatable("buildtools.error.too_large", generated.size(), BuildToolsConfig.MAX_OPERATION_VOLUME.get()));
-            return false;
-        }
         if (!validatePositions(player, player.serverLevel(), generated)) {
             return false;
         }
@@ -257,6 +252,9 @@ public final class BuildOperationEngine {
         }
         if (positions.isEmpty()) {
             fail(player, "buildtools.error.no_targets");
+            return false;
+        }
+        if (!validateOperationSize(player, positions.size())) {
             return false;
         }
 
@@ -313,10 +311,6 @@ public final class BuildOperationEngine {
             fail(player, "buildtools.error.empty_shape");
             return false;
         }
-        if (generated.size() > BuildToolsConfig.MAX_OPERATION_VOLUME.get()) {
-            fail(player, Component.translatable("buildtools.error.too_large", generated.size(), BuildToolsConfig.MAX_OPERATION_VOLUME.get()));
-            return false;
-        }
         if (!validatePositions(player, player.serverLevel(), generated)) {
             return false;
         }
@@ -337,6 +331,9 @@ public final class BuildOperationEngine {
         }
         if (entries.isEmpty()) {
             failNoPlacementTargets(player, level, generated, mode, replaceMatch);
+            return false;
+        }
+        if (!validateOperationSize(player, entries.size())) {
             return false;
         }
         BuildToolsState.setPlan(player, new BuildPlan(level.dimension(), List.copyOf(entries)));
@@ -377,6 +374,9 @@ public final class BuildOperationEngine {
             targetBlockEntities.add(entry.blockEntity());
             undo.add(undoEntry(level, entry.pos(), previous, entry.state(), entry.blockEntity(), previous.isAir() || previous.canBeReplaced()));
             addUndoRefund(refund, entry.state());
+        }
+        if (!validateOperationSize(player, positions.size())) {
+            return false;
         }
         String label = "build plan";
         boolean trackHistory = hasHistoryItems(player);
@@ -447,6 +447,9 @@ public final class BuildOperationEngine {
         }
         if (positions.isEmpty()) {
             fail(player, "buildtools.error.blocks_in_way");
+            return false;
+        }
+        if (!validateOperationSize(player, positions.size())) {
             return false;
         }
         boolean trackHistory = hasHistoryItems(player);
@@ -520,8 +523,7 @@ public final class BuildOperationEngine {
             fail(player, "buildtools.error.no_targets");
             return false;
         }
-        if (positions.size() > BuildToolsConfig.MAX_OPERATION_VOLUME.get()) {
-            fail(player, Component.translatable("buildtools.error.too_large", positions.size(), BuildToolsConfig.MAX_OPERATION_VOLUME.get()));
+        if (!validateOperationSize(player, positions.size())) {
             return false;
         }
         boolean trackHistory = hasHistoryItems(player);
@@ -1429,6 +1431,14 @@ public final class BuildOperationEngine {
         }
         PacketDistributor.sendToPlayer(player, new ToolStatusPayload(true, "BuildTools Warning", lines, 0xF05A4F));
         fail(player, Component.translatable("buildtools.error.invalid_positions", outOfWorld + unloaded + tooFar));
+        return false;
+    }
+
+    private static boolean validateOperationSize(ServerPlayer player, int changes) {
+        if (changes <= BuildToolsConfig.MAX_OPERATION_VOLUME.get()) {
+            return true;
+        }
+        fail(player, Component.translatable("buildtools.error.too_large", changes, BuildToolsConfig.MAX_OPERATION_VOLUME.get()));
         return false;
     }
 

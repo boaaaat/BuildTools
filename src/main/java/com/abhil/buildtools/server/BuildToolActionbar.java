@@ -147,7 +147,7 @@ public final class BuildToolActionbar {
                 + " | Air: " + stats.air()
                 + " | Blocks: " + stats.solid()
                 + " | " + modeName(mode) + ": " + stats.targetsFor(mode)
-                + limitSuffix(stats));
+                + limitSuffix(stats.targetsFor(mode)));
     }
 
     private static Component builderMessage(ServerPlayer player) {
@@ -180,7 +180,7 @@ public final class BuildToolActionbar {
                 + " | Blocks: " + stats.solid()
                 + " | Replace target: " + BuildToolsState.replaceTarget(player).getBlock().getName().getString()
                 + costSuffix(player, costPlan)
-                + limitSuffix(stats));
+                + limitSuffix(targets));
     }
 
     private static Component advancedBuilderMessage(ServerPlayer player) {
@@ -219,7 +219,7 @@ public final class BuildToolActionbar {
                 + " | Air: " + stats.air()
                 + " | Will break: " + willBreak
                 + " | Drops stored if history is active"
-                + limitSuffix(stats));
+                + limitSuffix(willBreak));
     }
 
     private static Component trowelMessage(ServerPlayer player) {
@@ -302,8 +302,7 @@ public final class BuildToolActionbar {
                 positions.size() - air,
                 fillTargets,
                 replaceTargets,
-                surfaceTargets,
-                positions.size() > BuildToolsConfig.MAX_OPERATION_VOLUME.get());
+                surfaceTargets);
     }
 
     private static boolean touchesMatchingBlock(ServerPlayer player, BlockPos pos, BlockState match) {
@@ -347,8 +346,8 @@ public final class BuildToolActionbar {
         return " | Need: " + required + " | Materials ready";
     }
 
-    private static String limitSuffix(SelectionStats stats) {
-        return stats.tooLarge() ? " | Over limit: " + BuildToolsConfig.MAX_OPERATION_VOLUME.get() : "";
+    private static String limitSuffix(int changes) {
+        return changes > BuildToolsConfig.MAX_OPERATION_VOLUME.get() ? " | Over limit: " + BuildToolsConfig.MAX_OPERATION_VOLUME.get() : "";
     }
 
     private static String compactMissing(Map<ItemStackKey, Integer> missing) {
@@ -371,10 +370,9 @@ public final class BuildToolActionbar {
             int solid,
             int fillTargets,
             int replaceTargets,
-            int surfaceTargets,
-            boolean tooLarge) {
+            int surfaceTargets) {
         private static SelectionStats invalid(String status) {
-            return new SelectionStats(false, status, "", "", 0, 0, 0, 0, 0, 0, false);
+            return new SelectionStats(false, status, "", "", 0, 0, 0, 0, 0, 0);
         }
 
         private int targetsFor(BuildMode mode) {

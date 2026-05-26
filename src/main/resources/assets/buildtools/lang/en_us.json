@@ -228,7 +228,7 @@
   "buildtools.error.offhand_block": "Put the block to place in your offhand.",
   "buildtools.error.unsupported_block": "That block cannot be placed by BuildTools.",
   "buildtools.error.empty_shape": "The selected shape is empty.",
-  "buildtools.error.too_large": "Selection has %s blocks; limit is %s.",
+  "buildtools.error.too_large": "Operation has %s block changes; limit is %s.",
   "buildtools.error.copy_too_large": "Blueprint has %s blocks; limit is %s.",
   "buildtools.error.not_enough_durability": "Tool needs %s durability for this job; only %s remains.",
   "buildtools.error.copy_unsupported": "That block cannot be copied by BuildTools.",
