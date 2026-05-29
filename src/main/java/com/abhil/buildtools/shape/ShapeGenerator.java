@@ -17,6 +17,14 @@ public final class ShapeGenerator {
     }
 
     public static List<BlockPos> generate(Selection selection, CustomShapeMode customMode, StairDirectionOverride stairDirection) {
+        return generate(selection, customMode, stairDirection, Options.DEFAULT);
+    }
+
+    public static List<BlockPos> generate(Selection selection, CustomShapeMode customMode, StairDirectionOverride stairDirection, int roadWidth) {
+        return generate(selection, customMode, stairDirection, new Options(roadWidth, false, 50, false, false));
+    }
+
+    public static List<BlockPos> generate(Selection selection, CustomShapeMode customMode, StairDirectionOverride stairDirection, Options options) {
         if (selection.shape() == SelectionShape.CUSTOM_SMART) {
             return customSmart(selection.points(), customMode);
         }
@@ -36,11 +44,11 @@ public final class ShapeGenerator {
             case HOLLOW_BOX -> cuboid(a, b, Filter.SHELL);
             case LINE -> line(a, b);
             case CYLINDER -> cylinder(a, b);
-            case SPHERE -> sphere(a, b, true);
-            case ELLIPSOID -> sphere(a, b, false);
-            case ROAD -> cuboid(a, b, Filter.FLOOR);
+            case SPHERE -> sphere(a, b, true, options.sphereHollow());
+            case ELLIPSOID -> sphere(a, b, false, options.ellipsoidHollow());
+            case ROAD -> road(selection.points().size() > 1 ? selection.points() : List.of(a, b), options.roadWidth());
             case TUNNEL -> tunnel(a, b);
-            case ARCH -> arch(a, b);
+            case ARCH -> arch(a, b, options.archEdgeWalls(), options.archPeak());
             case DOME -> dome(a, b);
             case CUSTOM_SMART -> customSmart(selection.points(), customMode);
             case STAIRS -> stairs(selection, stairDirection);
@@ -103,6 +111,111 @@ public final class ShapeGenerator {
         return List.copyOf(positions);
     }
 
+    public static List<BlockPos> road(List<BlockPos> points, int width) {
+        if (points.isEmpty()) {
+            return List.of();
+        }
+        int roadWidth = Math.max(1, width);
+        if (points.size() == 1) {
+            PathPoint point = new PathPoint(points.getFirst().getX(), points.getFirst().getY(), points.getFirst().getZ());
+            Set<BlockPos> positions = new LinkedHashSet<>();
+            stampRoadCrossSection(positions, point, point, point, roadWidth);
+            return List.copyOf(positions);
+        }
+        List<PathPoint> center = smoothPath(points);
+        Set<BlockPos> positions = new LinkedHashSet<>();
+        if (center.size() == 1) {
+            stampRoadCrossSection(positions, center.getFirst(), center.getFirst(), center.getFirst(), roadWidth);
+            return List.copyOf(positions);
+        }
+        for (int i = 0; i < center.size(); i++) {
+            PathPoint previous = center.get(Math.max(0, i - 1));
+            PathPoint current = center.get(i);
+            PathPoint next = center.get(Math.min(center.size() - 1, i + 1));
+            stampRoadCrossSection(positions, previous, current, next, roadWidth);
+        }
+        return List.copyOf(positions);
+    }
+
+    private static List<PathPoint> smoothPath(List<BlockPos> points) {
+        if (points.size() < 3) {
+            return linearPath(points);
+        }
+        List<PathPoint> path = new ArrayList<>();
+        for (int i = 0; i < points.size() - 1; i++) {
+            BlockPos p0 = points.get(Math.max(0, i - 1));
+            BlockPos p1 = points.get(i);
+            BlockPos p2 = points.get(i + 1);
+            BlockPos p3 = points.get(Math.min(points.size() - 1, i + 2));
+            int samples = Math.max(2, (int) Math.ceil(Math.sqrt(p1.distSqr(p2)) * 4.0D));
+            for (int step = 0; step <= samples; step++) {
+                if (i > 0 && step == 0) {
+                    continue;
+                }
+                double t = (double) step / (double) samples;
+                path.add(new PathPoint(
+                        catmullRom(p0.getX(), p1.getX(), p2.getX(), p3.getX(), t),
+                        catmullRom(p0.getY(), p1.getY(), p2.getY(), p3.getY(), t),
+                        catmullRom(p0.getZ(), p1.getZ(), p2.getZ(), p3.getZ(), t)));
+            }
+        }
+        return path;
+    }
+
+    private static List<PathPoint> linearPath(List<BlockPos> points) {
+        List<PathPoint> path = new ArrayList<>();
+        for (int i = 0; i < points.size() - 1; i++) {
+            BlockPos a = points.get(i);
+            BlockPos b = points.get(i + 1);
+            int samples = Math.max(1, (int) Math.ceil(Math.sqrt(a.distSqr(b)) * 4.0D));
+            for (int step = 0; step <= samples; step++) {
+                if (i > 0 && step == 0) {
+                    continue;
+                }
+                double t = (double) step / (double) samples;
+                path.add(new PathPoint(
+                        Mth.lerp(t, a.getX(), b.getX()),
+                        Mth.lerp(t, a.getY(), b.getY()),
+                        Mth.lerp(t, a.getZ(), b.getZ())));
+            }
+        }
+        return path;
+    }
+
+    private static double catmullRom(double p0, double p1, double p2, double p3, double t) {
+        double t2 = t * t;
+        double t3 = t2 * t;
+        return 0.5D * (2.0D * p1
+                + (-p0 + p2) * t
+                + (2.0D * p0 - 5.0D * p1 + 4.0D * p2 - p3) * t2
+                + (-p0 + 3.0D * p1 - 3.0D * p2 + p3) * t3);
+    }
+
+    private static void stampRoadCrossSection(Set<BlockPos> positions, PathPoint previous, PathPoint current, PathPoint next, int width) {
+        double dx = next.x() - previous.x();
+        double dz = next.z() - previous.z();
+        double length = Math.sqrt(dx * dx + dz * dz);
+        if (length < 0.0001D) {
+            dx = 0.0D;
+            dz = 1.0D;
+            length = 1.0D;
+        }
+        double perpendicularX = -dz / length;
+        double perpendicularZ = dx / length;
+        double centerOffset = (width - 1) / 2.0D;
+        for (int offsetIndex = 0; offsetIndex < width; offsetIndex++) {
+            double offset = offsetIndex - centerOffset;
+            positions.add(new BlockPos(
+                    roundedBlock(current.x() + perpendicularX * offset),
+                    roundedBlock(current.y()),
+                    roundedBlock(current.z() + perpendicularZ * offset)));
+        }
+    }
+
+    private static int roundedBlock(double value) {
+        return Mth.floor(value + 0.5D);
+    }
+
     public static List<BlockPos> cylinder(BlockPos a, BlockPos b) {
         int minY = Math.min(a.getY(), b.getY());
         int maxY = Math.max(a.getY(), b.getY());
@@ -131,6 +244,10 @@ public final class ShapeGenerator {
     }
 
     public static List<BlockPos> sphere(BlockPos a, BlockPos b, boolean forceRound) {
+        return sphere(a, b, forceRound, false);
+    }
+
+    public static List<BlockPos> sphere(BlockPos a, BlockPos b, boolean forceRound, boolean hollow) {
         int minX = Math.min(a.getX(), b.getX());
         int minY = Math.min(a.getY(), b.getY());
         int minZ = Math.min(a.getZ(), b.getZ());
@@ -150,6 +267,7 @@ public final class ShapeGenerator {
             radiusZ = radius;
         }
         List<BlockPos> positions = new ArrayList<>();
+        Set<BlockPos> filled = hollow ? new LinkedHashSet<>() : null;
 
         for (int y = minY; y <= maxY; y++) {
             for (int z = minZ; z <= maxZ; z++) {
@@ -158,12 +276,17 @@ public final class ShapeGenerator {
                     double ny = (y - centerY) / radiusY;
                     double nz = (z - centerZ) / radiusZ;
                     if (nx * nx + ny * ny + nz * nz <= 1.0D) {
-                        positions.add(new BlockPos(x, y, z));
+                        BlockPos pos = new BlockPos(x, y, z);
+                        if (hollow) {
+                            filled.add(pos);
+                        } else {
+                            positions.add(pos);
+                        }
                     }
                 }
             }
         }
-        return positions;
+        return hollow ? surfaceOnly(filled) : positions;
     }
 
     public static List<BlockPos> tunnel(BlockPos a, BlockPos b) {
@@ -195,30 +318,50 @@ public final class ShapeGenerator {
     }
 
     public static List<BlockPos> arch(BlockPos a, BlockPos b) {
+        return arch(a, b, false, 50);
+    }
+
+    public static List<BlockPos> arch(BlockPos a, BlockPos b, boolean edgeWalls, int peakPercent) {
         int minX = Math.min(a.getX(), b.getX());
         int minY = Math.min(a.getY(), b.getY());
         int minZ = Math.min(a.getZ(), b.getZ());
         int maxX = Math.max(a.getX(), b.getX());
         int maxY = Math.max(a.getY(), b.getY());
         int maxZ = Math.max(a.getZ(), b.getZ());
-        double centerX = (minX + maxX) / 2.0D;
-        double radiusX = Math.max(1.0D, (maxX - minX) / 2.0D);
+        double peak = Mth.clamp(peakPercent, 0, 100) / 100.0D;
+        double centerX = Mth.lerp(peak, minX, maxX);
+        double leftRadiusX = Math.max(1.0D, centerX - minX);
+        double rightRadiusX = Math.max(1.0D, maxX - centerX);
         double radiusY = Math.max(1.0D, maxY - minY);
         List<BlockPos> positions = new ArrayList<>();
 
         for (int z = minZ; z <= maxZ; z++) {
             for (int y = minY; y <= maxY; y++) {
                 for (int x = minX; x <= maxX; x++) {
+                    double radiusX = x <= centerX ? leftRadiusX : rightRadiusX;
                     double nx = (x - centerX) / radiusX;
                     double ny = (y - minY) / radiusY;
                     double value = nx * nx + ny * ny;
-                    if (x == minX || x == maxX || (ny >= 0.0D && value <= 1.08D && value >= 0.70D)) {
+                    if ((edgeWalls && (x == minX || x == maxX)) || (ny >= 0.0D && value <= 1.08D && value >= 0.70D)) {
                         positions.add(new BlockPos(x, y, z));
                     }
                 }
             }
         }
         return positions;
+    }
+
+    private static List<BlockPos> surfaceOnly(Set<BlockPos> filled) {
+        List<BlockPos> surface = new ArrayList<>();
+        for (BlockPos pos : filled) {
+            for (Direction direction : Direction.values()) {
+                if (!filled.contains(pos.relative(direction))) {
+                    surface.add(pos);
+                    break;
+                }
+            }
+        }
+        return surface;
     }
 
     public static List<BlockPos> dome(BlockPos a, BlockPos b) {
@@ -607,6 +750,18 @@ public final class ShapeGenerator {
         private boolean samePlane(HullPlane other) {
             return Math.abs(Math.abs(nx * other.nx + ny * other.ny + nz * other.nz) - 1.0D) < 0.001D
                     && Math.abs(Math.abs(d) - Math.abs(other.d)) < 0.001D;
+        }
+    }
+
+    private record PathPoint(double x, double y, double z) {
+    }
+
+    public record Options(int roadWidth, boolean archEdgeWalls, int archPeak, boolean sphereHollow, boolean ellipsoidHollow) {
+        public static final Options DEFAULT = new Options(3, false, 50, false, false);
+
+        public Options {
+            roadWidth = Math.max(1, roadWidth);
+            archPeak = Mth.clamp(archPeak, 0, 100);
         }
     }
 

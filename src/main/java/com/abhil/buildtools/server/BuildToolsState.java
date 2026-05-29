@@ -69,6 +69,11 @@ public final class BuildToolsState {
     private static final Map<UUID, BuildPlan> PLANS = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, BrushMode>> BRUSH_MODES = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, Integer>> BRUSH_RADII = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Integer>> ROAD_WIDTHS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Boolean>> ARCH_EDGE_WALLS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Integer>> ARCH_PEAKS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Boolean>> SPHERE_HOLLOW = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Boolean>> ELLIPSOID_HOLLOW = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, Boolean>> GRADIENTS = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, PaletteMode>> PALETTE_MODES = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, GradientDirection>> GRADIENT_DIRECTIONS = new HashMap<>();
@@ -80,6 +85,13 @@ public final class BuildToolsState {
     private static final int HISTORY_LIMIT = 10;
     private static final int MIN_BRUSH_RADIUS = 1;
     private static final int MAX_BRUSH_RADIUS = 8;
+    public static final int DEFAULT_ROAD_WIDTH = 3;
+    private static final int MIN_ROAD_WIDTH = 1;
+    private static final int MAX_ROAD_WIDTH = 16;
+    public static final int DEFAULT_ARCH_PEAK = 50;
+    private static final int ARCH_PEAK_STEP = 5;
+    private static final int MIN_ARCH_PEAK = 0;
+    private static final int MAX_ARCH_PEAK = 100;
     private static final int ADVANCED_SELECTION_ACTION_COOLDOWN = 6;
     private static final double ADVANCED_SELECTION_DISTANCE = 100.0D;
     private static final double ADVANCED_POINT_PICK_DISTANCE_SQR = 6.25D;
@@ -107,6 +119,26 @@ public final class BuildToolsState {
 
     public static int brushRadius(ServerPlayer player) {
         return brushRadii(player).getOrDefault(activeProfile(player), 2);
+    }
+
+    public static int roadWidth(ServerPlayer player) {
+        return clampRoadWidth(roadWidths(player).getOrDefault(activeProfile(player), DEFAULT_ROAD_WIDTH));
+    }
+
+    public static boolean archEdgeWalls(ServerPlayer player) {
+        return archEdgeWallModes(player).getOrDefault(activeProfile(player), false);
+    }
+
+    public static int archPeak(ServerPlayer player) {
+        return clampArchPeak(archPeaks(player).getOrDefault(activeProfile(player), DEFAULT_ARCH_PEAK));
+    }
+
+    public static boolean sphereHollow(ServerPlayer player) {
+        return sphereHollows(player).getOrDefault(activeProfile(player), false);
+    }
+
+    public static boolean ellipsoidHollow(ServerPlayer player) {
+        return ellipsoidHollows(player).getOrDefault(activeProfile(player), false);
     }
 
     public static boolean gradientEnabled(ServerPlayer player) {
@@ -143,7 +175,7 @@ public final class BuildToolsState {
     }
 
     public static List<BlockPos> generatedSelection(ServerPlayer player) {
-        return ShapeGenerator.generate(selection(player), customShapeMode(player), stairDirectionOverride(player));
+        return ShapeGenerator.generate(selection(player), customShapeMode(player), stairDirectionOverride(player), shapeOptions(player));
     }
 
     public static ToolProfile activeToolProfile(ServerPlayer player) {
@@ -1050,6 +1082,46 @@ public final class BuildToolsState {
         sendPreview(player);
     }
 
+    public static void changeRoadWidth(ServerPlayer player, int delta) {
+        int width = clampRoadWidth(roadWidth(player) + delta);
+        roadWidths(player).put(activeProfile(player), width);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.road_width", width), true);
+        sendPreview(player);
+    }
+
+    public static void toggleArchEdgeWalls(ServerPlayer player) {
+        boolean enabled = !archEdgeWalls(player);
+        archEdgeWallModes(player).put(activeProfile(player), enabled);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.arch_edge_walls", archEdgeModeName(enabled)), true);
+        sendPreview(player);
+    }
+
+    public static void changeArchPeak(ServerPlayer player, int delta) {
+        int peak = clampArchPeak(archPeak(player) + delta * ARCH_PEAK_STEP);
+        archPeaks(player).put(activeProfile(player), peak);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.arch_peak", peak), true);
+        sendPreview(player);
+    }
+
+    public static void toggleShapeHollow(ServerPlayer player, SelectionShape shape) {
+        if (shape == SelectionShape.SPHERE) {
+            boolean hollow = !sphereHollow(player);
+            sphereHollows(player).put(activeProfile(player), hollow);
+            BuildOperationEngine.clearPendingOperation(player);
+            player.displayClientMessage(Component.translatable("buildtools.message.shape_hollow", shape.displayName(), hollowModeName(hollow)), true);
+            sendPreview(player);
+        } else if (shape == SelectionShape.ELLIPSOID) {
+            boolean hollow = !ellipsoidHollow(player);
+            ellipsoidHollows(player).put(activeProfile(player), hollow);
+            BuildOperationEngine.clearPendingOperation(player);
+            player.displayClientMessage(Component.translatable("buildtools.message.shape_hollow", shape.displayName(), hollowModeName(hollow)), true);
+            sendPreview(player);
+        }
+    }
+
     public static void toggleGradient(ServerPlayer player) {
         setPaletteMode(player, paletteMode(player) == PaletteMode.GRADIENT ? PaletteMode.SINGLE : PaletteMode.GRADIENT);
     }
@@ -1293,7 +1365,7 @@ public final class BuildToolsState {
     }
 
     private static List<BlockPos> filteredPreview(ServerPlayer player, Selection selection) {
-        List<BlockPos> generated = ShapeGenerator.generate(selection, customShapeMode(player), stairDirectionOverride(player));
+        List<BlockPos> generated = ShapeGenerator.generate(selection, customShapeMode(player), stairDirectionOverride(player), shapeOptions(player));
         if (generated.isEmpty()) {
             return generated;
         }
@@ -1441,6 +1513,51 @@ public final class BuildToolsState {
         return BRUSH_RADII.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
     }
 
+    private static EnumMap<ToolProfile, Integer> roadWidths(ServerPlayer player) {
+        return ROAD_WIDTHS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static int clampRoadWidth(int width) {
+        return Math.max(MIN_ROAD_WIDTH, Math.min(MAX_ROAD_WIDTH, width));
+    }
+
+    private static EnumMap<ToolProfile, Boolean> archEdgeWallModes(ServerPlayer player) {
+        return ARCH_EDGE_WALLS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, Integer> archPeaks(ServerPlayer player) {
+        return ARCH_PEAKS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static int clampArchPeak(int peak) {
+        return Math.max(MIN_ARCH_PEAK, Math.min(MAX_ARCH_PEAK, peak));
+    }
+
+    private static EnumMap<ToolProfile, Boolean> sphereHollows(ServerPlayer player) {
+        return SPHERE_HOLLOW.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, Boolean> ellipsoidHollows(ServerPlayer player) {
+        return ELLIPSOID_HOLLOW.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static ShapeGenerator.Options shapeOptions(ServerPlayer player) {
+        return new ShapeGenerator.Options(
+                roadWidth(player),
+                archEdgeWalls(player),
+                archPeak(player),
+                sphereHollow(player),
+                ellipsoidHollow(player));
+    }
+
+    private static Component archEdgeModeName(boolean enabled) {
+        return Component.translatable(enabled ? "buildtools.arch_edge_walls.on" : "buildtools.arch_edge_walls.off");
+    }
+
+    private static Component hollowModeName(boolean hollow) {
+        return Component.translatable(hollow ? "buildtools.shape_fill.hollow" : "buildtools.shape_fill.solid");
+    }
+
     private static EnumMap<ToolProfile, Boolean> gradients(ServerPlayer player) {
         return GRADIENTS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
     }
@@ -1472,6 +1589,11 @@ public final class BuildToolsState {
         tag.put("shapes", writeEnumMap(SHAPES.get(uuid)));
         tag.put("brushModes", writeEnumMap(BRUSH_MODES.get(uuid)));
         tag.put("brushRadii", writeIntMap(BRUSH_RADII.get(uuid)));
+        tag.put("roadWidths", writeIntMap(ROAD_WIDTHS.get(uuid)));
+        tag.put("archEdgeWalls", writeBooleanMap(ARCH_EDGE_WALLS.get(uuid)));
+        tag.put("archPeaks", writeIntMap(ARCH_PEAKS.get(uuid)));
+        tag.put("sphereHollow", writeBooleanMap(SPHERE_HOLLOW.get(uuid)));
+        tag.put("ellipsoidHollow", writeBooleanMap(ELLIPSOID_HOLLOW.get(uuid)));
         tag.put("gradients", writeBooleanMap(GRADIENTS.get(uuid)));
         tag.put("paletteModes", writeEnumMap(PALETTE_MODES.get(uuid)));
         tag.put("gradientDirections", writeEnumMap(GRADIENT_DIRECTIONS.get(uuid)));
@@ -1519,6 +1641,11 @@ public final class BuildToolsState {
         readShapes(tag.getList("shapes", Tag.TAG_COMPOUND)).ifPresent(map -> SHAPES.put(uuid, map));
         readBrushModes(tag.getList("brushModes", Tag.TAG_COMPOUND)).ifPresent(map -> BRUSH_MODES.put(uuid, map));
         readIntMap(tag.getList("brushRadii", Tag.TAG_COMPOUND)).ifPresent(map -> BRUSH_RADII.put(uuid, map));
+        readIntMap(tag.getList("roadWidths", Tag.TAG_COMPOUND)).ifPresent(map -> ROAD_WIDTHS.put(uuid, map));
+        readBooleanMap(tag.getList("archEdgeWalls", Tag.TAG_COMPOUND)).ifPresent(map -> ARCH_EDGE_WALLS.put(uuid, map));
+        readIntMap(tag.getList("archPeaks", Tag.TAG_COMPOUND)).ifPresent(map -> ARCH_PEAKS.put(uuid, map));
+        readBooleanMap(tag.getList("sphereHollow", Tag.TAG_COMPOUND)).ifPresent(map -> SPHERE_HOLLOW.put(uuid, map));
+        readBooleanMap(tag.getList("ellipsoidHollow", Tag.TAG_COMPOUND)).ifPresent(map -> ELLIPSOID_HOLLOW.put(uuid, map));
         readBooleanMap(tag.getList("gradients", Tag.TAG_COMPOUND)).ifPresent(map -> GRADIENTS.put(uuid, map));
         readPaletteModes(tag.getList("paletteModes", Tag.TAG_COMPOUND)).ifPresent(map -> PALETTE_MODES.put(uuid, map));
         readGradientDirections(tag.getList("gradientDirections", Tag.TAG_COMPOUND)).ifPresent(map -> GRADIENT_DIRECTIONS.put(uuid, map));
@@ -1602,6 +1729,11 @@ public final class BuildToolsState {
         PLANS.remove(uuid);
         BRUSH_MODES.remove(uuid);
         BRUSH_RADII.remove(uuid);
+        ROAD_WIDTHS.remove(uuid);
+        ARCH_EDGE_WALLS.remove(uuid);
+        ARCH_PEAKS.remove(uuid);
+        SPHERE_HOLLOW.remove(uuid);
+        ELLIPSOID_HOLLOW.remove(uuid);
         GRADIENTS.remove(uuid);
         PALETTE_MODES.remove(uuid);
         GRADIENT_DIRECTIONS.remove(uuid);

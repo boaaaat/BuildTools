@@ -31,6 +31,14 @@ public record ScrollToolPayload(int direction) implements CustomPacketPayload {
         }
         int step = payload.direction() >= 0 ? 1 : -1;
         ItemStack held = player.getMainHandItem();
+        if (isShapeOptionScrollTool(held) && BuildToolsState.selectionShape(player) == SelectionShape.ROAD) {
+            BuildToolsState.changeRoadWidth(player, step);
+            return;
+        }
+        if (isShapeOptionScrollTool(held) && BuildToolsState.selectionShape(player) == SelectionShape.ARCH) {
+            BuildToolsState.changeArchPeak(player, step);
+            return;
+        }
         if (held.is(ModItems.ADVANCED_SELECTION_STAFF.get())) {
             if (BuildToolsState.selectionShape(player) == SelectionShape.STAIRS) {
                 BuildToolsState.cycleStairDirection(player, step);
@@ -59,6 +67,14 @@ public record ScrollToolPayload(int direction) implements CustomPacketPayload {
         } else if (held.is(ModItems.BUILDER_WAND.get())) {
             BuildToolsState.cycleMode(player);
         }
+    }
+
+    private static boolean isShapeOptionScrollTool(ItemStack held) {
+        return held.is(ModItems.SELECTION_STAFF.get())
+                || held.is(ModItems.ADVANCED_SELECTION_STAFF.get())
+                || held.is(ModItems.BUILDER_WAND.get())
+                || held.is(ModItems.ADVANCED_BUILDER_WAND.get())
+                || held.is(ModItems.AREA_BREAKER.get());
     }
 
     @Override

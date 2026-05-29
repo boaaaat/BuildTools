@@ -739,17 +739,21 @@ public final class BuildOperationEngine {
                 return false;
             }
         }
-        UndoSnapshot redoSnapshot = new UndoSnapshot(snapshot.dimension(), captureCurrentAsRedone(level, snapshot.entries()), snapshot.refund(), snapshot.producedDrops(), snapshot.removedEntities(), snapshot.addedEntities());
+        HistoryReconciliation reconciliation = reconcileUndo(player, level, snapshot);
+        if (reconciliation == null) {
+            return false;
+        }
+        UndoSnapshot redoSnapshot = new UndoSnapshot(snapshot.dimension(), captureCurrentAsRedone(level, reconciliation.entries()), reconciliation.refund(), snapshot.producedDrops(), snapshot.removedEntities(), snapshot.addedEntities());
         BuildToolsState.takeUndo(player);
         removeCapturedEntities(level, snapshot.addedEntities());
         List<ItemStack> unexpectedDrops = new ArrayList<>();
-        List<ItemStack> undoDropBudget = new ArrayList<>(StoredItems.copyOf(snapshot.refund()));
-        for (UndoSnapshot.Entry entry : snapshot.entries()) {
+        List<ItemStack> undoDropBudget = new ArrayList<>(StoredItems.copyOf(reconciliation.refund()));
+        for (UndoSnapshot.Entry entry : reconciliation.entries()) {
             unexpectedDrops.addAll(capturedDropsBeyondBudget(undoDropBudget, restoreBlock(level, entry.pos(), entry.previousState(), entry.previousBlockEntity())));
         }
         spawnCapturedEntities(level, snapshot.removedEntities());
         if (!player.gameMode.isCreative()) {
-            BuildingStorageManager.depositOrGive(player, snapshot.refund());
+            BuildingStorageManager.depositOrGive(player, reconciliation.refund());
             BuildingStorageManager.depositOrGive(player, unexpectedDrops);
         }
         if (hasHistoryItems(player)) {
@@ -757,7 +761,7 @@ public final class BuildOperationEngine {
         } else {
             BuildToolsState.clearRedo(player);
         }
-        player.displayClientMessage(Component.translatable("buildtools.message.undo", snapshot.entries().size()), true);
+        player.displayClientMessage(Component.translatable("buildtools.message.undo", reconciliation.entries().size()), true);
         return true;
     }
 
@@ -777,8 +781,16 @@ public final class BuildOperationEngine {
         List<BlockState> targets = new ArrayList<>();
         List<CompoundTag> targetBlockEntities = new ArrayList<>();
         List<UndoSnapshot.Entry> undoEntries = new ArrayList<>();
+        List<ItemStack> refund = new ArrayList<>();
         for (UndoSnapshot.Entry entry : snapshot.entries()) {
             if (!canRestore(player, level, entry.pos())) {
+                return false;
+            }
+            if (matchesHistoryState(level, entry.pos(), entry.redoneState(), entry.redoneBlockEntity())) {
+                continue;
+            }
+            if (!matchesHistoryState(level, entry.pos(), entry.previousState(), entry.previousBlockEntity())) {
+                failHistoryConflict(player, entry.pos());
                 return false;
             }
             BlockState previous = level.getBlockState(entry.pos());
@@ -792,10 +804,15 @@ public final class BuildOperationEngine {
                     entry.redoneState(),
                     entry.redoneBlockEntity() == null ? null : entry.redoneBlockEntity().copy(),
                     true));
+            addUndoRefund(refund, entry.redoneState());
+        }
+        if (positions.isEmpty() && snapshot.removedEntities().isEmpty() && snapshot.addedEntities().isEmpty()) {
+            fail(player, "buildtools.error.no_targets");
+            return false;
         }
 
         boolean trackHistory = hasHistoryItems(player);
-        boolean queued = enqueue(player, level, positions, targets, copyBlockEntities(targetBlockEntities), List.copyOf(undoEntries), snapshot.refund(), snapshot.producedDrops(), snapshot.removedEntities(), snapshot.addedEntities(), trackHistory, true);
+        boolean queued = enqueue(player, level, positions, targets, copyBlockEntities(targetBlockEntities), List.copyOf(undoEntries), StoredItems.copyOf(refund), snapshot.producedDrops(), snapshot.removedEntities(), snapshot.addedEntities(), trackHistory, true);
         if (queued) {
             BuildToolsState.takeRedo(player);
         }
@@ -1169,6 +1186,47 @@ public final class BuildOperationEngine {
                     true));
         }
         return List.copyOf(captured);
+    }
+
+    private static HistoryReconciliation reconcileUndo(ServerPlayer player, ServerLevel level, UndoSnapshot snapshot) {
+        List<UndoSnapshot.Entry> entries = new ArrayList<>();
+        List<ItemStack> refund = new ArrayList<>();
+        for (UndoSnapshot.Entry entry : snapshot.entries()) {
+            if (matchesHistoryState(level, entry.pos(), entry.redoneState(), entry.redoneBlockEntity())) {
+                entries.add(entry);
+                addUndoRefund(refund, entry.redoneState());
+                continue;
+            }
+            if (matchesHistoryState(level, entry.pos(), entry.previousState(), entry.previousBlockEntity())) {
+                continue;
+            }
+            failHistoryConflict(player, entry.pos());
+            return null;
+        }
+        return new HistoryReconciliation(List.copyOf(entries), StoredItems.copyOf(refund));
+    }
+
+    private static boolean matchesHistoryState(ServerLevel level, BlockPos pos, BlockState expectedState, CompoundTag expectedBlockEntity) {
+        if (!level.getBlockState(pos).equals(expectedState)) {
+            return false;
+        }
+        if (expectedBlockEntity == null) {
+            return true;
+        }
+        CompoundTag current = captureBlockEntity(level, pos);
+        return current != null && normalizedBlockEntity(current).equals(normalizedBlockEntity(expectedBlockEntity));
+    }
+
+    private static CompoundTag normalizedBlockEntity(CompoundTag tag) {
+        CompoundTag normalized = tag.copy();
+        normalized.remove("x");
+        normalized.remove("y");
+        normalized.remove("z");
+        return normalized;
+    }
+
+    private static void failHistoryConflict(ServerPlayer player, BlockPos pos) {
+        fail(player, Component.translatable("buildtools.error.history_conflict", pos.toShortString()));
     }
 
     private static CompoundTag captureBlockEntity(ServerLevel level, BlockPos pos) {
@@ -1875,6 +1933,9 @@ public final class BuildOperationEngine {
             boolean canBreak,
             boolean free,
             String signature) {
+    }
+
+    private record HistoryReconciliation(List<UndoSnapshot.Entry> entries, List<ItemStack> refund) {
     }
 
     private record DropCapture(ServerLevel level, List<ItemStack> drops) {

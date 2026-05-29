@@ -1,6 +1,8 @@
 package com.abhil.buildtools.client;
 
+import com.abhil.buildtools.network.ArchPeakPayload;
 import com.abhil.buildtools.network.PaletteWeightPayload;
+import com.abhil.buildtools.network.RoadWidthPayload;
 import com.abhil.buildtools.server.AdvancedBuildToolsModeMenu;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
@@ -8,6 +10,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.Items;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 public final class AdvancedBuildToolsModeScreen extends AbstractContainerScreen<AdvancedBuildToolsModeMenu> {
@@ -37,6 +40,16 @@ public final class AdvancedBuildToolsModeScreen extends AbstractContainerScreen<
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
         Slot slot = this.hoveredSlot;
+        if (slot != null && this.menu.isRoadShapeSlot(slot) && slot.getItem().is(Items.RAIL)) {
+            int step = scrollY >= 0.0D ? 1 : -1;
+            PacketDistributor.sendToServer(new RoadWidthPayload(step));
+            return true;
+        }
+        if (slot != null && this.menu.isArchShapeSlot(slot) && slot.getItem().is(Items.STONE_BRICK_STAIRS)) {
+            int step = scrollY >= 0.0D ? 1 : -1;
+            PacketDistributor.sendToServer(new ArchPeakPayload(step));
+            return true;
+        }
         if (slot != null && AdvancedBuildToolsModeMenu.isPaletteSlot(slot.index) && !slot.getItem().isEmpty()) {
             int step = scrollY >= 0.0D ? 1 : -1;
             PacketDistributor.sendToServer(new PaletteWeightPayload(slot.index, step * (hasShiftDown() ? 10 : 1)));

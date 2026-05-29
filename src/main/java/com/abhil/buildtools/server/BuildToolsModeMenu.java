@@ -31,6 +31,7 @@ import net.minecraft.world.item.component.ItemLore;
 
 public final class BuildToolsModeMenu extends AbstractContainerMenu {
     private static final int MENU_SIZE = 27;
+    private static final int SHAPE_START_SLOT = 9;
     private final SimpleContainer menuItems = new SimpleContainer(MENU_SIZE);
     private final ToolProfile profile;
     private final ServerPlayer owner;
@@ -137,7 +138,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(5, utilityItem(Items.BOOK, "buildtools.menu.presets", "buildtools.menu.presets.description"));
         menuItems.setItem(6, utilityItem(Items.CHEST, "buildtools.menu.material_checklist", "buildtools.menu.material_checklist.description"));
         menuItems.setItem(8, utilityItem(Items.KNOWLEDGE_BOOK, "buildtools.menu.help", "buildtools.menu.help.description"));
-        populateShapes(9);
+        populateShapes(SHAPE_START_SLOT);
     }
 
     private void populateSelectionMenu() {
@@ -155,7 +156,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
                 "buildtools.menu.selection_visibility",
                 "buildtools.menu.selection_visibility.description",
                 shared));
-        populateShapes(9);
+        populateShapes(SHAPE_START_SLOT);
         menuItems.setItem(22, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.save_preset", "buildtools.menu.save_preset.description"));
         menuItems.setItem(23, utilityItem(Items.BOOK, "buildtools.menu.presets", "buildtools.menu.presets.description"));
         menuItems.setItem(24, utilityItem(Items.KNOWLEDGE_BOOK, "buildtools.menu.help", "buildtools.menu.help.description"));
@@ -181,7 +182,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(4, breakerPresetItem(Items.IRON_PICKAXE, AreaBreakerPreset.NORMAL));
         menuItems.setItem(5, breakerPresetItem(Items.WHEAT_SEEDS, AreaBreakerPreset.CLEAR_SNOW_CROPS));
         menuItems.setItem(8, utilityItem(Items.KNOWLEDGE_BOOK, "buildtools.menu.help", "buildtools.menu.help.description"));
-        populateShapes(9);
+        populateShapes(SHAPE_START_SLOT);
     }
 
     private void populateTrowelMenu() {
@@ -209,7 +210,29 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         SelectionShape[] shapes = visibleShapes();
         for (int i = 0; i < shapes.length; i++) {
             ItemStack stack = shapeIcon(shapes[i]);
-            stack.set(DataComponents.CUSTOM_NAME, shapes[i].displayName());
+            if (shapes[i] == SelectionShape.ROAD) {
+                int width = owner == null ? BuildToolsState.DEFAULT_ROAD_WIDTH : BuildToolsState.roadWidth(owner);
+                Component description = Component.translatable("buildtools.menu.road_width.description").withStyle(ChatFormatting.GRAY);
+                stack.set(DataComponents.CUSTOM_NAME, Component.translatable("buildtools.menu.road_width", width));
+                stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
+            } else if (shapes[i] == SelectionShape.ARCH) {
+                int peak = owner == null ? BuildToolsState.DEFAULT_ARCH_PEAK : BuildToolsState.archPeak(owner);
+                boolean edgeWalls = owner != null && BuildToolsState.archEdgeWalls(owner);
+                Component mode = Component.translatable(edgeWalls ? "buildtools.arch_edge_walls.on" : "buildtools.arch_edge_walls.off");
+                Component description = Component.translatable("buildtools.menu.arch.description", peak).withStyle(ChatFormatting.GRAY);
+                stack.set(DataComponents.CUSTOM_NAME, Component.translatable("buildtools.menu.arch", mode));
+                stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
+            } else if (shapes[i] == SelectionShape.SPHERE || shapes[i] == SelectionShape.ELLIPSOID) {
+                boolean hollow = owner != null && (shapes[i] == SelectionShape.SPHERE
+                        ? BuildToolsState.sphereHollow(owner)
+                        : BuildToolsState.ellipsoidHollow(owner));
+                Component fill = Component.translatable(hollow ? "buildtools.shape_fill.hollow" : "buildtools.shape_fill.solid");
+                Component description = Component.translatable("buildtools.menu.shape_hollow.description").withStyle(ChatFormatting.GRAY);
+                stack.set(DataComponents.CUSTOM_NAME, Component.translatable("buildtools.menu.shape_hollow", shapes[i].displayName(), fill));
+                stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
+            } else {
+                stack.set(DataComponents.CUSTOM_NAME, shapes[i].displayName());
+            }
             setSelected(stack, owner != null && BuildToolsState.selectionShape(owner) == shapes[i]);
             menuItems.setItem(startSlot + i, stack);
         }
@@ -288,7 +311,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case 6 -> MaterialChecklistMenu.open(player);
             case 8 -> HelpMenu.open(player);
             default -> {
-                return handleShapeClick(player, slotId, 9);
+                return handleShapeClick(player, slotId, SHAPE_START_SLOT);
             }
         }
         return true;
@@ -309,7 +332,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case 23 -> PresetLibraryMenu.open(player);
             case 24 -> HelpMenu.open(player);
             default -> {
-                return handleShapeClick(player, slotId, 9);
+                return handleShapeClick(player, slotId, SHAPE_START_SLOT);
             }
         }
         return true;
@@ -340,7 +363,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case 5 -> BuildToolsState.setAreaBreakerPreset(player, AreaBreakerPreset.CLEAR_SNOW_CROPS);
             case 8 -> HelpMenu.open(player);
             default -> {
-                return handleShapeClick(player, slotId, 9);
+                return handleShapeClick(player, slotId, SHAPE_START_SLOT);
             }
         }
         return true;
@@ -377,14 +400,58 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         int shapeIndex = slotId - startSlot;
         SelectionShape[] shapes = visibleShapes();
         if (shapeIndex >= 0 && shapeIndex < shapes.length) {
+            SelectionShape shape = shapes[shapeIndex];
+            if (BuildToolsState.selectionShape(player) == shape && handleSelectedShapeOptionClick(player, shape)) {
+                return true;
+            }
             BuildToolsState.setShape(player, shapes[shapeIndex]);
             return true;
         }
         return false;
     }
 
+    private static boolean handleSelectedShapeOptionClick(ServerPlayer player, SelectionShape shape) {
+        return switch (shape) {
+            case ARCH -> {
+                BuildToolsState.toggleArchEdgeWalls(player);
+                yield true;
+            }
+            case SPHERE, ELLIPSOID -> {
+                BuildToolsState.toggleShapeHollow(player, shape);
+                yield true;
+            }
+            default -> false;
+        };
+    }
+
+    public void adjustRoadWidth(ServerPlayer player, int delta) {
+        BuildToolsState.changeRoadWidth(player, delta);
+        populateMenuItems();
+    }
+
+    public void adjustArchPeak(ServerPlayer player, int delta) {
+        BuildToolsState.changeArchPeak(player, delta);
+        populateMenuItems();
+    }
+
     private SelectionShape[] visibleShapes() {
         return owner == null ? SelectionShape.basicShapes() : BuildToolsState.availableShapes(owner);
+    }
+
+    public static boolean isRoadShapeSlot(int slot) {
+        return slot == SHAPE_START_SLOT + SelectionShape.ROAD.ordinal();
+    }
+
+    public static boolean isArchShapeSlot(int slot) {
+        return slot == SHAPE_START_SLOT + SelectionShape.ARCH.ordinal();
+    }
+
+    public boolean isRoadShapeSlot(Slot slot) {
+        return isRoadShapeSlot(this.slots.indexOf(slot));
+    }
+
+    public boolean isArchShapeSlot(Slot slot) {
+        return isArchShapeSlot(this.slots.indexOf(slot));
     }
 
     private static ItemStack shapeIcon(SelectionShape shape) {
