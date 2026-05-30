@@ -11,18 +11,19 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
-public record ScrollToolPayload(int direction) implements CustomPacketPayload {
+public record ScrollToolPayload(int direction, boolean alternate) implements CustomPacketPayload {
     public static final Type<ScrollToolPayload> TYPE = new Type<>(BuildTools.id("scroll_tool"));
     public static final StreamCodec<RegistryFriendlyByteBuf, ScrollToolPayload> STREAM_CODEC = CustomPacketPayload.codec(
             ScrollToolPayload::write,
             ScrollToolPayload::read);
 
     private static ScrollToolPayload read(RegistryFriendlyByteBuf buffer) {
-        return new ScrollToolPayload(buffer.readVarInt());
+        return new ScrollToolPayload(buffer.readVarInt(), buffer.readBoolean());
     }
 
     private void write(RegistryFriendlyByteBuf buffer) {
         buffer.writeVarInt(direction);
+        buffer.writeBoolean(alternate);
     }
 
     public static void handle(ScrollToolPayload payload, IPayloadContext context) {
@@ -57,7 +58,14 @@ public record ScrollToolPayload(int direction) implements CustomPacketPayload {
         } else if (held.is(ModItems.SELECTION_STAFF.get())) {
             BuildToolsState.cycleShape(player);
         } else if (held.is(ModItems.BUILDER_BRUSH.get())) {
-            BuildToolsState.changeBrushRadius(player, step);
+            if (!payload.alternate()) {
+                BuildToolsState.changeBrushRadius(player, step);
+            } else if (BuildToolsState.brushMode(player) == com.abhil.buildtools.shape.BrushMode.SCATTER
+                    || BuildToolsState.brushMode(player) == com.abhil.buildtools.shape.BrushMode.BLEND) {
+                BuildToolsState.changeBrushDensity(player, step);
+            } else {
+                BuildToolsState.changeBrushDepth(player, step);
+            }
         } else if (held.is(ModItems.ADVANCED_BUILDER_WAND.get())) {
             if (BuildToolsState.selectionShape(player) == SelectionShape.STAIRS) {
                 BuildToolsState.cycleStairDirection(player, step);

@@ -3,10 +3,13 @@ package com.abhil.buildtools.shape;
 import net.minecraft.network.chat.Component;
 
 public enum BrushMode {
-    SPHERE("sphere"),
-    CYLINDER("cylinder"),
+    PAINT("paint"),
+    ERASE("erase"),
+    REPLACE("replace"),
     SMOOTH("smooth"),
-    REPLACE("replace");
+    SCATTER("scatter"),
+    OVERLAY("overlay"),
+    BLEND("blend");
 
     private final String key;
 

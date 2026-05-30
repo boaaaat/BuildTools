@@ -163,15 +163,23 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
     }
 
     private void populateBrushMenu() {
-        BrushMode brushMode = owner == null ? BrushMode.SPHERE : BuildToolsState.brushMode(owner);
+        BrushMode brushMode = owner == null ? BrushMode.PAINT : BuildToolsState.brushMode(owner);
         int radius = owner == null ? 2 : BuildToolsState.brushRadius(owner);
-        menuItems.setItem(0, brushModeItem(Items.SLIME_BALL, BrushMode.SPHERE, brushMode));
-        menuItems.setItem(1, brushModeItem(Items.SCAFFOLDING, BrushMode.CYLINDER, brushMode));
-        menuItems.setItem(2, brushModeItem(Items.GRASS_BLOCK, BrushMode.SMOOTH, brushMode));
-        menuItems.setItem(3, brushModeItem(Items.ORANGE_DYE, BrushMode.REPLACE, brushMode));
+        int depth = owner == null ? 1 : BuildToolsState.brushDepth(owner);
+        int density = owner == null ? 100 : BuildToolsState.brushDensity(owner);
+        menuItems.setItem(0, brushModeItem(Items.PAINTING, BrushMode.PAINT, brushMode));
+        menuItems.setItem(1, brushModeItem(Items.BARRIER, BrushMode.ERASE, brushMode));
+        menuItems.setItem(2, brushModeItem(Items.ORANGE_DYE, BrushMode.REPLACE, brushMode));
+        menuItems.setItem(3, brushModeItem(Items.GRASS_BLOCK, BrushMode.SMOOTH, brushMode));
+        menuItems.setItem(4, brushModeItem(Items.WHEAT_SEEDS, BrushMode.SCATTER, brushMode));
+        menuItems.setItem(5, brushModeItem(Items.SNOWBALL, BrushMode.OVERLAY, brushMode));
+        menuItems.setItem(6, brushModeItem(Items.AMETHYST_SHARD, BrushMode.BLEND, brushMode));
         menuItems.setItem(9, utilityItem(Items.LIGHT_BLUE_DYE, "buildtools.menu.brush_smaller", "buildtools.menu.brush_radius.description"));
         menuItems.setItem(10, named(Items.PAINTING, Component.translatable("buildtools.menu.brush_radius", radius)));
         menuItems.setItem(11, utilityItem(Items.BLUE_DYE, "buildtools.menu.brush_larger", "buildtools.menu.brush_radius.description"));
+        menuItems.setItem(12, named(Items.DEEPSLATE, Component.translatable("buildtools.menu.brush_depth", depth)));
+        menuItems.setItem(13, named(Items.WHEAT_SEEDS, Component.translatable("buildtools.menu.brush_density", density)));
+        populateShapes(18);
     }
 
     private void populateBreakerMenu() {
@@ -347,14 +355,19 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
 
     private boolean handleBrushClick(ServerPlayer player, int slotId) {
         switch (slotId) {
-            case 0 -> BuildToolsState.setBrushMode(player, BrushMode.SPHERE);
-            case 1 -> BuildToolsState.setBrushMode(player, BrushMode.CYLINDER);
-            case 2 -> BuildToolsState.setBrushMode(player, BrushMode.SMOOTH);
-            case 3 -> BuildToolsState.setBrushMode(player, BrushMode.REPLACE);
+            case 0 -> BuildToolsState.setBrushMode(player, BrushMode.PAINT);
+            case 1 -> BuildToolsState.setBrushMode(player, BrushMode.ERASE);
+            case 2 -> BuildToolsState.setBrushMode(player, BrushMode.REPLACE);
+            case 3 -> BuildToolsState.setBrushMode(player, BrushMode.SMOOTH);
+            case 4 -> BuildToolsState.setBrushMode(player, BrushMode.SCATTER);
+            case 5 -> BuildToolsState.setBrushMode(player, BrushMode.OVERLAY);
+            case 6 -> BuildToolsState.setBrushMode(player, BrushMode.BLEND);
             case 9 -> BuildToolsState.changeBrushRadius(player, -1);
             case 11 -> BuildToolsState.changeBrushRadius(player, 1);
+            case 12 -> BuildToolsState.changeBrushDepth(player, 1);
+            case 13 -> BuildToolsState.changeBrushDensity(player, -1);
             default -> {
-                return false;
+                return handleShapeClick(player, slotId, 18, false);
             }
         }
         return true;

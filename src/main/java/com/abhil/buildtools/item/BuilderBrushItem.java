@@ -1,24 +1,29 @@
 package com.abhil.buildtools.item;
 
 import com.abhil.buildtools.server.BuildOperationEngine;
-import net.minecraft.core.BlockPos;
+import com.abhil.buildtools.server.BuildToolsModeMenu;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.context.UseOnContext;
 
-public final class BuilderBrushItem extends BuildToolItem {
+public class BuilderBrushItem extends Item {
     public BuilderBrushItem(Properties properties) {
         super(properties);
     }
 
     @Override
     public InteractionResult useOn(UseOnContext context) {
-        Player player = context.getPlayer();
-        if (player instanceof ServerPlayer serverPlayer) {
-            BlockPos origin = context.getClickedPos().relative(context.getClickedFace());
-            BuildOperationEngine.executeBrush(serverPlayer, origin);
+        if (context.getLevel().isClientSide()) {
+            return InteractionResult.SUCCESS;
         }
-        return InteractionResult.sidedSuccess(context.getLevel().isClientSide());
+        if (context.getPlayer() instanceof ServerPlayer player) {
+            if (player.isShiftKeyDown()) {
+                BuildToolsModeMenu.open(player);
+            } else {
+                BuildOperationEngine.pickBrushTarget(player, context.getClickedPos());
+            }
+        }
+        return InteractionResult.SUCCESS;
     }
 }

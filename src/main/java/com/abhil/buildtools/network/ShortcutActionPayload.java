@@ -43,6 +43,7 @@ public record ShortcutActionPayload(String action, String direction, int amount)
             case "cancel_preview" -> cancel(player);
             case "undo" -> BuildOperationEngine.undo(player);
             case "redo" -> BuildOperationEngine.redo(player);
+            case "apply_brush" -> applyBrush(player);
             case "nudge" -> nudge(player, payload.direction(), payload.amount());
             case "nudge_relative" -> nudgeRelative(player, payload.direction(), payload.amount());
             case "cycle_shape_step" -> cycleShape(player, payload.amount());
@@ -85,6 +86,7 @@ public record ShortcutActionPayload(String action, String direction, int amount)
                 || stack.is(ModItems.ADVANCED_SELECTION_STAFF.get())
                 || stack.is(ModItems.BUILDER_WAND.get())
                 || stack.is(ModItems.ADVANCED_BUILDER_WAND.get())
+                || stack.is(ModItems.BUILDER_BRUSH.get())
                 || stack.is(ModItems.AREA_BREAKER.get());
     }
 
@@ -100,6 +102,12 @@ public record ShortcutActionPayload(String action, String direction, int amount)
     private static void confirm(ServerPlayer player) {
         if (!BuildOperationEngine.confirmPendingOperation(player)) {
             BuildOperationEngine.confirmPendingBlueprintPaste(player);
+        }
+    }
+
+    private static void applyBrush(ServerPlayer player) {
+        if (isBrushTool(player.getMainHandItem())) {
+            BuildOperationEngine.applyBrushAtLook(player);
         }
     }
 

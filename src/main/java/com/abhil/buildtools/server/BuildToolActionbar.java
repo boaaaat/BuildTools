@@ -191,12 +191,15 @@ public final class BuildToolActionbar {
 
     private static Component brushMessage(ServerPlayer player) {
         ItemStack source = player.getOffhandItem();
-        String offhand = source.getItem() instanceof BlockItem ? source.getHoverName().getString() : "missing offhand block";
+        String offhand = source.getItem() instanceof BlockItem ? source.getHoverName().getString() : "Air";
         return Component.literal("Builder Brush | " + BuildToolsState.brushMode(player).displayName().getString()
+                + " | Shape: " + BuildToolsState.selectionShape(player).displayName().getString()
                 + " | Radius: " + BuildToolsState.brushRadius(player)
+                + " | Depth: " + BuildToolsState.brushDepth(player)
+                + " | Density: " + BuildToolsState.brushDensity(player) + "%"
                 + " | Block: " + offhand
-                + " | Replace target: " + BuildToolsState.replaceTarget(player).getBlock().getName().getString()
-                + " | Sneak right-click: menu");
+                + " | Target: " + BuildToolsState.brushReplaceTarget(player).getBlock().getName().getString()
+                + " | Left-click: preview/apply | Right-click: pick target | Sneak right-click: menu");
     }
 
     private static Component breakerMessage(ServerPlayer player) {

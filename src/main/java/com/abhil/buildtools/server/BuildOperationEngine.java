@@ -48,7 +48,11 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -403,44 +407,71 @@ public final class BuildOperationEngine {
     }
 
     public static boolean executeBrush(ServerPlayer player, BlockPos origin) {
-        ItemStack source = player.getOffhandItem();
-        BlockState target = materialState(source);
-        if (target == null) {
-            fail(player, "buildtools.error.offhand_block");
+        return executeBrush(player, origin, Direction.UP);
+    }
+
+    public static boolean applyBrushAtLook(ServerPlayer player) {
+        BlockHitResult hit = brushHit(player);
+        if (hit == null) {
+            fail(player, "buildtools.error.no_target");
             return false;
         }
-        if (!isSupportedTarget(target)) {
+        return executeBrush(player, hit.getBlockPos(), hit.getDirection());
+    }
+
+    public static void pickBrushTarget(ServerPlayer player, BlockPos pos) {
+        BuildToolsState.setBrushReplaceTarget(player, player.level().getBlockState(pos));
+    }
+
+    private static boolean executeBrush(ServerPlayer player, BlockPos origin, Direction face) {
+        BrushMode brushMode = BuildToolsState.brushMode(player);
+        BlockState target = brushMaterialFallback(player);
+        if (!target.isAir() && !isSupportedTarget(target)) {
             fail(player, "buildtools.error.unsupported_block");
             return false;
         }
-
-        BrushMode brushMode = BuildToolsState.brushMode(player);
         return brushMode == BrushMode.SMOOTH
                 ? executeSmoothBrush(player, origin, target)
-                : executePlaceBrush(player, origin, target, brushMode);
+                : executeModifierBrush(player, origin, face, target, brushMode);
     }
 
-    private static boolean executePlaceBrush(ServerPlayer player, BlockPos origin, BlockState target, BrushMode brushMode) {
-        int radius = BuildToolsState.brushRadius(player);
-        List<BlockPos> generated = brushMode == BrushMode.CYLINDER
-                ? ShapeGenerator.cylinder(origin.offset(-radius, 0, -radius), origin.offset(radius, 0, radius))
-                : ShapeGenerator.sphere(origin.offset(-radius, -radius, -radius), origin.offset(radius, radius, radius), true);
+    private static boolean executeModifierBrush(ServerPlayer player, BlockPos origin, Direction face, BlockState fallbackTarget, BrushMode brushMode) {
         ServerLevel level = player.serverLevel();
+        List<BlockPos> generated = brushMode == BrushMode.OVERLAY
+                ? overlayBrushPositions(player, level, origin)
+                : brushPositions(player, origin, face);
         if (!validatePositions(player, level, generated)) {
             return false;
         }
+
+        int radius = BuildToolsState.brushRadius(player);
+        int density = BuildToolsState.brushDensity(player);
+        BlockState replaceMatch = BuildToolsState.brushReplaceTarget(player);
+        List<PaletteEntry> palette = BuildToolsState.brushPaletteEntries(player);
+        PaletteMode paletteMode = BuildToolsState.brushPaletteMode(player);
         List<BlockPos> positions = new ArrayList<>();
         List<BlockState> targets = new ArrayList<>();
         List<CompoundTag> targetBlockEntities = new ArrayList<>();
         List<UndoSnapshot.Entry> undo = new ArrayList<>();
         List<ItemStack> refund = new ArrayList<>();
+
         for (BlockPos pos : generated) {
             BlockState previous = level.getBlockState(pos);
             if (!canTouch(player, level, pos, previous)) {
                 return false;
             }
-            if (!previous.canBeReplaced()) {
+            BlockState target = brushMode == BrushMode.ERASE
+                    ? Blocks.AIR.defaultBlockState()
+                    : brushMaterialTarget(origin, pos, fallbackTarget, palette, paletteMode, brushMode);
+            if (!shouldBrushChange(level, origin, pos, previous, target, brushMode, replaceMatch, radius, density)) {
                 continue;
+            }
+            if (!target.isAir() && !isSupportedTarget(target)) {
+                fail(player, "buildtools.error.unsupported_block");
+                return false;
+            }
+            if (!previous.isAir() && !previous.is(target.getBlock()) && !canBreakState(player, level, pos, previous)) {
+                return false;
             }
             positions.add(pos.immutable());
             targets.add(target);
@@ -448,42 +479,21 @@ public final class BuildOperationEngine {
             undo.add(undoEntry(level, pos, previous, target, previous.isAir() || previous.canBeReplaced()));
             addUndoRefund(refund, target);
         }
-        if (positions.isEmpty()) {
-            fail(player, "buildtools.error.blocks_in_way");
-            return false;
-        }
-        if (!validateOperationSize(player, positions.size())) {
-            return false;
-        }
-        boolean trackHistory = hasHistoryItems(player);
-        List<CapturedEntity> removedEntities = captureDecorEntities(level, BlockPos.ZERO, positions);
-        List<ItemStack> producedDrops = withEntityDrops(dropsForChanges(player, level, undo), removedEntities);
-        String label = "brush";
-        return previewOrConfirm(player, level, new PendingOperation(
-                level.dimension(),
-                label,
-                List.copyOf(positions),
-                List.copyOf(targets),
-                copyBlockEntities(targetBlockEntities),
-                List.copyOf(undo),
-                StoredItems.copyOf(refund),
-                producedDrops,
-                removedEntities,
-                List.of(),
-                trackHistory,
-                false,
-                false,
-                signature(label + ":" + brushMode.name() + ":" + radius, level, positions, targets)));
+        return previewBrushOperation(player, level, brushMode, positions, targets, targetBlockEntities, undo, refund, true);
     }
 
     private static boolean executeSmoothBrush(ServerPlayer player, BlockPos origin, BlockState fillState) {
         ServerLevel level = player.serverLevel();
         int radius = BuildToolsState.brushRadius(player);
+        int depth = BuildToolsState.brushDepth(player);
         List<Integer> heights = new ArrayList<>();
         Map<BlockPos, Integer> tops = new LinkedHashMap<>();
         for (int x = origin.getX() - radius; x <= origin.getX() + radius; x++) {
             for (int z = origin.getZ() - radius; z <= origin.getZ() + radius; z++) {
-                BlockPos top = findTopSolid(level, x, z, origin.getY() - radius * 2, origin.getY() + radius * 2);
+                if (!insideBrushDisc(origin, x, z, radius)) {
+                    continue;
+                }
+                BlockPos top = findTopSolid(level, x, z, origin.getY() - radius - depth, origin.getY() + radius + depth);
                 if (top != null) {
                     heights.add(top.getY());
                     tops.put(new BlockPos(x, 0, z), top.getY());
@@ -505,23 +515,31 @@ public final class BuildOperationEngine {
             int x = entry.getKey().getX();
             int z = entry.getKey().getZ();
             int topY = entry.getValue();
-            if (topY < average) {
-                for (int y = topY + 1; y <= average; y++) {
-                    BlockPos pos = new BlockPos(x, y, z);
-                    BlockState previous = level.getBlockState(pos);
-                    if (previous.canBeReplaced()) {
-                        if (!canTouch(player, level, pos, previous)) {
-                            return false;
-                        }
-                        positions.add(pos);
-                        targets.add(fillState);
-                        targetBlockEntities.add(null);
-                        undo.add(undoEntry(level, pos, previous, fillState, true));
-                        addUndoRefund(refund, fillState);
-                    }
+            int fillTo = Math.min(average, topY + depth);
+            int trimTo = Math.max(average, topY - depth);
+            if (topY < average && !fillState.isAir()) {
+                for (int y = topY + 1; y <= fillTo; y++) {
+                    addBrushChange(player, level, new BlockPos(x, y, z), fillState, positions, targets, targetBlockEntities, undo, refund);
+                }
+            } else if (topY > average) {
+                for (int y = topY; y > trimTo; y--) {
+                    addBrushChange(player, level, new BlockPos(x, y, z), Blocks.AIR.defaultBlockState(), positions, targets, targetBlockEntities, undo, refund);
                 }
             }
         }
+        return previewBrushOperation(player, level, BrushMode.SMOOTH, positions, targets, targetBlockEntities, undo, refund, true);
+    }
+
+    private static boolean previewBrushOperation(
+            ServerPlayer player,
+            ServerLevel level,
+            BrushMode brushMode,
+            List<BlockPos> positions,
+            List<BlockState> targets,
+            List<CompoundTag> targetBlockEntities,
+            List<UndoSnapshot.Entry> undo,
+            List<ItemStack> refund,
+            boolean canBreak) {
         if (positions.isEmpty()) {
             fail(player, "buildtools.error.no_targets");
             return false;
@@ -532,7 +550,8 @@ public final class BuildOperationEngine {
         boolean trackHistory = hasHistoryItems(player);
         List<CapturedEntity> removedEntities = captureDecorEntities(level, BlockPos.ZERO, positions);
         List<ItemStack> producedDrops = withEntityDrops(dropsForChanges(player, level, undo), removedEntities);
-        String label = "smooth brush";
+        String label = brushMode.displayName().getString();
+        boolean free = targets.stream().allMatch(BlockState::isAir);
         return previewOrConfirm(player, level, new PendingOperation(
                 level.dimension(),
                 label,
@@ -545,13 +564,178 @@ public final class BuildOperationEngine {
                 removedEntities,
                 List.of(),
                 trackHistory,
-                false,
-                false,
-                signature(label + ":" + radius, level, positions, targets)));
+                canBreak,
+                free,
+                signature(label + ":" + BuildToolsState.selectionShape(player).name()
+                        + ":" + BuildToolsState.brushRadius(player)
+                        + ":" + BuildToolsState.brushDepth(player)
+                        + ":" + BuildToolsState.brushDensity(player), level, positions, targets)));
+    }
+
+    private static void addBrushChange(
+            ServerPlayer player,
+            ServerLevel level,
+            BlockPos pos,
+            BlockState target,
+            List<BlockPos> positions,
+            List<BlockState> targets,
+            List<CompoundTag> targetBlockEntities,
+            List<UndoSnapshot.Entry> undo,
+            List<ItemStack> refund) {
+        BlockState previous = level.getBlockState(pos);
+        if (previous.is(target.getBlock())) {
+            return;
+        }
+        if (!canTouch(player, level, pos, previous)) {
+            return;
+        }
+        if (!previous.isAir() && !canBreakState(player, level, pos, previous)) {
+            return;
+        }
+        positions.add(pos.immutable());
+        targets.add(target);
+        targetBlockEntities.add(null);
+        undo.add(undoEntry(level, pos, previous, target, previous.isAir() || previous.canBeReplaced()));
+        addUndoRefund(refund, target);
+    }
+
+    private static List<BlockPos> brushPositions(ServerPlayer player, BlockPos origin, Direction face) {
+        int radius = BuildToolsState.brushRadius(player);
+        int depth = BuildToolsState.brushDepth(player);
+        SelectionShape shape = BuildToolsState.selectionShape(player);
+        return switch (shape) {
+            case CYLINDER -> ShapeGenerator.cylinder(
+                    origin.offset(-radius, -depth + 1, -radius),
+                    origin.offset(radius, 0, radius));
+            case CUBOID -> ShapeGenerator.cuboid(
+                    origin.offset(-radius, -depth + 1, -radius),
+                    origin.offset(radius, 0, radius),
+                    ShapeGenerator.Filter.ALL);
+            case FLOOR -> ShapeGenerator.cylinder(
+                    origin.offset(-radius, 0, -radius),
+                    origin.offset(radius, 0, radius));
+            default -> ShapeGenerator.sphere(
+                    origin.offset(-radius, -radius, -radius),
+                    origin.offset(radius, radius, radius),
+                    true);
+        };
+    }
+
+    private static List<BlockPos> overlayBrushPositions(ServerPlayer player, ServerLevel level, BlockPos origin) {
+        int radius = BuildToolsState.brushRadius(player);
+        int depth = BuildToolsState.brushDepth(player);
+        List<BlockPos> positions = new ArrayList<>();
+        Set<BlockPos> unique = new HashSet<>();
+        for (int x = origin.getX() - radius; x <= origin.getX() + radius; x++) {
+            for (int z = origin.getZ() - radius; z <= origin.getZ() + radius; z++) {
+                if (!insideBrushDisc(origin, x, z, radius)) {
+                    continue;
+                }
+                BlockPos top = findTopSolid(level, x, z, origin.getY() - radius - depth, origin.getY() + radius + depth);
+                if (top == null || !isExposedTop(level, top)) {
+                    continue;
+                }
+                BlockPos place = top.above();
+                if (unique.add(place.immutable())) {
+                    positions.add(place.immutable());
+                }
+            }
+        }
+        return positions;
+    }
+
+    private static boolean shouldBrushChange(
+            ServerLevel level,
+            BlockPos origin,
+            BlockPos pos,
+            BlockState previous,
+            BlockState target,
+            BrushMode brushMode,
+            BlockState replaceMatch,
+            int radius,
+            int density) {
+        if (previous.is(target.getBlock())) {
+            return false;
+        }
+        return switch (brushMode) {
+            case ERASE -> !previous.isAir();
+            case REPLACE -> !previous.isAir() && previous.is(replaceMatch.getBlock());
+            case SCATTER -> acceptsDensity(origin, pos, radius, density, true);
+            case BLEND -> acceptsDensity(origin, pos, radius, density, true);
+            case OVERLAY -> target.isAir() ? false : previous.canBeReplaced() && acceptsDensity(origin, pos, radius, density, false);
+            case PAINT -> true;
+            case SMOOTH -> true;
+        };
+    }
+
+    private static BlockState brushMaterialFallback(ServerPlayer player) {
+        ItemStack source = player.getOffhandItem();
+        if (source.isEmpty()) {
+            return Blocks.AIR.defaultBlockState();
+        }
+        BlockState target = materialState(source);
+        if (target != null) {
+            return target;
+        }
+        List<PaletteEntry> palette = BuildToolsState.brushPaletteEntries(player);
+        if (!palette.isEmpty()) {
+            return palette.getFirst().state();
+        }
+        return Blocks.AIR.defaultBlockState();
+    }
+
+    private static BlockState brushMaterialTarget(
+            BlockPos origin,
+            BlockPos pos,
+            BlockState fallback,
+            List<PaletteEntry> palette,
+            PaletteMode paletteMode,
+            BrushMode brushMode) {
+        if (!palette.isEmpty() && (brushMode == BrushMode.BLEND || brushMode == BrushMode.SCATTER || paletteMode == PaletteMode.RANDOM)) {
+            return randomTarget(pos, palette);
+        }
+        return fallback;
+    }
+
+    private static boolean acceptsDensity(BlockPos origin, BlockPos pos, int radius, int density, boolean falloff) {
+        int clamped = Mth.clamp(density, 0, 100);
+        if (clamped >= 100) {
+            return true;
+        }
+        int effective = clamped;
+        if (falloff && radius > 0) {
+            double distance = Math.sqrt(origin.distSqr(pos));
+            double edge = Mth.clamp(distance / Math.max(1.0D, radius), 0.0D, 1.0D);
+            effective = Mth.clamp((int) Math.round(clamped * (1.0D - edge * 0.65D)), 1, 100);
+        }
+        return Math.floorMod(weightedHash(pos), 100) < effective;
+    }
+
+    private static boolean insideBrushDisc(BlockPos origin, int x, int z, int radius) {
+        int dx = x - origin.getX();
+        int dz = z - origin.getZ();
+        return dx * dx + dz * dz <= radius * radius;
+    }
+
+    private static boolean isExposedTop(ServerLevel level, BlockPos pos) {
+        return !level.getBlockState(pos).isAir() && level.getBlockState(pos.above()).canBeReplaced();
+    }
+
+    private static BlockHitResult brushHit(ServerPlayer player) {
+        double distance = BuildToolsConfig.MAX_OPERATION_DISTANCE.get();
+        Vec3 start = player.getEyePosition();
+        Vec3 end = start.add(player.getViewVector(1.0F).scale(distance));
+        BlockHitResult hit = player.level().clip(new ClipContext(
+                start,
+                end,
+                ClipContext.Block.OUTLINE,
+                ClipContext.Fluid.NONE,
+                player));
+        return hit.getType() == HitResult.Type.BLOCK ? hit : null;
     }
 
     public static boolean copySelection(ServerPlayer player) {
-        Blueprint blueprint = captureSelectionBlueprint(player, null);
+        Blueprint blueprint = BuildToolsState.blueprint(player).orElseGet(() -> captureSelectionBlueprint(player, null));
         if (blueprint == null) {
             return false;
         }
@@ -568,6 +752,14 @@ public final class BuildOperationEngine {
         BuildToolsState.setBlueprint(player, blueprint);
         player.displayClientMessage(Component.translatable("buildtools.message.copied", blueprint.entries().size() + blueprint.entities().size()), true);
         return true;
+    }
+
+    public static boolean applyBrush(ServerPlayer player, BlockPos center, net.minecraft.core.Direction face, boolean replaceClickedBlockOnly) {
+        if (replaceClickedBlockOnly) {
+            BuildToolsState.setBrushReplaceTarget(player, player.level().getBlockState(center));
+            BuildToolsState.setBrushMode(player, BrushMode.REPLACE);
+        }
+        return executeBrush(player, center, face);
     }
 
     public static boolean beginSavedBlueprintCreate(ServerPlayer player) {
@@ -658,6 +850,14 @@ public final class BuildOperationEngine {
     }
 
     public static boolean previewOrConfirmBlueprintPaste(ServerPlayer player, BlockPos origin) {
+        boolean changed = previewOrConfirmBlueprintPasteInternal(player, origin);
+        if (changed) {
+            BuildToolsState.sendPreview(player);
+        }
+        return changed;
+    }
+
+    private static boolean previewOrConfirmBlueprintPasteInternal(ServerPlayer player, BlockPos origin) {
         if (BuildToolsState.pendingPasteOrigin(player).filter(origin::equals).isPresent()) {
             boolean success = pasteBlueprint(player, origin);
             if (success) {

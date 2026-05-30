@@ -70,6 +70,13 @@ public enum SelectionShape {
             STAIRS
     };
 
+    private static final SelectionShape[] BRUSH = {
+            SPHERE,
+            CYLINDER,
+            CUBOID,
+            FLOOR
+    };
+
     private final String key;
 
     SelectionShape(String key) {
@@ -95,5 +102,9 @@ public enum SelectionShape {
 
     public static SelectionShape[] advancedSelectionShapes() {
         return ADVANCED_SELECTION.clone();
+    }
+
+    public static SelectionShape[] brushShapes() {
+        return BRUSH.clone();
     }
 }

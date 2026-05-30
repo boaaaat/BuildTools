@@ -73,6 +73,8 @@ public final class BuildToolsState {
     private static final Map<UUID, BuildPlan> PLANS = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, BrushMode>> BRUSH_MODES = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, Integer>> BRUSH_RADII = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Integer>> BRUSH_DEPTHS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Integer>> BRUSH_DENSITIES = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, Integer>> ROAD_WIDTHS = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, ArchMode>> ARCH_MODES = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, ArchDirection>> ARCH_DIRECTIONS = new HashMap<>();
@@ -90,6 +92,11 @@ public final class BuildToolsState {
     private static final int HISTORY_LIMIT = 10;
     private static final int MIN_BRUSH_RADIUS = 1;
     private static final int MAX_BRUSH_RADIUS = 8;
+    private static final int MIN_BRUSH_DEPTH = 1;
+    private static final int MAX_BRUSH_DEPTH = 16;
+    private static final int MIN_BRUSH_DENSITY = 5;
+    private static final int MAX_BRUSH_DENSITY = 100;
+    private static final int BRUSH_DENSITY_STEP = 5;
     public static final int DEFAULT_ROAD_WIDTH = 3;
     private static final int MIN_ROAD_WIDTH = 1;
     private static final int MAX_ROAD_WIDTH = 16;
@@ -106,6 +113,7 @@ public final class BuildToolsState {
             ToolProfile.ADVANCED_SELECTION,
             ToolProfile.BUILDER,
             ToolProfile.ADVANCED_BUILDER,
+            ToolProfile.BRUSH,
             ToolProfile.BREAKER
     };
     private static final ToolProfile[] BUILD_MODE_PROFILES = {
@@ -133,11 +141,19 @@ public final class BuildToolsState {
     }
 
     public static BrushMode brushMode(ServerPlayer player) {
-        return brushModes(player).getOrDefault(activeProfile(player), BrushMode.SPHERE);
+        return brushModes(player).getOrDefault(activeProfile(player), BrushMode.PAINT);
     }
 
     public static int brushRadius(ServerPlayer player) {
         return brushRadii(player).getOrDefault(activeProfile(player), 2);
+    }
+
+    public static int brushDepth(ServerPlayer player) {
+        return brushDepths(player).getOrDefault(activeProfile(player), 1);
+    }
+
+    public static int brushDensity(ServerPlayer player) {
+        return brushDensities(player).getOrDefault(activeProfile(player), 100);
     }
 
     public static int roadWidth(ServerPlayer player) {
@@ -216,6 +232,7 @@ public final class BuildToolsState {
     private static SelectionShape[] availableShapes(ToolProfile profile) {
         return switch (profile) {
             case ADVANCED_SELECTION -> SelectionShape.advancedSelectionShapes();
+            case BRUSH -> SelectionShape.brushShapes();
             case ADVANCED_BUILDER, BREAKER -> SelectionShape.shapesWithStairs();
             default -> SelectionShape.basicShapes();
         };
@@ -1041,6 +1058,13 @@ public final class BuildToolsState {
         sendPreview(player);
     }
 
+    public static void setBrushReplaceTarget(ServerPlayer player, BlockState state) {
+        REPLACE_TARGETS.put(player.getUUID(), state);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.replace_target", state.getBlock().getName()), true);
+        sendPreview(player);
+    }
+
     public static void setReplaceTargets(ServerPlayer player, List<BlockState> states) {
         if (states.isEmpty()) {
             palettes(player).remove(activeProfile(player));
@@ -1060,6 +1084,11 @@ public final class BuildToolsState {
         return replaceTargets(player).stream().findFirst()
                 .orElseGet(() -> Optional.ofNullable(REPLACE_TARGETS.get(player.getUUID()))
                 .orElseGet(() -> inferredReplaceTarget(player)));
+    }
+
+    public static BlockState brushReplaceTarget(ServerPlayer player) {
+        return Optional.ofNullable(REPLACE_TARGETS.get(player.getUUID()))
+                .orElseGet(() -> inferredReplaceTarget(player));
     }
 
     private static BlockState inferredReplaceTarget(ServerPlayer player) {
@@ -1114,6 +1143,21 @@ public final class BuildToolsState {
         return palettes(player).getOrDefault(activeProfile(player), List.of());
     }
 
+    public static List<PaletteEntry> brushPaletteEntries(ServerPlayer player) {
+        EnumMap<ToolProfile, List<PaletteEntry>> map = palettes(player);
+        List<PaletteEntry> brush = map.get(ToolProfile.BRUSH);
+        if (brush != null && !brush.isEmpty()) {
+            return brush;
+        }
+        return map.getOrDefault(ToolProfile.ADVANCED_BUILDER, List.of());
+    }
+
+    public static PaletteMode brushPaletteMode(ServerPlayer player) {
+        EnumMap<ToolProfile, PaletteMode> modes = paletteModes(player);
+        PaletteMode brush = modes.get(ToolProfile.BRUSH);
+        return brush != null ? brush : modes.getOrDefault(ToolProfile.ADVANCED_BUILDER, PaletteMode.SINGLE);
+    }
+
     public static void setPaletteEntries(ServerPlayer player, List<PaletteEntry> entries) {
         if (entries.isEmpty()) {
             palettes(player).remove(activeProfile(player));
@@ -1152,6 +1196,22 @@ public final class BuildToolsState {
         brushRadii(player).put(activeProfile(player), radius);
         BuildOperationEngine.clearPendingOperation(player);
         player.displayClientMessage(Component.translatable("buildtools.message.brush_radius", radius), true);
+        sendPreview(player);
+    }
+
+    public static void changeBrushDepth(ServerPlayer player, int delta) {
+        int depth = Math.max(MIN_BRUSH_DEPTH, Math.min(MAX_BRUSH_DEPTH, brushDepth(player) + delta));
+        brushDepths(player).put(activeProfile(player), depth);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.brush_depth", depth), true);
+        sendPreview(player);
+    }
+
+    public static void changeBrushDensity(ServerPlayer player, int delta) {
+        int density = Math.max(MIN_BRUSH_DENSITY, Math.min(MAX_BRUSH_DENSITY, brushDensity(player) + delta * BRUSH_DENSITY_STEP));
+        brushDensities(player).put(activeProfile(player), density);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.brush_density", density), true);
         sendPreview(player);
     }
 
@@ -1509,6 +1569,9 @@ public final class BuildToolsState {
             }
             return filtered;
         }
+        if (profile == ToolProfile.BRUSH) {
+            return List.of();
+        }
         if (profile == ToolProfile.SELECTION
                 || profile == ToolProfile.ADVANCED_SELECTION
                 || profile == ToolProfile.BREAKER
@@ -1850,6 +1913,14 @@ public final class BuildToolsState {
         return BRUSH_RADII.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
     }
 
+    private static EnumMap<ToolProfile, Integer> brushDepths(ServerPlayer player) {
+        return BRUSH_DEPTHS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, Integer> brushDensities(ServerPlayer player) {
+        return BRUSH_DENSITIES.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
     private static EnumMap<ToolProfile, Integer> roadWidths(ServerPlayer player) {
         return ROAD_WIDTHS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
     }
@@ -1931,6 +2002,8 @@ public final class BuildToolsState {
         tag.put("shapes", writeEnumMap(SHAPES.get(uuid)));
         tag.put("brushModes", writeEnumMap(BRUSH_MODES.get(uuid)));
         tag.put("brushRadii", writeIntMap(BRUSH_RADII.get(uuid)));
+        tag.put("brushDepths", writeIntMap(BRUSH_DEPTHS.get(uuid)));
+        tag.put("brushDensities", writeIntMap(BRUSH_DENSITIES.get(uuid)));
         tag.put("roadWidths", writeIntMap(ROAD_WIDTHS.get(uuid)));
         tag.put("archModes", writeEnumMap(ARCH_MODES.get(uuid)));
         tag.put("archDirections", writeEnumMap(ARCH_DIRECTIONS.get(uuid)));
@@ -1984,6 +2057,8 @@ public final class BuildToolsState {
         readShapes(tag.getList("shapes", Tag.TAG_COMPOUND)).ifPresent(map -> SHAPES.put(uuid, map));
         readBrushModes(tag.getList("brushModes", Tag.TAG_COMPOUND)).ifPresent(map -> BRUSH_MODES.put(uuid, map));
         readIntMap(tag.getList("brushRadii", Tag.TAG_COMPOUND)).ifPresent(map -> BRUSH_RADII.put(uuid, map));
+        readIntMap(tag.getList("brushDepths", Tag.TAG_COMPOUND)).ifPresent(map -> BRUSH_DEPTHS.put(uuid, map));
+        readIntMap(tag.getList("brushDensities", Tag.TAG_COMPOUND)).ifPresent(map -> BRUSH_DENSITIES.put(uuid, map));
         readIntMap(tag.getList("roadWidths", Tag.TAG_COMPOUND)).ifPresent(map -> ROAD_WIDTHS.put(uuid, map));
         Optional<EnumMap<ToolProfile, ArchMode>> archModes = readArchModes(tag.getList("archModes", Tag.TAG_COMPOUND));
         if (archModes.isPresent()) {
@@ -2078,6 +2153,8 @@ public final class BuildToolsState {
         PLANS.remove(uuid);
         BRUSH_MODES.remove(uuid);
         BRUSH_RADII.remove(uuid);
+        BRUSH_DEPTHS.remove(uuid);
+        BRUSH_DENSITIES.remove(uuid);
         ROAD_WIDTHS.remove(uuid);
         ARCH_MODES.remove(uuid);
         ARCH_DIRECTIONS.remove(uuid);

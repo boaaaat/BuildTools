@@ -253,15 +253,18 @@ public final class BuildToolsClient {
     @SubscribeEvent
     static void mouseScrolled(InputEvent.MouseScrollingEvent event) {
         Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.player == null || minecraft.screen != null || !minecraft.player.isShiftKeyDown()) {
+        if (minecraft.player == null || minecraft.screen != null) {
             return;
         }
         ItemStack held = minecraft.player.getMainHandItem();
         if (!isScrollableBuildTool(held)) {
             return;
         }
+        if (!held.is(ModItems.BUILDER_BRUSH.get()) && !minecraft.player.isShiftKeyDown()) {
+            return;
+        }
         int direction = event.getScrollDeltaY() >= 0.0D ? 1 : -1;
-        PacketDistributor.sendToServer(new ScrollToolPayload(direction));
+        PacketDistributor.sendToServer(new ScrollToolPayload(direction, minecraft.player.isShiftKeyDown()));
         event.setCanceled(true);
     }
 
@@ -275,6 +278,12 @@ public final class BuildToolsClient {
             return;
         }
         ItemStack held = minecraft.player.getMainHandItem();
+        if (held.is(ModItems.BUILDER_BRUSH.get()) && minecraft.hitResult.getType() == HitResult.Type.BLOCK) {
+            PacketDistributor.sendToServer(new ShortcutActionPayload("apply_brush", "", 0));
+            event.setSwingHand(false);
+            event.setCanceled(true);
+            return;
+        }
         if (held.is(ModItems.ADVANCED_SELECTION_STAFF.get())) {
             if (advancedSelectionAttackDown) {
                 event.setSwingHand(false);
@@ -319,6 +328,7 @@ public final class BuildToolsClient {
                 || stack.is(ModItems.ADVANCED_SELECTION_STAFF.get())
                 || stack.is(ModItems.BUILDER_WAND.get())
                 || stack.is(ModItems.ADVANCED_BUILDER_WAND.get())
+                || stack.is(ModItems.BUILDER_BRUSH.get())
                 || stack.is(ModItems.AREA_BREAKER.get());
     }
 
