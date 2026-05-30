@@ -101,6 +101,19 @@ public final class BuildToolsState {
     private static final double ADVANCED_SELECTION_DISTANCE = 100.0D;
     private static final double ADVANCED_POINT_PICK_DISTANCE_SQR = 6.25D;
     private static final double ADVANCED_POINT_RAY_PICK_DISTANCE_SQR = 1.0D;
+    private static final ToolProfile[] SHARED_OPTION_PRIORITY = {
+            ToolProfile.SELECTION,
+            ToolProfile.ADVANCED_SELECTION,
+            ToolProfile.BUILDER,
+            ToolProfile.ADVANCED_BUILDER,
+            ToolProfile.BREAKER
+    };
+    private static final ToolProfile[] BUILD_MODE_PROFILES = {
+            ToolProfile.SELECTION,
+            ToolProfile.ADVANCED_SELECTION,
+            ToolProfile.BUILDER,
+            ToolProfile.ADVANCED_BUILDER
+    };
     public static final int MAX_SAVED_BLUEPRINTS = 45;
     private static final int MAX_BLUEPRINT_NAME_LENGTH = 32;
 
@@ -112,7 +125,7 @@ public final class BuildToolsState {
     }
 
     public static BuildMode mode(ServerPlayer player) {
-        return modes(player).getOrDefault(activeProfile(player), BuildMode.FILL);
+        return sharedBuildMode(modes(player));
     }
 
     public static SelectionShape selectionShape(ServerPlayer player) {
@@ -128,7 +141,7 @@ public final class BuildToolsState {
     }
 
     public static int roadWidth(ServerPlayer player) {
-        return clampRoadWidth(roadWidths(player).getOrDefault(activeProfile(player), DEFAULT_ROAD_WIDTH));
+        return clampRoadWidth(sharedShapeOption(roadWidths(player), SelectionShape.ROAD, DEFAULT_ROAD_WIDTH));
     }
 
     public static boolean archEdgeWalls(ServerPlayer player) {
@@ -136,23 +149,23 @@ public final class BuildToolsState {
     }
 
     public static ArchMode archMode(ServerPlayer player) {
-        return archModes(player).getOrDefault(activeProfile(player), ArchMode.OPEN);
+        return sharedShapeOption(archModes(player), SelectionShape.ARCH, ArchMode.OPEN);
     }
 
     public static ArchDirection archDirection(ServerPlayer player) {
-        return archDirections(player).getOrDefault(activeProfile(player), ArchDirection.X);
+        return sharedShapeOption(archDirections(player), SelectionShape.ARCH, ArchDirection.X);
     }
 
     public static int archPeak(ServerPlayer player) {
-        return clampArchPeak(archPeaks(player).getOrDefault(activeProfile(player), DEFAULT_ARCH_PEAK));
+        return clampArchPeak(sharedShapeOption(archPeaks(player), SelectionShape.ARCH, DEFAULT_ARCH_PEAK));
     }
 
     public static boolean sphereHollow(ServerPlayer player) {
-        return sphereHollows(player).getOrDefault(activeProfile(player), false);
+        return sharedShapeOption(sphereHollows(player), SelectionShape.SPHERE, false);
     }
 
     public static boolean ellipsoidHollow(ServerPlayer player) {
-        return ellipsoidHollows(player).getOrDefault(activeProfile(player), false);
+        return sharedShapeOption(ellipsoidHollows(player), SelectionShape.ELLIPSOID, false);
     }
 
     public static boolean gradientEnabled(ServerPlayer player) {
@@ -333,7 +346,7 @@ public final class BuildToolsState {
     }
 
     public static void setMode(ServerPlayer player, BuildMode mode) {
-        modes(player).put(activeProfile(player), mode);
+        setSharedBuildMode(modes(player), mode);
         BuildOperationEngine.clearPendingOperation(player);
         player.displayClientMessage(Component.translatable("buildtools.message.mode", mode.displayName()), true);
         sendPreview(player);
@@ -752,7 +765,6 @@ public final class BuildToolsState {
                 false));
         sendPreview(player);
         syncSharedSelectionsTo(player);
-        syncSharedSelectionFrom(player);
     }
 
     public static void nudgeSelection(ServerPlayer player, Direction direction) {
@@ -1145,7 +1157,7 @@ public final class BuildToolsState {
 
     public static void changeRoadWidth(ServerPlayer player, int delta) {
         int width = clampRoadWidth(roadWidth(player) + delta);
-        roadWidths(player).put(activeProfile(player), width);
+        putForProfilesSupportingShape(roadWidths(player), SelectionShape.ROAD, width);
         BuildOperationEngine.clearPendingOperation(player);
         player.displayClientMessage(Component.translatable("buildtools.message.road_width", width), true);
         sendPreview(player);
@@ -1153,7 +1165,7 @@ public final class BuildToolsState {
 
     public static void cycleArchMode(ServerPlayer player) {
         ArchMode mode = archMode(player).next();
-        archModes(player).put(activeProfile(player), mode);
+        putForProfilesSupportingShape(archModes(player), SelectionShape.ARCH, mode);
         BuildOperationEngine.clearPendingOperation(player);
         player.displayClientMessage(Component.translatable("buildtools.message.arch_mode", archModeName(mode)), true);
         sendPreview(player);
@@ -1161,7 +1173,7 @@ public final class BuildToolsState {
 
     public static void cycleArchDirection(ServerPlayer player) {
         ArchDirection direction = archDirection(player).next();
-        archDirections(player).put(activeProfile(player), direction);
+        putForProfilesSupportingShape(archDirections(player), SelectionShape.ARCH, direction);
         BuildOperationEngine.clearPendingOperation(player);
         player.displayClientMessage(Component.translatable("buildtools.message.arch_direction", direction.displayName()), true);
         sendPreview(player);
@@ -1173,7 +1185,7 @@ public final class BuildToolsState {
 
     public static void changeArchPeak(ServerPlayer player, int delta) {
         int peak = clampArchPeak(archPeak(player) + delta * ARCH_PEAK_STEP);
-        archPeaks(player).put(activeProfile(player), peak);
+        putForProfilesSupportingShape(archPeaks(player), SelectionShape.ARCH, peak);
         BuildOperationEngine.clearPendingOperation(player);
         player.displayClientMessage(Component.translatable("buildtools.message.arch_peak", peak), true);
         sendPreview(player);
@@ -1182,13 +1194,13 @@ public final class BuildToolsState {
     public static void toggleShapeHollow(ServerPlayer player, SelectionShape shape) {
         if (shape == SelectionShape.SPHERE) {
             boolean hollow = !sphereHollow(player);
-            sphereHollows(player).put(activeProfile(player), hollow);
+            putForProfilesSupportingShape(sphereHollows(player), SelectionShape.SPHERE, hollow);
             BuildOperationEngine.clearPendingOperation(player);
             player.displayClientMessage(Component.translatable("buildtools.message.shape_hollow", shape.displayName(), hollowModeName(hollow)), true);
             sendPreview(player);
         } else if (shape == SelectionShape.ELLIPSOID) {
             boolean hollow = !ellipsoidHollow(player);
-            ellipsoidHollows(player).put(activeProfile(player), hollow);
+            putForProfilesSupportingShape(ellipsoidHollows(player), SelectionShape.ELLIPSOID, hollow);
             BuildOperationEngine.clearPendingOperation(player);
             player.displayClientMessage(Component.translatable("buildtools.message.shape_hollow", shape.displayName(), hollowModeName(hollow)), true);
             sendPreview(player);
@@ -1217,6 +1229,10 @@ public final class BuildToolsState {
 
     public static void sendPreview(ServerPlayer player) {
         if (PENDING_PASTE_ORIGINS.containsKey(player.getUUID())) {
+            persist(player);
+            if (selectionVisibleToOthers(player)) {
+                syncSharedSelectionFrom(player);
+            }
             return;
         }
         Selection selection = selection(player);
@@ -1230,6 +1246,9 @@ public final class BuildToolsState {
         List<Integer> colors = gradientPreviewColors(player, selection, preview);
         persist(player);
         PacketDistributor.sendToPlayer(player, new PreviewPayload(preview, false, colors));
+        if (selectionVisibleToOthers(player)) {
+            syncSharedSelectionFrom(player);
+        }
     }
 
     private static void syncSharedSelectionFrom(ServerPlayer owner) {
@@ -1756,6 +1775,53 @@ public final class BuildToolsState {
             }
         }
         return false;
+    }
+
+    private static <T> void putForProfilesSupportingShape(EnumMap<ToolProfile, T> map, SelectionShape shape, T value) {
+        for (ToolProfile profile : ToolProfile.values()) {
+            if (supportsShape(profile, shape)) {
+                map.put(profile, value);
+            }
+        }
+    }
+
+    private static <T> T sharedShapeOption(EnumMap<ToolProfile, T> map, SelectionShape shape, T fallback) {
+        T value = null;
+        for (ToolProfile profile : SHARED_OPTION_PRIORITY) {
+            if (supportsShape(profile, shape)) {
+                value = map.get(profile);
+                if (value != null) {
+                    break;
+                }
+            }
+        }
+        if (value == null) {
+            value = fallback;
+        } else {
+            putForProfilesSupportingShape(map, shape, value);
+        }
+        return value;
+    }
+
+    private static BuildMode sharedBuildMode(EnumMap<ToolProfile, BuildMode> map) {
+        BuildMode mode = null;
+        for (ToolProfile profile : BUILD_MODE_PROFILES) {
+            mode = map.get(profile);
+            if (mode != null) {
+                break;
+            }
+        }
+        if (mode == null) {
+            return BuildMode.FILL;
+        }
+        setSharedBuildMode(map, mode);
+        return mode;
+    }
+
+    private static void setSharedBuildMode(EnumMap<ToolProfile, BuildMode> map, BuildMode mode) {
+        for (ToolProfile profile : BUILD_MODE_PROFILES) {
+            map.put(profile, mode);
+        }
     }
 
     private static ToolProfile activeProfile(ServerPlayer player) {

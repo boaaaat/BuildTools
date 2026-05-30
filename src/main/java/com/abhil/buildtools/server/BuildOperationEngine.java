@@ -551,7 +551,17 @@ public final class BuildOperationEngine {
     }
 
     public static boolean copySelection(ServerPlayer player) {
-        Blueprint blueprint = captureSelectionBlueprint(player);
+        Blueprint blueprint = captureSelectionBlueprint(player, null);
+        if (blueprint == null) {
+            return false;
+        }
+        BuildToolsState.setBlueprint(player, blueprint);
+        player.displayClientMessage(Component.translatable("buildtools.message.copied", blueprint.entries().size() + blueprint.entities().size()), true);
+        return true;
+    }
+
+    public static boolean copySelection(ServerPlayer player, BlockPos origin) {
+        Blueprint blueprint = captureSelectionBlueprint(player, origin);
         if (blueprint == null) {
             return false;
         }
@@ -565,11 +575,11 @@ public final class BuildOperationEngine {
             fail(player, Component.translatable("buildtools.error.blueprint_library_full", BuildToolsState.MAX_SAVED_BLUEPRINTS));
             return false;
         }
-        Blueprint blueprint = captureSelectionBlueprint(player);
+        Blueprint blueprint = captureSelectionBlueprint(player, null);
         return blueprint != null && BuildToolsState.beginBlueprintCreatePrompt(player, blueprint);
     }
 
-    private static Blueprint captureSelectionBlueprint(ServerPlayer player) {
+    private static Blueprint captureSelectionBlueprint(ServerPlayer player, BlockPos origin) {
         Selection selection = BuildToolsState.selection(player);
         if (selection.dimension() == null || !selection.dimension().equals(player.level().dimension())) {
             fail(player, "buildtools.error.incomplete_selection");
@@ -580,12 +590,8 @@ public final class BuildOperationEngine {
             fail(player, "buildtools.error.empty_shape");
             return null;
         }
-        if (positions.size() > BuildToolsConfig.MAX_COPY_VOLUME.get()) {
-            fail(player, Component.translatable("buildtools.error.copy_too_large", positions.size(), BuildToolsConfig.MAX_COPY_VOLUME.get()));
-            return null;
-        }
         ServerLevel level = player.serverLevel();
-        BlockPos origin = player.blockPosition();
+        origin = origin == null ? selection.first() : origin;
         List<Blueprint.Entry> entries = new ArrayList<>();
         for (BlockPos pos : positions) {
             BlockState state = level.getBlockState(pos);

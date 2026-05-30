@@ -16,10 +16,10 @@ public final class BlueprintTrowelItem extends BuildToolItem {
     public InteractionResult useOn(UseOnContext context) {
         Player player = context.getPlayer();
         if (player instanceof ServerPlayer serverPlayer) {
+            BlockPos origin = context.getClickedPos();
             if (player.isShiftKeyDown()) {
-                BuildOperationEngine.copySelection(serverPlayer);
+                BuildOperationEngine.copySelection(serverPlayer, origin);
             } else {
-                BlockPos origin = context.getClickedPos().relative(context.getClickedFace());
                 BuildOperationEngine.previewOrConfirmBlueprintPaste(serverPlayer, origin);
             }
         }

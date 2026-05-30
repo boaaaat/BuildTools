@@ -11,7 +11,7 @@ public final class BuildToolsConfig {
 
     public static final ModConfigSpec.IntValue MAX_COPY_VOLUME = BUILDER
             .comment("Maximum number of non-air blocks a Blueprint Trowel may copy or paste.")
-            .defineInRange("maxCopyVolume", 2048, 1, 262144);
+            .defineInRange("maxCopyVolume", 4096, 1, 262144);
 
     public static final ModConfigSpec.IntValue MAX_OPERATION_DISTANCE = BUILDER
             .comment("Maximum distance in blocks from the player to every edited block.")
