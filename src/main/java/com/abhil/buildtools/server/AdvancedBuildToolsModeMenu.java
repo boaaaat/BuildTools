@@ -171,7 +171,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         if (owner != null) {
             gradientDirection.set(DataComponents.CUSTOM_NAME, Component.translatable("buildtools.menu.gradient_direction")
                     .append(": ")
-                    .append(BuildToolsState.gradientDirection(owner).displayName()));
+                    .append(DirectionDisplay.gradientDirection(owner, BuildToolsState.gradientDirection(owner))));
         }
         menuItems.setItem(40, utilityItem(Items.BOOKSHELF, "buildtools.menu.palettes", "buildtools.menu.palettes.description"));
         menuItems.setItem(41, gradientDirection);
@@ -179,7 +179,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
                 Items.STONE_STAIRS,
                 Component.translatable("buildtools.menu.stair_direction").append(": ").append(owner == null
                         ? Component.translatable("buildtools.stair_direction.point_order")
-                        : BuildToolsState.stairDirectionOverride(owner).displayName()),
+                        : DirectionDisplay.stairDirection(owner, BuildToolsState.stairDirectionOverride(owner))),
                 Component.translatable("buildtools.menu.stair_direction.description"),
                 owner != null && BuildToolsState.selectionShape(owner) == SelectionShape.STAIRS));
 
@@ -208,7 +208,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
                 Items.STONE_STAIRS,
                 Component.translatable("buildtools.menu.stair_direction").append(": ").append(owner == null
                         ? Component.translatable("buildtools.stair_direction.point_order")
-                        : BuildToolsState.stairDirectionOverride(owner).displayName()),
+                        : DirectionDisplay.stairDirection(owner, BuildToolsState.stairDirectionOverride(owner))),
                 Component.translatable("buildtools.menu.stair_direction.description"),
                 owner != null && BuildToolsState.selectionShape(owner) == SelectionShape.STAIRS));
         populateShapes(SHAPE_START_SLOT);
@@ -251,7 +251,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
                 stack.set(DataComponents.CUSTOM_NAME, Component.translatable("buildtools.menu.shape_hollow", shapes[i].displayName(), fill));
                 stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
             } else {
-                stack.set(DataComponents.CUSTOM_NAME, shapes[i].displayName());
+                stack.set(DataComponents.CUSTOM_NAME, shapeName(shapes[i]));
             }
             setSelected(stack, owner != null && BuildToolsState.selectionShape(owner) == shapes[i]);
             menuItems.setItem(startSlot + i, stack);
@@ -262,6 +262,15 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         ItemStack stack = new ItemStack(item);
         stack.set(DataComponents.CUSTOM_NAME, name);
         return stack;
+    }
+
+    private Component shapeName(SelectionShape shape) {
+        if (shape == SelectionShape.STAIRS && owner != null) {
+            return shape.displayName().copy()
+                    .append(": ")
+                    .append(DirectionDisplay.stairDirection(owner, BuildToolsState.stairDirectionOverride(owner)));
+        }
+        return shape.displayName();
     }
 
     private static Component menuTitle(ServerPlayer player) {

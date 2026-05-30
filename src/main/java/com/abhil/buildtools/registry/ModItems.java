@@ -30,7 +30,7 @@ public final class ModItems {
     public static final DeferredItem<Item> BUILDER_BRUSH = ITEMS.register("builder_brush",
             () -> new BuilderBrushItem(new Item.Properties().stacksTo(1).durability(128)));
     public static final DeferredItem<Item> AREA_BREAKER = ITEMS.register("area_breaker",
-            () -> new AreaBreakerItem(new Item.Properties().stacksTo(1).durability(128)));
+            () -> new AreaBreakerItem(new Item.Properties().stacksTo(1).durability(256)));
     public static final DeferredItem<Item> BLUEPRINT_TROWEL = ITEMS.register("blueprint_trowel",
             () -> new BlueprintTrowelItem(new Item.Properties().stacksTo(1).durability(128)));
     public static final DeferredItem<Item> UNDO_TOKEN = ITEMS.register("undo_token",

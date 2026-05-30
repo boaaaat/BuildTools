@@ -2,10 +2,12 @@ package com.abhil.buildtools.client;
 
 import java.util.ArrayList;
 import java.util.List;
+import com.abhil.buildtools.BuildToolsClient;
 import com.abhil.buildtools.config.BuildToolsClientConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
 
 public final class BuildToolStatusOverlay {
@@ -28,8 +30,9 @@ public final class BuildToolStatusOverlay {
         Font font = minecraft.font;
         List<String> statusLines = filteredLines(ClientToolStatusData.lines());
         List<String> lines = wrappedLines(font, statusLines, MAX_WIDTH - 20);
-        int width = Math.max(110, Math.min(MAX_WIDTH, contentWidth(font, ClientToolStatusData.title(), lines) + 20));
-        int height = 22 + lines.size() * 10 + 8;
+        List<String> shortcutLines = wrappedLines(font, shortcutLines(minecraft), MAX_WIDTH - 20);
+        int width = Math.max(110, Math.min(MAX_WIDTH, contentWidth(font, ClientToolStatusData.title(), lines, shortcutLines) + 20));
+        int height = 22 + lines.size() * 10 + (shortcutLines.isEmpty() ? 8 : 20 + shortcutLines.size() * 10);
         double scale = BuildToolsClientConfig.OVERLAY_SCALE.get();
         int scaledWidth = (int) Math.ceil(width * scale);
         int scaledHeight = (int) Math.ceil(height * scale);
@@ -54,7 +57,30 @@ public final class BuildToolStatusOverlay {
             guiGraphics.drawString(font, line, x + 9, lineY, MUTED_TEXT, false);
             lineY += 10;
         }
+        if (!shortcutLines.isEmpty()) {
+            lineY += 4;
+            guiGraphics.hLine(x + 8, x + width - 9, lineY, PANEL_BORDER);
+            lineY += 6;
+            guiGraphics.drawString(font, "Shortcuts", x + 9, lineY, TEXT, false);
+            lineY += 10;
+            for (String line : shortcutLines) {
+                guiGraphics.drawString(font, line, x + 9, lineY, MUTED_TEXT, false);
+                lineY += 10;
+            }
+        }
         guiGraphics.pose().popPose();
+    }
+
+    private static List<String> shortcutLines(Minecraft minecraft) {
+        if (minecraft.player == null) {
+            return List.of();
+        }
+        ItemStack mainHand = minecraft.player.getMainHandItem();
+        List<String> lines = BuildToolsClient.shortcutHintLines(mainHand);
+        if (!lines.isEmpty()) {
+            return lines;
+        }
+        return BuildToolsClient.shortcutHintLines(minecraft.player.getOffhandItem());
     }
 
     private static List<String> filteredLines(List<String> lines) {
@@ -113,10 +139,16 @@ public final class BuildToolStatusOverlay {
         return result;
     }
 
-    private static int contentWidth(Font font, String title, List<String> lines) {
+    private static int contentWidth(Font font, String title, List<String> lines, List<String> shortcutLines) {
         int width = font.width(title);
         for (String line : lines) {
             width = Math.max(width, font.width(line));
+        }
+        if (!shortcutLines.isEmpty()) {
+            width = Math.max(width, font.width("Shortcuts"));
+            for (String line : shortcutLines) {
+                width = Math.max(width, font.width(line));
+            }
         }
         return width;
     }

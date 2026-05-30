@@ -16,6 +16,8 @@ import com.abhil.buildtools.network.ShortcutActionPayload;
 import com.abhil.buildtools.registry.ModItems;
 import com.abhil.buildtools.registry.ModMenus;
 import com.mojang.blaze3d.platform.InputConstants;
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.Direction;
@@ -56,6 +58,19 @@ public final class BuildToolsClient {
     private static final KeyMapping NUDGE_SOUTH = key("nudge_south");
     private static final KeyMapping NUDGE_UP = key("nudge_up");
     private static final KeyMapping NUDGE_DOWN = key("nudge_down");
+    private static final KeyMapping RELATIVE_NUDGE_LEFT = key("relative_nudge_left", GLFW.GLFW_KEY_LEFT);
+    private static final KeyMapping RELATIVE_NUDGE_RIGHT = key("relative_nudge_right", GLFW.GLFW_KEY_RIGHT);
+    private static final KeyMapping RELATIVE_NUDGE_FORWARD = key("relative_nudge_forward", GLFW.GLFW_KEY_UP);
+    private static final KeyMapping RELATIVE_NUDGE_BACK = key("relative_nudge_back", GLFW.GLFW_KEY_DOWN);
+    private static final KeyMapping RELATIVE_NUDGE_UP = key("relative_nudge_up", GLFW.GLFW_KEY_PAGE_UP);
+    private static final KeyMapping RELATIVE_NUDGE_DOWN = key("relative_nudge_down", GLFW.GLFW_KEY_PAGE_DOWN);
+    private static final KeyMapping PREVIOUS_SHAPE = key("previous_shape", GLFW.GLFW_KEY_LEFT_BRACKET);
+    private static final KeyMapping NEXT_SHAPE = key("next_shape", GLFW.GLFW_KEY_RIGHT_BRACKET);
+    private static final KeyMapping PREVIOUS_MODE = key("previous_mode", GLFW.GLFW_KEY_COMMA);
+    private static final KeyMapping NEXT_MODE = key("next_mode", GLFW.GLFW_KEY_PERIOD);
+    private static final KeyMapping ADJUST_OPTION_DOWN = key("adjust_option_down", GLFW.GLFW_KEY_MINUS);
+    private static final KeyMapping ADJUST_OPTION_UP = key("adjust_option_up", GLFW.GLFW_KEY_EQUAL);
+    private static final KeyMapping TOGGLE_SHAPE_OPTION = key("toggle_shape_option", GLFW.GLFW_KEY_H);
 
     public BuildToolsClient(IEventBus modEventBus, ModContainer container) {
         modEventBus.addListener(this::registerScreens);
@@ -65,6 +80,10 @@ public final class BuildToolsClient {
 
     private static KeyMapping key(String name) {
         return new KeyMapping("key.buildtools." + name, InputConstants.Type.KEYSYM, InputConstants.UNKNOWN.getValue(), KEY_CATEGORY);
+    }
+
+    private static KeyMapping key(String name, int defaultKey) {
+        return new KeyMapping("key.buildtools." + name, InputConstants.Type.KEYSYM, defaultKey, KEY_CATEGORY);
     }
 
     private void registerKeyMappings(RegisterKeyMappingsEvent event) {
@@ -81,6 +100,19 @@ public final class BuildToolsClient {
         event.register(NUDGE_SOUTH);
         event.register(NUDGE_UP);
         event.register(NUDGE_DOWN);
+        event.register(RELATIVE_NUDGE_LEFT);
+        event.register(RELATIVE_NUDGE_RIGHT);
+        event.register(RELATIVE_NUDGE_FORWARD);
+        event.register(RELATIVE_NUDGE_BACK);
+        event.register(RELATIVE_NUDGE_UP);
+        event.register(RELATIVE_NUDGE_DOWN);
+        event.register(PREVIOUS_SHAPE);
+        event.register(NEXT_SHAPE);
+        event.register(PREVIOUS_MODE);
+        event.register(NEXT_MODE);
+        event.register(ADJUST_OPTION_DOWN);
+        event.register(ADJUST_OPTION_UP);
+        event.register(TOGGLE_SHAPE_OPTION);
     }
 
     private void registerScreens(RegisterMenuScreensEvent event) {
@@ -125,6 +157,22 @@ public final class BuildToolsClient {
         handleNudge(NUDGE_SOUTH, Direction.SOUTH);
         handleNudge(NUDGE_UP, Direction.UP);
         handleNudge(NUDGE_DOWN, Direction.DOWN);
+        if (!isShortcutBuildTool(minecraft.player.getMainHandItem())) {
+            return;
+        }
+        handleRelativeNudge(RELATIVE_NUDGE_LEFT, "LEFT");
+        handleRelativeNudge(RELATIVE_NUDGE_RIGHT, "RIGHT");
+        handleRelativeNudge(RELATIVE_NUDGE_FORWARD, "FORWARD");
+        handleRelativeNudge(RELATIVE_NUDGE_BACK, "BACK");
+        handleRelativeNudge(RELATIVE_NUDGE_UP, "UP");
+        handleRelativeNudge(RELATIVE_NUDGE_DOWN, "DOWN");
+        handleStepShortcut(PREVIOUS_SHAPE, "cycle_shape_step", -1);
+        handleStepShortcut(NEXT_SHAPE, "cycle_shape_step", 1);
+        handleStepShortcut(PREVIOUS_MODE, "cycle_mode_step", -1);
+        handleStepShortcut(NEXT_MODE, "cycle_mode_step", 1);
+        handleStepShortcut(ADJUST_OPTION_DOWN, "adjust_option", -1);
+        handleStepShortcut(ADJUST_OPTION_UP, "adjust_option", 1);
+        handleShortcut(TOGGLE_SHAPE_OPTION, "toggle_shape_option");
     }
 
     private static void handleShortcut(KeyMapping key, String action) {
@@ -137,6 +185,60 @@ public final class BuildToolsClient {
         while (key.consumeClick()) {
             PacketDistributor.sendToServer(new ShortcutActionPayload("nudge", direction.name(), shortcutAmount()));
         }
+    }
+
+    private static void handleRelativeNudge(KeyMapping key, String direction) {
+        while (key.consumeClick()) {
+            PacketDistributor.sendToServer(new ShortcutActionPayload("nudge_relative", direction, shortcutAmount()));
+        }
+    }
+
+    private static void handleStepShortcut(KeyMapping key, String action, int step) {
+        while (key.consumeClick()) {
+            PacketDistributor.sendToServer(new ShortcutActionPayload(action, "", step));
+        }
+    }
+
+    public static List<String> shortcutHintLines(ItemStack stack) {
+        if (!isShortcutBuildTool(stack)) {
+            return List.of();
+        }
+        List<String> lines = new ArrayList<>();
+        addHint(lines, "Nudge", RELATIVE_NUDGE_LEFT, RELATIVE_NUDGE_RIGHT, RELATIVE_NUDGE_FORWARD, RELATIVE_NUDGE_BACK);
+        addHint(lines, "Nudge Y", RELATIVE_NUDGE_UP, RELATIVE_NUDGE_DOWN);
+        if (isShapeControlTool(stack)) {
+            addHint(lines, "Shape", PREVIOUS_SHAPE, NEXT_SHAPE);
+            addHint(lines, "Option", ADJUST_OPTION_DOWN, ADJUST_OPTION_UP);
+            addHint(lines, "Toggle", TOGGLE_SHAPE_OPTION);
+        }
+        if (isModeControlTool(stack)) {
+            addHint(lines, "Mode", PREVIOUS_MODE, NEXT_MODE);
+        }
+        if (stack.is(ModItems.BUILDER_BRUSH.get())) {
+            addHint(lines, "Brush Size", ADJUST_OPTION_DOWN, ADJUST_OPTION_UP);
+        }
+        addHint(lines, "Confirm", CONFIRM_PREVIEW);
+        addHint(lines, "Cancel", CANCEL_PREVIEW);
+        addHint(lines, "Undo", UNDO);
+        addHint(lines, "Redo", REDO);
+        return lines;
+    }
+
+    private static void addHint(List<String> lines, String label, KeyMapping... keys) {
+        String joined = joinedKeys(keys);
+        if (!joined.isBlank()) {
+            lines.add(joined + "  " + label);
+        }
+    }
+
+    private static String joinedKeys(KeyMapping... keys) {
+        List<String> names = new ArrayList<>();
+        for (KeyMapping key : keys) {
+            if (!key.isUnbound()) {
+                names.add(key.getTranslatedKeyMessage().getString());
+            }
+        }
+        return String.join("/", names);
     }
 
     private static int shortcutAmount() {
@@ -203,6 +305,26 @@ public final class BuildToolsClient {
                 || stack.is(ModItems.ADVANCED_BUILDER_WAND.get())
                 || stack.is(ModItems.BUILDER_BRUSH.get())
                 || stack.is(ModItems.AREA_BREAKER.get());
+    }
+
+    private static boolean isShortcutBuildTool(ItemStack stack) {
+        return isScrollableBuildTool(stack)
+                || stack.is(ModItems.BLUEPRINT_TROWEL.get())
+                || stack.is(ModItems.UNDO_TOKEN.get())
+                || stack.is(ModItems.REDO_TOKEN.get());
+    }
+
+    private static boolean isShapeControlTool(ItemStack stack) {
+        return stack.is(ModItems.SELECTION_STAFF.get())
+                || stack.is(ModItems.ADVANCED_SELECTION_STAFF.get())
+                || stack.is(ModItems.BUILDER_WAND.get())
+                || stack.is(ModItems.ADVANCED_BUILDER_WAND.get())
+                || stack.is(ModItems.AREA_BREAKER.get());
+    }
+
+    private static boolean isModeControlTool(ItemStack stack) {
+        return stack.is(ModItems.BUILDER_WAND.get())
+                || stack.is(ModItems.ADVANCED_BUILDER_WAND.get());
     }
 
     private static boolean isAirMenuTool(ItemStack stack) {

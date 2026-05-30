@@ -10,11 +10,15 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
-public record PreviewPayload(List<BlockPos> positions, boolean detailed) implements CustomPacketPayload {
+public record PreviewPayload(List<BlockPos> positions, boolean detailed, List<Integer> colors) implements CustomPacketPayload {
     public static final Type<PreviewPayload> TYPE = new Type<>(BuildTools.id("preview"));
     public static final StreamCodec<RegistryFriendlyByteBuf, PreviewPayload> STREAM_CODEC = CustomPacketPayload.codec(
             PreviewPayload::write,
             PreviewPayload::read);
+
+    public PreviewPayload(List<BlockPos> positions, boolean detailed) {
+        this(positions, detailed, List.of());
+    }
 
     private static PreviewPayload read(RegistryFriendlyByteBuf buffer) {
         int count = buffer.readVarInt();
@@ -26,7 +30,15 @@ public record PreviewPayload(List<BlockPos> positions, boolean detailed) impleme
             }
         }
         boolean detailed = buffer.readBoolean();
-        return new PreviewPayload(positions, detailed);
+        int colorCount = buffer.readVarInt();
+        List<Integer> colors = new ArrayList<>(Math.min(colorCount, BuildToolsNetworking.MAX_PREVIEW_POSITIONS));
+        for (int i = 0; i < colorCount; i++) {
+            int color = buffer.readInt();
+            if (i < BuildToolsNetworking.MAX_PREVIEW_POSITIONS) {
+                colors.add(color);
+            }
+        }
+        return new PreviewPayload(positions, detailed, colors);
     }
 
     private void write(RegistryFriendlyByteBuf buffer) {
@@ -35,10 +47,14 @@ public record PreviewPayload(List<BlockPos> positions, boolean detailed) impleme
             BlockPos.STREAM_CODEC.encode(buffer, pos);
         }
         buffer.writeBoolean(detailed);
+        buffer.writeVarInt(colors.size());
+        for (int color : colors) {
+            buffer.writeInt(color);
+        }
     }
 
     public static void handle(PreviewPayload payload, IPayloadContext context) {
-        ClientSelectionData.setPreview(payload.positions(), payload.detailed());
+        ClientSelectionData.setPreview(payload.positions(), payload.detailed(), payload.colors());
     }
 
     @Override

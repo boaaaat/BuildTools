@@ -54,7 +54,9 @@ public final class ClientSelectionRenderer {
                 bounds = bounds == null ? new AABB(pos) : bounds.minmax(new AABB(pos));
             }
 
-            if (rendersAffectedBlocks(ClientSelectionData.shape(), ClientSelectionData.detailedPreview())) {
+            if (!ClientSelectionData.previewColors().isEmpty()) {
+                renderColoredPreview(poseStack, lines, preview, ClientSelectionData.previewColors(), 0.85F);
+            } else if (rendersAffectedBlocks(ClientSelectionData.shape(), ClientSelectionData.detailedPreview())) {
                 renderAffectedEdges(poseStack, lines, preview, self.red(), self.green(), self.blue(), 0.9F);
             } else if (bounds != null) {
                 renderBox(poseStack, lines, bounds.inflate(0.03D), self.red(), self.green(), self.blue(), 1.0F);
@@ -211,6 +213,14 @@ public final class ClientSelectionRenderer {
 
         for (Edge edge : edges) {
             renderLine(poseStack, lines, edge, red, green, blue, alpha);
+        }
+    }
+
+    private static void renderColoredPreview(PoseStack poseStack, VertexConsumer lines, List<BlockPos> positions, List<Integer> colors, float alpha) {
+        int limit = Math.min(positions.size(), colors.size());
+        for (int i = 0; i < limit; i++) {
+            Color color = Color.of(colors.get(i));
+            renderBox(poseStack, lines, new AABB(positions.get(i)).inflate(0.01D), color.red(), color.green(), color.blue(), alpha);
         }
     }
 

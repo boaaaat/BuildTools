@@ -16,6 +16,7 @@ public final class ClientSelectionData {
     private static SelectionShape shape = SelectionShape.CUBOID;
     private static List<BlockPos> points = List.of();
     private static List<BlockPos> preview = List.of();
+    private static List<Integer> previewColors = List.of();
     private static boolean detailedPreview;
     private static final Map<UUID, SharedSelection> sharedSelections = new LinkedHashMap<>();
 
@@ -31,7 +32,12 @@ public final class ClientSelectionData {
     }
 
     public static void setPreview(List<BlockPos> positions, boolean detailed) {
+        setPreview(positions, detailed, List.of());
+    }
+
+    public static void setPreview(List<BlockPos> positions, boolean detailed, List<Integer> colors) {
         preview = List.copyOf(positions);
+        previewColors = colors.size() == positions.size() ? List.copyOf(colors) : List.of();
         detailedPreview = detailed;
     }
 
@@ -61,6 +67,10 @@ public final class ClientSelectionData {
 
     public static List<BlockPos> preview() {
         return preview;
+    }
+
+    public static List<Integer> previewColors() {
+        return previewColors;
     }
 
     public static List<BlockPos> points() {

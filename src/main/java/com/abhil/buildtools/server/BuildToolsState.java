@@ -34,6 +34,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.Mth;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -249,6 +251,10 @@ public final class BuildToolsState {
     }
 
     public static void cycleShape(ServerPlayer player) {
+        cycleShape(player, 1);
+    }
+
+    public static void cycleShape(ServerPlayer player, int step) {
         SelectionShape[] shapes = availableShapes(player);
         SelectionShape current = shape(player);
         int currentIndex = 0;
@@ -258,7 +264,7 @@ public final class BuildToolsState {
                 break;
             }
         }
-        setShape(player, shapes[(currentIndex + 1) % shapes.length]);
+        setShape(player, shapes[Math.floorMod(currentIndex + (step >= 0 ? 1 : -1), shapes.length)]);
     }
 
     public static void setShape(ServerPlayer player, SelectionShape shape) {
@@ -285,7 +291,7 @@ public final class BuildToolsState {
         StairDirectionOverride next = stairDirectionOverride(player).next(step);
         STAIR_DIRECTIONS.put(player.getUUID(), next);
         BuildOperationEngine.clearPendingOperation(player);
-        player.displayClientMessage(Component.translatable("buildtools.message.stair_direction", next.displayName()), true);
+        player.displayClientMessage(Component.translatable("buildtools.message.stair_direction", DirectionDisplay.stairDirection(player, next)), true);
         sendPreview(player);
     }
 
@@ -297,7 +303,12 @@ public final class BuildToolsState {
     }
 
     public static void cycleMode(ServerPlayer player) {
-        setMode(player, mode(player).next());
+        cycleMode(player, 1);
+    }
+
+    public static void cycleMode(ServerPlayer player, int step) {
+        BuildMode[] values = BuildMode.values();
+        setMode(player, values[Math.floorMod(mode(player).ordinal() + (step >= 0 ? 1 : -1), values.length)]);
     }
 
     public static void setMode(ServerPlayer player, BuildMode mode) {
@@ -734,7 +745,7 @@ public final class BuildToolsState {
             setAdvancedPoints(player, selection.points().stream()
                     .map(point -> point.offset(offset))
                     .toList());
-            player.displayClientMessage(Component.translatable("buildtools.message.selection_nudged", direction.getName()), true);
+            player.displayClientMessage(Component.translatable("buildtools.message.selection_nudged", DirectionDisplay.direction(player, direction)), true);
             return;
         }
         SELECTIONS.put(player.getUUID(), new Selection(
@@ -745,7 +756,7 @@ public final class BuildToolsState {
                 shape(player)));
         BuildOperationEngine.clearPendingOperation(player);
         sync(player);
-        player.displayClientMessage(Component.translatable("buildtools.message.selection_nudged", direction.getName()), true);
+        player.displayClientMessage(Component.translatable("buildtools.message.selection_nudged", DirectionDisplay.direction(player, direction)), true);
     }
 
     public static void resizeSelection(ServerPlayer player, Direction direction, int amount) {
@@ -783,7 +794,7 @@ public final class BuildToolsState {
                 selection.shape()));
         BuildOperationEngine.clearPendingOperation(player);
         sync(player);
-        player.displayClientMessage(Component.translatable(amount >= 0 ? "buildtools.message.selection_expanded" : "buildtools.message.selection_shrunk", direction.getName()), true);
+        player.displayClientMessage(Component.translatable(amount >= 0 ? "buildtools.message.selection_expanded" : "buildtools.message.selection_shrunk", DirectionDisplay.direction(player, direction)), true);
     }
 
     public static void savePreset(ServerPlayer player) {
@@ -1134,7 +1145,7 @@ public final class BuildToolsState {
         GradientDirection next = gradientDirection(player).next();
         gradientDirections(player).put(activeProfile(player), next);
         BuildOperationEngine.clearPendingOperation(player);
-        player.displayClientMessage(Component.translatable("buildtools.message.gradient_direction", next.displayName()), true);
+        player.displayClientMessage(Component.translatable("buildtools.message.gradient_direction", DirectionDisplay.gradientDirection(player, next)), true);
         sendPreview(player);
     }
 
@@ -1150,8 +1161,9 @@ public final class BuildToolsState {
         if (preview.size() > BuildToolsNetworking.MAX_PREVIEW_POSITIONS) {
             preview = preview.subList(0, BuildToolsNetworking.MAX_PREVIEW_POSITIONS);
         }
+        List<Integer> colors = gradientPreviewColors(player, selection, preview);
         persist(player);
-        PacketDistributor.sendToPlayer(player, new PreviewPayload(preview, false));
+        PacketDistributor.sendToPlayer(player, new PreviewPayload(preview, false, colors));
     }
 
     private static void syncSharedSelectionFrom(ServerPlayer owner) {
@@ -1407,6 +1419,148 @@ public final class BuildToolsState {
             case REPLACE -> touchesMatchingBlock(player, pos, replaceMatch);
             case SURFACE -> SurfacePlacementSupport.touchesSolidBlock(player.level(), pos);
         };
+    }
+
+    private static List<Integer> gradientPreviewColors(ServerPlayer player, Selection selection, List<BlockPos> preview) {
+        if (preview.isEmpty()
+                || activeProfile(player) != ToolProfile.ADVANCED_BUILDER
+                || paletteMode(player) != PaletteMode.GRADIENT) {
+            return List.of();
+        }
+        BlockState fallback = materialPreviewFallback(player);
+        List<BlockState> palette = gradientPreviewPalette(fallback, paletteEntries(player));
+        if (fallback == null || palette.size() <= 1 || !selection.isComplete()) {
+            return List.of();
+        }
+        GradientDirection direction = gradientDirection(player);
+        List<Integer> colors = new ArrayList<>(preview.size());
+        for (BlockPos pos : preview) {
+            colors.add(previewColor(gradientPreviewTarget(selection, pos, fallback, palette, direction), player, pos));
+        }
+        return colors;
+    }
+
+    private static BlockState materialPreviewFallback(ServerPlayer player) {
+        BlockState source = materialState(player.getOffhandItem());
+        if (source != null) {
+            return source;
+        }
+        List<PaletteEntry> palette = paletteEntries(player);
+        return palette.isEmpty() ? null : palette.getFirst().state();
+    }
+
+    private static BlockState materialState(ItemStack stack) {
+        if (stack.getItem() instanceof BlockItem blockItem) {
+            return blockItem.getBlock().defaultBlockState();
+        }
+        if (stack.is(Items.WATER_BUCKET)) {
+            return net.minecraft.world.level.block.Blocks.WATER.defaultBlockState();
+        }
+        if (stack.is(Items.LAVA_BUCKET)) {
+            return net.minecraft.world.level.block.Blocks.LAVA.defaultBlockState();
+        }
+        return null;
+    }
+
+    private static List<BlockState> gradientPreviewPalette(BlockState fallback, List<PaletteEntry> entries) {
+        if (entries.isEmpty()) {
+            return fallback == null ? List.of() : List.of(fallback);
+        }
+        List<BlockState> palette = new ArrayList<>();
+        for (PaletteEntry entry : entries) {
+            if (palette.stream().noneMatch(state -> state.is(entry.state().getBlock()))) {
+                palette.add(entry.state());
+            }
+        }
+        return palette;
+    }
+
+    private static BlockState gradientPreviewTarget(Selection selection, BlockPos pos, BlockState fallback, List<BlockState> palette, GradientDirection direction) {
+        if (palette.size() <= 1 || !selection.isComplete()) {
+            return fallback;
+        }
+        double min = direction == GradientDirection.POINT_ORDER
+                ? 0.0D
+                : Math.min(gradientCoordinate(selection, selection.first(), direction), gradientCoordinate(selection, selection.second(), direction));
+        double max = direction == GradientDirection.POINT_ORDER
+                ? pointOrderLength(selection)
+                : Math.max(gradientCoordinate(selection, selection.first(), direction), gradientCoordinate(selection, selection.second(), direction));
+        if (min == max) {
+            return palette.getFirst();
+        }
+        double ratio = (gradientCoordinate(selection, pos, direction) - min) / (max - min);
+        int index = Mth.clamp((int) Math.round(ratio * (palette.size() - 1)), 0, palette.size() - 1);
+        return palette.get(index);
+    }
+
+    private static double gradientCoordinate(Selection selection, BlockPos pos, GradientDirection direction) {
+        return switch (direction) {
+            case X -> pos.getX();
+            case Y -> pos.getY();
+            case Z -> pos.getZ();
+            case POINT_ORDER -> pointOrderCoordinate(selection, pos);
+        };
+    }
+
+    private static double pointOrderCoordinate(Selection selection, BlockPos pos) {
+        List<BlockPos> points = selection.points();
+        if (points.size() < 2) {
+            return pos.distSqr(selection.first());
+        }
+        double bestDistance = Double.MAX_VALUE;
+        double bestCoordinate = 0.0D;
+        double traveled = 0.0D;
+        for (int i = 1; i < points.size(); i++) {
+            BlockPos a = points.get(i - 1);
+            BlockPos b = points.get(i);
+            double segmentLength = Math.sqrt(a.distSqr(b));
+            if (segmentLength <= 0.0D) {
+                continue;
+            }
+            double t = projectionRatio(a, b, pos);
+            double closestX = a.getX() + (b.getX() - a.getX()) * t;
+            double closestY = a.getY() + (b.getY() - a.getY()) * t;
+            double closestZ = a.getZ() + (b.getZ() - a.getZ()) * t;
+            double dx = pos.getX() - closestX;
+            double dy = pos.getY() - closestY;
+            double dz = pos.getZ() - closestZ;
+            double distance = dx * dx + dy * dy + dz * dz;
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestCoordinate = traveled + segmentLength * t;
+            }
+            traveled += segmentLength;
+        }
+        return bestCoordinate;
+    }
+
+    private static double pointOrderLength(Selection selection) {
+        List<BlockPos> points = selection.points();
+        if (points.size() < 2) {
+            return Math.sqrt(selection.first().distSqr(selection.second()));
+        }
+        double length = 0.0D;
+        for (int i = 1; i < points.size(); i++) {
+            length += Math.sqrt(points.get(i - 1).distSqr(points.get(i)));
+        }
+        return length;
+    }
+
+    private static double projectionRatio(BlockPos a, BlockPos b, BlockPos pos) {
+        double dx = b.getX() - a.getX();
+        double dy = b.getY() - a.getY();
+        double dz = b.getZ() - a.getZ();
+        double lengthSqr = dx * dx + dy * dy + dz * dz;
+        if (lengthSqr <= 0.0D) {
+            return 0.0D;
+        }
+        double dot = (pos.getX() - a.getX()) * dx + (pos.getY() - a.getY()) * dy + (pos.getZ() - a.getZ()) * dz;
+        return Mth.clamp(dot / lengthSqr, 0.0D, 1.0D);
+    }
+
+    private static int previewColor(BlockState state, ServerPlayer player, BlockPos pos) {
+        int color = state.getMapColor(player.level(), pos).col;
+        return color == 0 ? 0xFFFFFF : color;
     }
 
     private static boolean touchesMatchingBlock(ServerPlayer player, BlockPos pos, BlockState match) {
@@ -2152,6 +2306,9 @@ public final class BuildToolsState {
                     entryTag.put("redoneBlockEntity", entry.redoneBlockEntity().copy());
                 }
                 entryTag.putBoolean("mayRestorePrevious", entry.mayRestorePrevious());
+                if (entry.previousOwner() != null) {
+                    entryTag.putString("previousOwner", entry.previousOwner().toString());
+                }
                 entries.add(entryTag);
             }
             tag.put("entries", entries);
@@ -2183,13 +2340,22 @@ public final class BuildToolsState {
                 CompoundTag redoneBlockEntity = entryTag.contains("redoneBlockEntity", Tag.TAG_COMPOUND)
                         ? entryTag.getCompound("redoneBlockEntity").copy()
                         : null;
+                UUID previousOwner = null;
+                if (entryTag.contains("previousOwner", Tag.TAG_STRING)) {
+                    try {
+                        previousOwner = UUID.fromString(entryTag.getString("previousOwner"));
+                    } catch (IllegalArgumentException ignored) {
+                        previousOwner = null;
+                    }
+                }
                 entries.add(new UndoSnapshot.Entry(
                         pos.get(),
                         readBlockState(entryTag.getCompound("previousState"), registries),
                         previousBlockEntity,
                         readBlockState(entryTag.getCompound("redoneState"), registries),
                         redoneBlockEntity,
-                        entryTag.getBoolean("mayRestorePrevious")));
+                        entryTag.getBoolean("mayRestorePrevious"),
+                        previousOwner));
             }
             if (!entries.isEmpty()) {
                 snapshots.addLast(new UndoSnapshot(

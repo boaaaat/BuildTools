@@ -71,6 +71,7 @@ public final class BuildToolServerEvents {
     public static void breakBlock(BlockEvent.BreakEvent event) {
         if (event.getLevel() instanceof net.minecraft.server.level.ServerLevel level) {
             BuildingStorageManager.unmark(level, event.getPos());
+            BuildToolsBuiltBlockData.get(level.getServer()).remove(level.dimension(), event.getPos());
         }
     }
 

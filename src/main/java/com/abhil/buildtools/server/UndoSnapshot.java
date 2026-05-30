@@ -1,6 +1,7 @@
 package com.abhil.buildtools.server;
 
 import java.util.List;
+import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceKey;
@@ -39,9 +40,14 @@ public record UndoSnapshot(
             CompoundTag previousBlockEntity,
             BlockState redoneState,
             CompoundTag redoneBlockEntity,
-            boolean mayRestorePrevious) {
+            boolean mayRestorePrevious,
+            UUID previousOwner) {
         public Entry(BlockPos pos, BlockState previousState, BlockState redoneState, boolean mayRestorePrevious) {
-            this(pos, previousState, null, redoneState, null, mayRestorePrevious);
+            this(pos, previousState, null, redoneState, null, mayRestorePrevious, null);
+        }
+
+        public Entry(BlockPos pos, BlockState previousState, CompoundTag previousBlockEntity, BlockState redoneState, CompoundTag redoneBlockEntity, boolean mayRestorePrevious) {
+            this(pos, previousState, previousBlockEntity, redoneState, redoneBlockEntity, mayRestorePrevious, null);
         }
     }
 }

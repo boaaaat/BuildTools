@@ -10,7 +10,7 @@
       "tag": "c:gems/amethyst"
     },
     "P": {
-      "item": "minecraft:diamond_pickaxe"
+      "item": "minecraft:netherite_pickaxe"
     },
     "R": {
       "tag": "c:storage_blocks/redstone"

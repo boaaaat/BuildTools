@@ -106,8 +106,6 @@ public final class BuildToolActionbar {
             String details = "";
             if (BuildToolsState.selectionShape(player) == SelectionShape.CUSTOM_SMART) {
                 details = " | Custom: " + BuildToolsState.customShapeMode(player).displayName().getString();
-            } else if (BuildToolsState.selectionShape(player) == SelectionShape.STAIRS) {
-                details = " | Stairs: " + BuildToolsState.stairDirectionOverride(player).displayName().getString();
             }
             return Component.literal("Advanced Selection Staff | Points: " + BuildToolsState.advancedPointCount(player) + details + " | " + selectionMessage(player).getString());
         }
@@ -187,7 +185,7 @@ public final class BuildToolActionbar {
         Component base = builderMessage(player);
         int paletteSize = BuildToolsState.paletteEntries(player).size();
         String materialMode = BuildToolsState.paletteMode(player).displayName().getString();
-        String gradientDirection = BuildToolsState.gradientDirection(player).displayName().getString();
+        String gradientDirection = DirectionDisplay.gradientDirection(player, BuildToolsState.gradientDirection(player)).getString();
         return Component.literal("Advanced " + base.getString() + " | Palette: " + paletteSize + " | Material mode: " + materialMode + " | Gradient: " + gradientDirection + " | Ghost/plan ready in menu");
     }
 
@@ -295,7 +293,7 @@ public final class BuildToolActionbar {
         return new SelectionStats(
                 true,
                 "",
-                selection.shape().displayName().getString(),
+                shapeName(player, selection.shape()),
                 dimensions(positions),
                 positions.size(),
                 air,
@@ -332,6 +330,14 @@ public final class BuildToolActionbar {
 
     private static String modeName(BuildMode mode) {
         return mode.displayName().getString();
+    }
+
+    private static String shapeName(ServerPlayer player, SelectionShape shape) {
+        if (shape == SelectionShape.STAIRS) {
+            return shape.displayName().getString() + ": "
+                    + DirectionDisplay.stairDirection(player, BuildToolsState.stairDirectionOverride(player)).getString();
+        }
+        return shape.displayName().getString();
     }
 
     private static String costSuffix(ServerPlayer player, BlockCostPlan costPlan) {

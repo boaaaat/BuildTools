@@ -231,7 +231,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
                 stack.set(DataComponents.CUSTOM_NAME, Component.translatable("buildtools.menu.shape_hollow", shapes[i].displayName(), fill));
                 stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
             } else {
-                stack.set(DataComponents.CUSTOM_NAME, shapes[i].displayName());
+                stack.set(DataComponents.CUSTOM_NAME, shapeName(shapes[i]));
             }
             setSelected(stack, owner != null && BuildToolsState.selectionShape(owner) == shapes[i]);
             menuItems.setItem(startSlot + i, stack);
@@ -478,6 +478,15 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         ItemStack stack = new ItemStack(item);
         stack.set(DataComponents.CUSTOM_NAME, name);
         return stack;
+    }
+
+    private Component shapeName(SelectionShape shape) {
+        if (shape == SelectionShape.STAIRS && owner != null) {
+            return shape.displayName().copy()
+                    .append(": ")
+                    .append(DirectionDisplay.stairDirection(owner, BuildToolsState.stairDirectionOverride(owner)));
+        }
+        return shape.displayName();
     }
 
     private static Component menuTitle(ServerPlayer player) {

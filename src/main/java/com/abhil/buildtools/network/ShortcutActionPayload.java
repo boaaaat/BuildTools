@@ -6,6 +6,7 @@ import com.abhil.buildtools.server.AdvancedBuildToolsModeMenu;
 import com.abhil.buildtools.server.BuildOperationEngine;
 import com.abhil.buildtools.server.BuildToolsModeMenu;
 import com.abhil.buildtools.server.BuildToolsState;
+import com.abhil.buildtools.shape.SelectionShape;
 import net.minecraft.core.Direction;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -43,6 +44,11 @@ public record ShortcutActionPayload(String action, String direction, int amount)
             case "undo" -> BuildOperationEngine.undo(player);
             case "redo" -> BuildOperationEngine.redo(player);
             case "nudge" -> nudge(player, payload.direction(), payload.amount());
+            case "nudge_relative" -> nudgeRelative(player, payload.direction(), payload.amount());
+            case "cycle_shape_step" -> cycleShape(player, payload.amount());
+            case "cycle_mode_step" -> cycleMode(player, payload.amount());
+            case "adjust_option" -> adjustCurrentOption(player, payload.amount());
+            case "toggle_shape_option" -> toggleShapeOption(player);
             default -> {
             }
         }
@@ -67,6 +73,30 @@ public record ShortcutActionPayload(String action, String direction, int amount)
                 || stack.is(ModItems.REDO_TOKEN.get());
     }
 
+    private static boolean isShortcutBuildTool(ItemStack stack) {
+        return isShapeTool(stack)
+                || stack.is(ModItems.BLUEPRINT_TROWEL.get())
+                || stack.is(ModItems.UNDO_TOKEN.get())
+                || stack.is(ModItems.REDO_TOKEN.get());
+    }
+
+    private static boolean isShapeTool(ItemStack stack) {
+        return stack.is(ModItems.SELECTION_STAFF.get())
+                || stack.is(ModItems.ADVANCED_SELECTION_STAFF.get())
+                || stack.is(ModItems.BUILDER_WAND.get())
+                || stack.is(ModItems.ADVANCED_BUILDER_WAND.get())
+                || stack.is(ModItems.AREA_BREAKER.get());
+    }
+
+    private static boolean isModeTool(ItemStack stack) {
+        return stack.is(ModItems.BUILDER_WAND.get())
+                || stack.is(ModItems.ADVANCED_BUILDER_WAND.get());
+    }
+
+    private static boolean isBrushTool(ItemStack stack) {
+        return stack.is(ModItems.BUILDER_BRUSH.get());
+    }
+
     private static void confirm(ServerPlayer player) {
         if (!BuildOperationEngine.confirmPendingOperation(player)) {
             BuildOperationEngine.confirmPendingBlueprintPaste(player);
@@ -83,6 +113,21 @@ public record ShortcutActionPayload(String action, String direction, int amount)
         if (direction == null) {
             return;
         }
+        nudge(player, direction, amount);
+    }
+
+    private static void nudgeRelative(ServerPlayer player, String relativeDirection, int amount) {
+        if (!isShortcutBuildTool(player.getMainHandItem())) {
+            return;
+        }
+        Direction direction = relativeDirection(relativeDirection, player.getDirection());
+        if (direction == null) {
+            return;
+        }
+        nudge(player, direction, amount);
+    }
+
+    private static void nudge(ServerPlayer player, Direction direction, int amount) {
         int steps = Math.max(1, Math.min(10, Math.abs(amount)));
         for (int i = 0; i < steps; i++) {
             if (BuildToolsState.pendingPasteOrigin(player).isPresent()) {
@@ -91,6 +136,60 @@ public record ShortcutActionPayload(String action, String direction, int amount)
                 BuildToolsState.nudgeSelection(player, direction);
             }
         }
+    }
+
+    private static void cycleShape(ServerPlayer player, int step) {
+        if (isShapeTool(player.getMainHandItem())) {
+            BuildToolsState.cycleShape(player, step);
+        }
+    }
+
+    private static void cycleMode(ServerPlayer player, int step) {
+        if (isModeTool(player.getMainHandItem())) {
+            BuildToolsState.cycleMode(player, step);
+        }
+    }
+
+    private static void adjustCurrentOption(ServerPlayer player, int step) {
+        ItemStack held = player.getMainHandItem();
+        SelectionShape shape = BuildToolsState.selectionShape(player);
+        if (isShapeTool(held) && shape == SelectionShape.ROAD) {
+            BuildToolsState.changeRoadWidth(player, step);
+        } else if (isShapeTool(held) && shape == SelectionShape.ARCH) {
+            BuildToolsState.changeArchPeak(player, step);
+        } else if (isShapeTool(held) && shape == SelectionShape.STAIRS) {
+            BuildToolsState.cycleStairDirection(player, step);
+        } else if (isBrushTool(held)) {
+            BuildToolsState.changeBrushRadius(player, step);
+        } else if (isModeTool(held)) {
+            BuildToolsState.cycleMode(player, step);
+        } else if (isShapeTool(held)) {
+            BuildToolsState.cycleShape(player, step);
+        }
+    }
+
+    private static void toggleShapeOption(ServerPlayer player) {
+        if (!isShapeTool(player.getMainHandItem())) {
+            return;
+        }
+        SelectionShape shape = BuildToolsState.selectionShape(player);
+        if (shape == SelectionShape.ARCH) {
+            BuildToolsState.toggleArchEdgeWalls(player);
+        } else if (shape == SelectionShape.SPHERE || shape == SelectionShape.ELLIPSOID) {
+            BuildToolsState.toggleShapeHollow(player, shape);
+        }
+    }
+
+    private static Direction relativeDirection(String value, Direction facing) {
+        return switch (value) {
+            case "LEFT" -> facing.getCounterClockWise();
+            case "RIGHT" -> facing.getClockWise();
+            case "FORWARD" -> facing;
+            case "BACK" -> facing.getOpposite();
+            case "UP" -> Direction.UP;
+            case "DOWN" -> Direction.DOWN;
+            default -> null;
+        };
     }
 
     private static Direction parseDirection(String value) {

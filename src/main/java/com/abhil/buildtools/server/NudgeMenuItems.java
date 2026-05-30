@@ -17,7 +17,7 @@ final class NudgeMenuItems {
 
     static ItemStack item(ServerPlayer player, Direction direction, String descriptionKey) {
         ItemStack stack = new ItemStack(icon(player, direction));
-        stack.set(DataComponents.CUSTOM_NAME, Component.literal(arrow(player, direction) + " ")
+        stack.set(DataComponents.CUSTOM_NAME, Component.literal(DirectionDisplay.arrow(player, direction) + " ")
                 .append(Component.translatable(nameKey(direction))));
         Component description = Component.translatable(descriptionKey).withStyle(ChatFormatting.GRAY);
         stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
@@ -31,36 +31,13 @@ final class NudgeMenuItems {
         if (direction == Direction.DOWN) {
             return Items.ANVIL;
         }
-        return switch (arrow(player, direction)) {
-            case "↑" -> Items.SPECTRAL_ARROW;
-            case "↓" -> Items.ARROW;
-            case "←" -> Items.FEATHER;
-            case "→" -> Items.PRISMARINE_SHARD;
+        return switch (DirectionDisplay.arrow(player, direction)) {
+            case DirectionDisplay.FORWARD -> Items.SPECTRAL_ARROW;
+            case DirectionDisplay.BACK -> Items.ARROW;
+            case DirectionDisplay.LEFT -> Items.FEATHER;
+            case DirectionDisplay.RIGHT -> Items.PRISMARINE_SHARD;
             default -> Items.COMPASS;
         };
-    }
-
-    private static String arrow(ServerPlayer player, Direction direction) {
-        if (direction == Direction.UP) {
-            return "⇧";
-        }
-        if (direction == Direction.DOWN) {
-            return "⇩";
-        }
-        Direction facing = player == null ? Direction.NORTH : player.getDirection();
-        if (direction == facing) {
-            return "↑";
-        }
-        if (direction == facing.getOpposite()) {
-            return "↓";
-        }
-        if (direction == facing.getClockWise()) {
-            return "→";
-        }
-        if (direction == facing.getCounterClockWise()) {
-            return "←";
-        }
-        return "•";
     }
 
     private static String nameKey(Direction direction) {
