@@ -21,7 +21,7 @@ public final class ShapeGenerator {
     }
 
     public static List<BlockPos> generate(Selection selection, CustomShapeMode customMode, StairDirectionOverride stairDirection, int roadWidth) {
-        return generate(selection, customMode, stairDirection, new Options(roadWidth, false, 50, false, false));
+        return generate(selection, customMode, stairDirection, new Options(roadWidth, ArchMode.OPEN, 50, ArchDirection.X, false, false));
     }
 
     public static List<BlockPos> generate(Selection selection, CustomShapeMode customMode, StairDirectionOverride stairDirection, Options options) {
@@ -48,7 +48,7 @@ public final class ShapeGenerator {
             case ELLIPSOID -> sphere(a, b, false, options.ellipsoidHollow());
             case ROAD -> road(selection.points().size() > 1 ? selection.points() : List.of(a, b), options.roadWidth());
             case TUNNEL -> tunnel(a, b);
-            case ARCH -> arch(a, b, options.archEdgeWalls(), options.archPeak());
+            case ARCH -> arch(a, b, options.archMode(), options.archPeak(), options.archDirection());
             case DOME -> dome(a, b);
             case CUSTOM_SMART -> customSmart(selection.points(), customMode);
             case STAIRS -> stairs(selection, stairDirection);
@@ -322,27 +322,42 @@ public final class ShapeGenerator {
     }
 
     public static List<BlockPos> arch(BlockPos a, BlockPos b, boolean edgeWalls, int peakPercent) {
+        return arch(a, b, edgeWalls ? ArchMode.EDGE_WALLS : ArchMode.OPEN, peakPercent, ArchDirection.X);
+    }
+
+    public static List<BlockPos> arch(BlockPos a, BlockPos b, ArchMode mode, int peakPercent, ArchDirection direction) {
+        mode = mode == null ? ArchMode.OPEN : mode;
+        direction = direction == null ? ArchDirection.X : direction;
         int minX = Math.min(a.getX(), b.getX());
         int minY = Math.min(a.getY(), b.getY());
         int minZ = Math.min(a.getZ(), b.getZ());
         int maxX = Math.max(a.getX(), b.getX());
         int maxY = Math.max(a.getY(), b.getY());
         int maxZ = Math.max(a.getZ(), b.getZ());
+        int minArch = direction == ArchDirection.X ? minX : minZ;
+        int maxArch = direction == ArchDirection.X ? maxX : maxZ;
+        int minDepth = direction == ArchDirection.X ? minZ : minX;
+        int maxDepth = direction == ArchDirection.X ? maxZ : maxX;
         double peak = Mth.clamp(peakPercent, 0, 100) / 100.0D;
-        double centerX = Mth.lerp(peak, minX, maxX);
-        double leftRadiusX = Math.max(1.0D, centerX - minX);
-        double rightRadiusX = Math.max(1.0D, maxX - centerX);
+        double centerArch = Mth.lerp(peak, minArch, maxArch);
+        double leftRadius = Math.max(1.0D, centerArch - minArch);
+        double rightRadius = Math.max(1.0D, maxArch - centerArch);
         double radiusY = Math.max(1.0D, maxY - minY);
         List<BlockPos> positions = new ArrayList<>();
 
         for (int z = minZ; z <= maxZ; z++) {
             for (int y = minY; y <= maxY; y++) {
                 for (int x = minX; x <= maxX; x++) {
-                    double radiusX = x <= centerX ? leftRadiusX : rightRadiusX;
-                    double nx = (x - centerX) / radiusX;
+                    int archCoord = direction == ArchDirection.X ? x : z;
+                    int depthCoord = direction == ArchDirection.X ? z : x;
+                    double radius = archCoord <= centerArch ? leftRadius : rightRadius;
+                    double nx = (archCoord - centerArch) / radius;
                     double ny = (y - minY) / radiusY;
                     double value = nx * nx + ny * ny;
-                    if ((edgeWalls && (x == minX || x == maxX)) || (ny >= 0.0D && value <= 1.08D && value >= 0.70D)) {
+                    boolean archShell = ny >= 0.0D && value <= 1.08D && value >= 0.70D;
+                    boolean edgeWall = mode == ArchMode.EDGE_WALLS && (archCoord == minArch || archCoord == maxArch);
+                    boolean endWall = mode == ArchMode.WALLS && (depthCoord == minDepth || depthCoord == maxDepth) && ny >= 0.0D && value <= 1.08D;
+                    if (edgeWall || endWall || archShell) {
                         positions.add(new BlockPos(x, y, z));
                     }
                 }
@@ -756,12 +771,14 @@ public final class ShapeGenerator {
     private record PathPoint(double x, double y, double z) {
     }
 
-    public record Options(int roadWidth, boolean archEdgeWalls, int archPeak, boolean sphereHollow, boolean ellipsoidHollow) {
-        public static final Options DEFAULT = new Options(3, false, 50, false, false);
+    public record Options(int roadWidth, ArchMode archMode, int archPeak, ArchDirection archDirection, boolean sphereHollow, boolean ellipsoidHollow) {
+        public static final Options DEFAULT = new Options(3, ArchMode.OPEN, 50, ArchDirection.X, false, false);
 
         public Options {
             roadWidth = Math.max(1, roadWidth);
+            archMode = archMode == null ? ArchMode.OPEN : archMode;
             archPeak = Mth.clamp(archPeak, 0, 100);
+            archDirection = archDirection == null ? ArchDirection.X : archDirection;
         }
     }
 

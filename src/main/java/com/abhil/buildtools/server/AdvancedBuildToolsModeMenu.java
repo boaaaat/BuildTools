@@ -29,6 +29,7 @@ import net.minecraft.world.level.block.state.BlockState;
 public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
     private static final int MENU_SIZE = 54;
     private static final int SHAPE_START_SLOT = 9;
+    private static final int GRADIENT_SLOT = 4;
     public static final int PALETTE_START = 44;
     public static final int PALETTE_COUNT = 10;
     private final SimpleContainer menuItems = new SimpleContainer(MENU_SIZE);
@@ -57,8 +58,9 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
     @Override
     public void clicked(int slotId, int button, ClickType clickType, Player player) {
         if (slotId >= 0 && slotId < MENU_SIZE && player instanceof ServerPlayer serverPlayer) {
+            boolean rightClick = clickType == ClickType.PICKUP && button == 1;
             if (isAdvancedSelectionMenu()) {
-                if (handleSelectionClick(serverPlayer, slotId)) {
+                if (handleSelectionClick(serverPlayer, slotId, rightClick)) {
                     populateMenuItems();
                     return;
                 }
@@ -76,7 +78,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             int shapeIndex = shapeIndex(slotId);
             SelectionShape[] shapes = visibleShapes();
             if (shapeIndex >= 0 && shapeIndex < shapes.length) {
-                handleShapeClick(serverPlayer, shapes[shapeIndex]);
+                handleShapeClick(serverPlayer, shapes[shapeIndex], rightClick);
                 populateMenuItems();
                 return;
             }
@@ -159,29 +161,20 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(1, modeItem(Items.ORANGE_STAINED_GLASS, BuildMode.REPLACE));
         menuItems.setItem(2, modeItem(Items.LIGHT_BLUE_STAINED_GLASS, BuildMode.SURFACE));
         menuItems.setItem(3, utilityItem(Items.CHEST, "buildtools.menu.material_checklist", "buildtools.menu.material_checklist.description"));
-        menuItems.setItem(4, utilityItem(Items.POWDER_SNOW_BUCKET, "buildtools.menu.gradient", "buildtools.menu.gradient.description",
-                owner != null && BuildToolsState.paletteMode(owner) == PaletteMode.GRADIENT));
+        ItemStack gradient = utilityItem(Items.POWDER_SNOW_BUCKET, "buildtools.menu.gradient", "buildtools.menu.gradient.description",
+                owner != null && BuildToolsState.paletteMode(owner) == PaletteMode.GRADIENT);
+        if (owner != null) {
+            gradient.set(DataComponents.CUSTOM_NAME, Component.translatable("buildtools.menu.gradient")
+                    .append(": ")
+                    .append(DirectionDisplay.gradientDirection(owner, BuildToolsState.gradientDirection(owner))));
+        }
+        menuItems.setItem(GRADIENT_SLOT, gradient);
         menuItems.setItem(5, utilityItem(Items.MAP, "buildtools.menu.save_plan", "buildtools.menu.save_plan.description"));
         menuItems.setItem(6, utilityItem(Items.FILLED_MAP, "buildtools.menu.build_plan", "buildtools.menu.build_plan.description"));
         menuItems.setItem(7, utilityItem(Items.DISPENSER, "buildtools.menu.random_pattern", "buildtools.menu.random_pattern.description",
                 owner != null && BuildToolsState.paletteMode(owner) == PaletteMode.RANDOM));
         menuItems.setItem(8, utilityItem(Items.HOPPER, "buildtools.menu.return_palette", "buildtools.menu.return_palette.description"));
-        ItemStack gradientDirection = utilityItem(Items.COMPASS, "buildtools.menu.gradient_direction", "buildtools.menu.gradient_direction.description",
-                owner != null && BuildToolsState.paletteMode(owner) == PaletteMode.GRADIENT);
-        if (owner != null) {
-            gradientDirection.set(DataComponents.CUSTOM_NAME, Component.translatable("buildtools.menu.gradient_direction")
-                    .append(": ")
-                    .append(DirectionDisplay.gradientDirection(owner, BuildToolsState.gradientDirection(owner))));
-        }
         menuItems.setItem(40, utilityItem(Items.BOOKSHELF, "buildtools.menu.palettes", "buildtools.menu.palettes.description"));
-        menuItems.setItem(41, gradientDirection);
-        menuItems.setItem(42, stateItem(
-                Items.STONE_STAIRS,
-                Component.translatable("buildtools.menu.stair_direction").append(": ").append(owner == null
-                        ? Component.translatable("buildtools.stair_direction.point_order")
-                        : DirectionDisplay.stairDirection(owner, BuildToolsState.stairDirectionOverride(owner))),
-                Component.translatable("buildtools.menu.stair_direction.description"),
-                owner != null && BuildToolsState.selectionShape(owner) == SelectionShape.STAIRS));
 
         populateShapes(SHAPE_START_SLOT);
 
@@ -204,13 +197,6 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
                         : BuildToolsState.customShapeMode(owner).displayName()),
                 Component.translatable("buildtools.menu.custom_shape_mode.description"),
                 owner != null && BuildToolsState.selectionShape(owner) == SelectionShape.CUSTOM_SMART));
-        menuItems.setItem(6, stateItem(
-                Items.STONE_STAIRS,
-                Component.translatable("buildtools.menu.stair_direction").append(": ").append(owner == null
-                        ? Component.translatable("buildtools.stair_direction.point_order")
-                        : DirectionDisplay.stairDirection(owner, BuildToolsState.stairDirectionOverride(owner))),
-                Component.translatable("buildtools.menu.stair_direction.description"),
-                owner != null && BuildToolsState.selectionShape(owner) == SelectionShape.STAIRS));
         populateShapes(SHAPE_START_SLOT);
         menuItems.setItem(27, NudgeMenuItems.item(owner, Direction.WEST, "buildtools.menu.nudge.description"));
         menuItems.setItem(28, NudgeMenuItems.item(owner, Direction.EAST, "buildtools.menu.nudge.description"));
@@ -223,6 +209,12 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
                 "buildtools.menu.selection_visibility",
                 "buildtools.menu.selection_visibility.description",
                 shared));
+        menuItems.setItem(36, NudgeMenuItems.expandItem(owner, Direction.WEST));
+        menuItems.setItem(37, NudgeMenuItems.expandItem(owner, Direction.EAST));
+        menuItems.setItem(38, NudgeMenuItems.expandItem(owner, Direction.DOWN));
+        menuItems.setItem(39, NudgeMenuItems.expandItem(owner, Direction.UP));
+        menuItems.setItem(40, NudgeMenuItems.expandItem(owner, Direction.NORTH));
+        menuItems.setItem(41, NudgeMenuItems.expandItem(owner, Direction.SOUTH));
         menuItems.setItem(53, utilityItem(Items.KNOWLEDGE_BOOK, "buildtools.menu.help", "buildtools.menu.help.description"));
     }
 
@@ -237,8 +229,11 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
                 stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
             } else if (shapes[i] == SelectionShape.ARCH) {
                 int peak = owner == null ? BuildToolsState.DEFAULT_ARCH_PEAK : BuildToolsState.archPeak(owner);
-                boolean edgeWalls = owner != null && BuildToolsState.archEdgeWalls(owner);
-                Component mode = Component.translatable(edgeWalls ? "buildtools.arch_edge_walls.on" : "buildtools.arch_edge_walls.off");
+                Component mode = owner == null
+                        ? Component.translatable("buildtools.arch_mode.open")
+                        : BuildToolsState.archMode(owner).displayName().copy()
+                                .append(" / ")
+                                .append(BuildToolsState.archDirection(owner).displayName());
                 Component description = Component.translatable("buildtools.menu.arch.description", peak).withStyle(ChatFormatting.GRAY);
                 stack.set(DataComponents.CUSTOM_NAME, Component.translatable("buildtools.menu.arch", mode));
                 stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
@@ -334,8 +329,6 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             case 7 -> BuildToolsState.toggleRandomPattern(player);
             case 8 -> returnPalette(player);
             case 40 -> PaletteLibraryMenu.open(player);
-            case 41 -> BuildToolsState.cycleGradientDirection(player);
-            case 42 -> BuildToolsState.cycleStairDirection(player, 1);
             case 39 -> HelpMenu.open(player);
             default -> {
                 return false;
@@ -344,7 +337,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         return true;
     }
 
-    private boolean handleSelectionClick(ServerPlayer player, int slotId) {
+    private boolean handleSelectionClick(ServerPlayer player, int slotId, boolean rightClick) {
         switch (slotId) {
             case 0 -> BuildToolsState.clearAdvancedPoints(player);
             case 1 -> BuildToolsState.clearSelection(player);
@@ -352,7 +345,6 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             case 3 -> BuildToolsState.savePreset(player);
             case 4 -> PresetLibraryMenu.open(player);
             case 5 -> BuildToolsState.cycleCustomShapeMode(player);
-            case 6 -> BuildToolsState.cycleStairDirection(player, 1);
             case 27 -> BuildToolsState.nudgeSelection(player, Direction.WEST);
             case 28 -> BuildToolsState.nudgeSelection(player, Direction.EAST);
             case 29 -> BuildToolsState.nudgeSelection(player, Direction.DOWN);
@@ -360,12 +352,18 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             case 31 -> BuildToolsState.nudgeSelection(player, Direction.NORTH);
             case 32 -> BuildToolsState.nudgeSelection(player, Direction.SOUTH);
             case 33 -> BuildToolsState.toggleSelectionVisibility(player);
+            case 36 -> BuildToolsState.resizeSelection(player, Direction.WEST, 1);
+            case 37 -> BuildToolsState.resizeSelection(player, Direction.EAST, 1);
+            case 38 -> BuildToolsState.resizeSelection(player, Direction.DOWN, 1);
+            case 39 -> BuildToolsState.resizeSelection(player, Direction.UP, 1);
+            case 40 -> BuildToolsState.resizeSelection(player, Direction.NORTH, 1);
+            case 41 -> BuildToolsState.resizeSelection(player, Direction.SOUTH, 1);
             case 53 -> HelpMenu.open(player);
             default -> {
                 int shapeIndex = shapeIndex(slotId);
                 SelectionShape[] shapes = visibleShapes();
                 if (shapeIndex >= 0 && shapeIndex < shapes.length) {
-                    handleShapeClick(player, shapes[shapeIndex]);
+                    handleShapeClick(player, shapes[shapeIndex], rightClick);
                     return true;
                 }
                 return false;
@@ -427,17 +425,31 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         populateMenuItems();
     }
 
-    private static void handleShapeClick(ServerPlayer player, SelectionShape shape) {
-        if (BuildToolsState.selectionShape(player) == shape && handleSelectedShapeOptionClick(player, shape)) {
+    public void adjustStairDirection(ServerPlayer player, int delta) {
+        BuildToolsState.cycleStairDirection(player, delta);
+        populateMenuItems();
+    }
+
+    public void adjustGradientDirection(ServerPlayer player, int delta) {
+        BuildToolsState.cycleGradientDirection(player, delta);
+        populateMenuItems();
+    }
+
+    private static void handleShapeClick(ServerPlayer player, SelectionShape shape, boolean rightClick) {
+        if (BuildToolsState.selectionShape(player) == shape && handleSelectedShapeOptionClick(player, shape, rightClick)) {
             return;
         }
         BuildToolsState.setShape(player, shape);
     }
 
-    private static boolean handleSelectedShapeOptionClick(ServerPlayer player, SelectionShape shape) {
+    private static boolean handleSelectedShapeOptionClick(ServerPlayer player, SelectionShape shape, boolean rightClick) {
         return switch (shape) {
             case ARCH -> {
-                BuildToolsState.toggleArchEdgeWalls(player);
+                if (rightClick) {
+                    BuildToolsState.cycleArchDirection(player);
+                } else {
+                    BuildToolsState.cycleArchMode(player);
+                }
                 yield true;
             }
             case SPHERE, ELLIPSOID -> {
@@ -539,12 +551,39 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         return slot == SHAPE_START_SLOT + SelectionShape.ARCH.ordinal();
     }
 
+    public static boolean isStairShapeSlot(int slot) {
+        return slot == SHAPE_START_SLOT + SelectionShape.STAIRS.ordinal();
+    }
+
+    public static boolean isGradientSlot(int slot) {
+        return slot == GRADIENT_SLOT;
+    }
+
     public boolean isRoadShapeSlot(Slot slot) {
-        return isRoadShapeSlot(this.slots.indexOf(slot));
+        return isShapeSlot(slot, SelectionShape.ROAD);
     }
 
     public boolean isArchShapeSlot(Slot slot) {
-        return isArchShapeSlot(this.slots.indexOf(slot));
+        return isShapeSlot(slot, SelectionShape.ARCH);
+    }
+
+    public boolean isStairShapeSlot(Slot slot) {
+        return isShapeSlot(slot, SelectionShape.STAIRS);
+    }
+
+    public boolean isGradientSlot(Slot slot) {
+        return isGradientSlot(this.slots.indexOf(slot));
+    }
+
+    private boolean isShapeSlot(Slot slot, SelectionShape shape) {
+        int slotId = this.slots.indexOf(slot);
+        SelectionShape[] shapes = visibleShapes();
+        for (int i = 0; i < shapes.length; i++) {
+            if (shapes[i] == shape) {
+                return slotId == SHAPE_START_SLOT + i;
+            }
+        }
+        return false;
     }
 
     private static BlockState paletteState(ItemStack stack) {

@@ -19,7 +19,11 @@ public enum GradientDirection {
     }
 
     public GradientDirection next() {
+        return next(1);
+    }
+
+    public GradientDirection next(int step) {
         GradientDirection[] values = values();
-        return values[(ordinal() + 1) % values.length];
+        return values[Math.floorMod(ordinal() + (step >= 0 ? 1 : -1), values.length)];
     }
 }

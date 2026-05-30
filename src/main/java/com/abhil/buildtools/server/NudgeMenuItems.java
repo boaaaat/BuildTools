@@ -16,9 +16,17 @@ final class NudgeMenuItems {
     }
 
     static ItemStack item(ServerPlayer player, Direction direction, String descriptionKey) {
+        return item(player, direction, "nudge", descriptionKey);
+    }
+
+    static ItemStack expandItem(ServerPlayer player, Direction direction) {
+        return item(player, direction, "expand", "buildtools.menu.expand.description");
+    }
+
+    private static ItemStack item(ServerPlayer player, Direction direction, String action, String descriptionKey) {
         ItemStack stack = new ItemStack(icon(player, direction));
         stack.set(DataComponents.CUSTOM_NAME, Component.literal(DirectionDisplay.arrow(player, direction) + " ")
-                .append(Component.translatable(nameKey(direction))));
+                .append(Component.translatable(nameKey(action, direction))));
         Component description = Component.translatable(descriptionKey).withStyle(ChatFormatting.GRAY);
         stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
         return stack;
@@ -40,14 +48,14 @@ final class NudgeMenuItems {
         };
     }
 
-    private static String nameKey(Direction direction) {
+    private static String nameKey(String action, Direction direction) {
         return switch (direction) {
-            case WEST -> "buildtools.menu.nudge_west";
-            case EAST -> "buildtools.menu.nudge_east";
-            case DOWN -> "buildtools.menu.nudge_down";
-            case UP -> "buildtools.menu.nudge_up";
-            case NORTH -> "buildtools.menu.nudge_north";
-            case SOUTH -> "buildtools.menu.nudge_south";
+            case WEST -> "buildtools.menu." + action + "_west";
+            case EAST -> "buildtools.menu." + action + "_east";
+            case DOWN -> "buildtools.menu." + action + "_down";
+            case UP -> "buildtools.menu." + action + "_up";
+            case NORTH -> "buildtools.menu." + action + "_north";
+            case SOUTH -> "buildtools.menu." + action + "_south";
         };
     }
 }

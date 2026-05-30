@@ -58,7 +58,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
     @Override
     public void clicked(int slotId, int button, ClickType clickType, Player player) {
         if (slotId >= 0 && slotId < MENU_SIZE && player instanceof ServerPlayer serverPlayer) {
-            if (handleClick(serverPlayer, slotId)) {
+            if (handleClick(serverPlayer, slotId, isRightClick(button, clickType))) {
                 populateMenuItems();
                 return;
             }
@@ -217,8 +217,11 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
                 stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
             } else if (shapes[i] == SelectionShape.ARCH) {
                 int peak = owner == null ? BuildToolsState.DEFAULT_ARCH_PEAK : BuildToolsState.archPeak(owner);
-                boolean edgeWalls = owner != null && BuildToolsState.archEdgeWalls(owner);
-                Component mode = Component.translatable(edgeWalls ? "buildtools.arch_edge_walls.on" : "buildtools.arch_edge_walls.off");
+                Component mode = owner == null
+                        ? Component.translatable("buildtools.arch_mode.open")
+                        : BuildToolsState.archMode(owner).displayName().copy()
+                                .append(" / ")
+                                .append(BuildToolsState.archDirection(owner).displayName());
                 Component description = Component.translatable("buildtools.menu.arch.description", peak).withStyle(ChatFormatting.GRAY);
                 stack.set(DataComponents.CUSTOM_NAME, Component.translatable("buildtools.menu.arch", mode));
                 stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
@@ -238,11 +241,15 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         }
     }
 
-    private boolean handleClick(ServerPlayer player, int slotId) {
+    private static boolean isRightClick(int button, ClickType clickType) {
+        return clickType == ClickType.PICKUP && button == 1;
+    }
+
+    private boolean handleClick(ServerPlayer player, int slotId, boolean rightClick) {
         return switch (profile) {
-            case SELECTION, ADVANCED_SELECTION -> handleSelectionClick(player, slotId);
+            case SELECTION, ADVANCED_SELECTION -> handleSelectionClick(player, slotId, rightClick);
             case BRUSH -> handleBrushClick(player, slotId);
-            case BREAKER -> handleBreakerClick(player, slotId);
+            case BREAKER -> handleBreakerClick(player, slotId, rightClick);
             case TROWEL -> handleTrowelClick(player, slotId);
             case UNDO -> {
                 if (slotId == 26 && BuildOperationEngine.collectStoredDrops(player)) {
@@ -276,7 +283,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
                 }
                 yield false;
             }
-            default -> handleBuilderClick(player, slotId);
+            default -> handleBuilderClick(player, slotId, rightClick);
         };
     }
 
@@ -299,7 +306,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         return true;
     }
 
-    private boolean handleBuilderClick(ServerPlayer player, int slotId) {
+    private boolean handleBuilderClick(ServerPlayer player, int slotId, boolean rightClick) {
         if (slotId >= 0 && slotId < BuildMode.values().length) {
             BuildToolsState.setMode(player, BuildMode.values()[slotId]);
             return true;
@@ -311,13 +318,13 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case 6 -> MaterialChecklistMenu.open(player);
             case 8 -> HelpMenu.open(player);
             default -> {
-                return handleShapeClick(player, slotId, SHAPE_START_SLOT);
+                return handleShapeClick(player, slotId, SHAPE_START_SLOT, rightClick);
             }
         }
         return true;
     }
 
-    private boolean handleSelectionClick(ServerPlayer player, int slotId) {
+    private boolean handleSelectionClick(ServerPlayer player, int slotId, boolean rightClick) {
         switch (slotId) {
             case 0 -> BuildToolsState.nudgeSelection(player, Direction.WEST);
             case 1 -> BuildToolsState.nudgeSelection(player, Direction.EAST);
@@ -332,7 +339,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case 23 -> PresetLibraryMenu.open(player);
             case 24 -> HelpMenu.open(player);
             default -> {
-                return handleShapeClick(player, slotId, SHAPE_START_SLOT);
+                return handleShapeClick(player, slotId, SHAPE_START_SLOT, rightClick);
             }
         }
         return true;
@@ -353,7 +360,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         return true;
     }
 
-    private boolean handleBreakerClick(ServerPlayer player, int slotId) {
+    private boolean handleBreakerClick(ServerPlayer player, int slotId, boolean rightClick) {
         switch (slotId) {
             case 0 -> BuildToolsState.clearSelection(player);
             case 1 -> BuildToolsState.rotateSelection(player);
@@ -363,7 +370,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case 5 -> BuildToolsState.setAreaBreakerPreset(player, AreaBreakerPreset.CLEAR_SNOW_CROPS);
             case 8 -> HelpMenu.open(player);
             default -> {
-                return handleShapeClick(player, slotId, SHAPE_START_SLOT);
+                return handleShapeClick(player, slotId, SHAPE_START_SLOT, rightClick);
             }
         }
         return true;
@@ -396,12 +403,12 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         return true;
     }
 
-    private boolean handleShapeClick(ServerPlayer player, int slotId, int startSlot) {
+    private boolean handleShapeClick(ServerPlayer player, int slotId, int startSlot, boolean rightClick) {
         int shapeIndex = slotId - startSlot;
         SelectionShape[] shapes = visibleShapes();
         if (shapeIndex >= 0 && shapeIndex < shapes.length) {
             SelectionShape shape = shapes[shapeIndex];
-            if (BuildToolsState.selectionShape(player) == shape && handleSelectedShapeOptionClick(player, shape)) {
+            if (BuildToolsState.selectionShape(player) == shape && handleSelectedShapeOptionClick(player, shape, rightClick)) {
                 return true;
             }
             BuildToolsState.setShape(player, shapes[shapeIndex]);
@@ -410,10 +417,14 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         return false;
     }
 
-    private static boolean handleSelectedShapeOptionClick(ServerPlayer player, SelectionShape shape) {
+    private static boolean handleSelectedShapeOptionClick(ServerPlayer player, SelectionShape shape, boolean rightClick) {
         return switch (shape) {
             case ARCH -> {
-                BuildToolsState.toggleArchEdgeWalls(player);
+                if (rightClick) {
+                    BuildToolsState.cycleArchDirection(player);
+                } else {
+                    BuildToolsState.cycleArchMode(player);
+                }
                 yield true;
             }
             case SPHERE, ELLIPSOID -> {
@@ -434,6 +445,11 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         populateMenuItems();
     }
 
+    public void adjustStairDirection(ServerPlayer player, int delta) {
+        BuildToolsState.cycleStairDirection(player, delta);
+        populateMenuItems();
+    }
+
     private SelectionShape[] visibleShapes() {
         return owner == null ? SelectionShape.basicShapes() : BuildToolsState.availableShapes(owner);
     }
@@ -446,12 +462,31 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         return slot == SHAPE_START_SLOT + SelectionShape.ARCH.ordinal();
     }
 
+    public static boolean isStairShapeSlot(int slot) {
+        return slot == SHAPE_START_SLOT + SelectionShape.STAIRS.ordinal();
+    }
+
     public boolean isRoadShapeSlot(Slot slot) {
-        return isRoadShapeSlot(this.slots.indexOf(slot));
+        return isShapeSlot(slot, SelectionShape.ROAD);
     }
 
     public boolean isArchShapeSlot(Slot slot) {
-        return isArchShapeSlot(this.slots.indexOf(slot));
+        return isShapeSlot(slot, SelectionShape.ARCH);
+    }
+
+    public boolean isStairShapeSlot(Slot slot) {
+        return isShapeSlot(slot, SelectionShape.STAIRS);
+    }
+
+    private boolean isShapeSlot(Slot slot, SelectionShape shape) {
+        int slotId = this.slots.indexOf(slot);
+        SelectionShape[] shapes = visibleShapes();
+        for (int i = 0; i < shapes.length; i++) {
+            if (shapes[i] == shape) {
+                return slotId == SHAPE_START_SLOT + i;
+            }
+        }
+        return false;
     }
 
     private static ItemStack shapeIcon(SelectionShape shape) {

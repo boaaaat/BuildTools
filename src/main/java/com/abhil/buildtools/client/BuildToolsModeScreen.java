@@ -2,6 +2,7 @@ package com.abhil.buildtools.client;
 
 import com.abhil.buildtools.network.ArchPeakPayload;
 import com.abhil.buildtools.network.RoadWidthPayload;
+import com.abhil.buildtools.network.StairDirectionPayload;
 import com.abhil.buildtools.server.BuildToolsModeMenu;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
@@ -47,6 +48,11 @@ public final class BuildToolsModeScreen extends AbstractContainerScreen<BuildToo
         if (slot != null && this.menu.isArchShapeSlot(slot) && slot.getItem().is(Items.STONE_BRICK_STAIRS)) {
             int step = scrollY >= 0.0D ? 1 : -1;
             PacketDistributor.sendToServer(new ArchPeakPayload(step));
+            return true;
+        }
+        if (slot != null && this.menu.isStairShapeSlot(slot) && slot.getItem().is(Items.STONE_STAIRS)) {
+            int step = scrollY >= 0.0D ? 1 : -1;
+            PacketDistributor.sendToServer(new StairDirectionPayload(step));
             return true;
         }
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);

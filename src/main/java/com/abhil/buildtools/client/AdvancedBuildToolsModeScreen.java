@@ -1,8 +1,10 @@
 package com.abhil.buildtools.client;
 
 import com.abhil.buildtools.network.ArchPeakPayload;
+import com.abhil.buildtools.network.GradientDirectionPayload;
 import com.abhil.buildtools.network.PaletteWeightPayload;
 import com.abhil.buildtools.network.RoadWidthPayload;
+import com.abhil.buildtools.network.StairDirectionPayload;
 import com.abhil.buildtools.server.AdvancedBuildToolsModeMenu;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
@@ -48,6 +50,16 @@ public final class AdvancedBuildToolsModeScreen extends AbstractContainerScreen<
         if (slot != null && this.menu.isArchShapeSlot(slot) && slot.getItem().is(Items.STONE_BRICK_STAIRS)) {
             int step = scrollY >= 0.0D ? 1 : -1;
             PacketDistributor.sendToServer(new ArchPeakPayload(step));
+            return true;
+        }
+        if (slot != null && this.menu.isStairShapeSlot(slot) && slot.getItem().is(Items.STONE_STAIRS)) {
+            int step = scrollY >= 0.0D ? 1 : -1;
+            PacketDistributor.sendToServer(new StairDirectionPayload(step));
+            return true;
+        }
+        if (slot != null && this.menu.isGradientSlot(slot) && slot.getItem().is(Items.POWDER_SNOW_BUCKET)) {
+            int step = scrollY >= 0.0D ? 1 : -1;
+            PacketDistributor.sendToServer(new GradientDirectionPayload(step));
             return true;
         }
         if (slot != null && AdvancedBuildToolsModeMenu.isPaletteSlot(slot.index) && !slot.getItem().isEmpty()) {

@@ -4,6 +4,8 @@ import com.abhil.buildtools.network.BuildToolsNetworking;
 import com.abhil.buildtools.network.PreviewPayload;
 import com.abhil.buildtools.network.SelectionSyncPayload;
 import com.abhil.buildtools.registry.ModItems;
+import com.abhil.buildtools.shape.ArchDirection;
+import com.abhil.buildtools.shape.ArchMode;
 import com.abhil.buildtools.shape.BrushMode;
 import com.abhil.buildtools.shape.BuildMode;
 import com.abhil.buildtools.shape.CustomShapeMode;
@@ -72,7 +74,8 @@ public final class BuildToolsState {
     private static final Map<UUID, EnumMap<ToolProfile, BrushMode>> BRUSH_MODES = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, Integer>> BRUSH_RADII = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, Integer>> ROAD_WIDTHS = new HashMap<>();
-    private static final Map<UUID, EnumMap<ToolProfile, Boolean>> ARCH_EDGE_WALLS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, ArchMode>> ARCH_MODES = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, ArchDirection>> ARCH_DIRECTIONS = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, Integer>> ARCH_PEAKS = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, Boolean>> SPHERE_HOLLOW = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, Boolean>> ELLIPSOID_HOLLOW = new HashMap<>();
@@ -97,6 +100,7 @@ public final class BuildToolsState {
     private static final int ADVANCED_SELECTION_ACTION_COOLDOWN = 6;
     private static final double ADVANCED_SELECTION_DISTANCE = 100.0D;
     private static final double ADVANCED_POINT_PICK_DISTANCE_SQR = 6.25D;
+    private static final double ADVANCED_POINT_RAY_PICK_DISTANCE_SQR = 1.0D;
     public static final int MAX_SAVED_BLUEPRINTS = 45;
     private static final int MAX_BLUEPRINT_NAME_LENGTH = 32;
 
@@ -128,7 +132,15 @@ public final class BuildToolsState {
     }
 
     public static boolean archEdgeWalls(ServerPlayer player) {
-        return archEdgeWallModes(player).getOrDefault(activeProfile(player), false);
+        return archMode(player) == ArchMode.EDGE_WALLS;
+    }
+
+    public static ArchMode archMode(ServerPlayer player) {
+        return archModes(player).getOrDefault(activeProfile(player), ArchMode.OPEN);
+    }
+
+    public static ArchDirection archDirection(ServerPlayer player) {
+        return archDirections(player).getOrDefault(activeProfile(player), ArchDirection.X);
     }
 
     public static int archPeak(ServerPlayer player) {
@@ -185,7 +197,11 @@ public final class BuildToolsState {
     }
 
     public static SelectionShape[] availableShapes(ServerPlayer player) {
-        return switch (activeProfile(player)) {
+        return availableShapes(activeProfile(player));
+    }
+
+    private static SelectionShape[] availableShapes(ToolProfile profile) {
+        return switch (profile) {
             case ADVANCED_SELECTION -> SelectionShape.advancedSelectionShapes();
             case ADVANCED_BUILDER, BREAKER -> SelectionShape.shapesWithStairs();
             default -> SelectionShape.basicShapes();
@@ -268,7 +284,12 @@ public final class BuildToolsState {
     }
 
     public static void setShape(ServerPlayer player, SelectionShape shape) {
-        shapes(player).put(activeProfile(player), shape);
+        EnumMap<ToolProfile, SelectionShape> shapes = shapes(player);
+        for (ToolProfile profile : ToolProfile.values()) {
+            if (supportsShape(profile, shape)) {
+                shapes.put(profile, shape);
+            }
+        }
         Selection selection = selection(player).withShape(shape);
         SELECTIONS.put(player.getUUID(), selection);
         BuildOperationEngine.clearPendingOperation(player);
@@ -773,6 +794,24 @@ public final class BuildToolsState {
         int maxZ = Math.max(selection.first().getZ(), selection.second().getZ());
 
         int delta = amount >= 0 ? 1 : -1;
+        if (!selection.points().isEmpty()) {
+            BlockPos offset = BlockPos.ZERO.offset(direction.getNormal()).multiply(delta);
+            int pointMinX = minX;
+            int pointMinY = minY;
+            int pointMinZ = minZ;
+            int pointMaxX = maxX;
+            int pointMaxY = maxY;
+            int pointMaxZ = maxZ;
+            List<BlockPos> resizedPoints = selection.points().stream()
+                    .map(point -> isBoundaryPoint(point, direction, pointMinX, pointMinY, pointMinZ, pointMaxX, pointMaxY, pointMaxZ)
+                            ? point.offset(offset)
+                            : point)
+                    .toList();
+            setAdvancedPoints(player, resizedPoints);
+            player.displayClientMessage(Component.translatable(amount >= 0 ? "buildtools.message.selection_expanded" : "buildtools.message.selection_shrunk", DirectionDisplay.direction(player, direction)), true);
+            return;
+        }
+
         switch (direction) {
             case EAST -> maxX += delta;
             case WEST -> minX -= delta;
@@ -795,6 +834,17 @@ public final class BuildToolsState {
         BuildOperationEngine.clearPendingOperation(player);
         sync(player);
         player.displayClientMessage(Component.translatable(amount >= 0 ? "buildtools.message.selection_expanded" : "buildtools.message.selection_shrunk", DirectionDisplay.direction(player, direction)), true);
+    }
+
+    private static boolean isBoundaryPoint(BlockPos point, Direction direction, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
+        return switch (direction) {
+            case EAST -> point.getX() == maxX;
+            case WEST -> point.getX() == minX;
+            case UP -> point.getY() == maxY;
+            case DOWN -> point.getY() == minY;
+            case SOUTH -> point.getZ() == maxZ;
+            case NORTH -> point.getZ() == minZ;
+        };
     }
 
     public static void savePreset(ServerPlayer player) {
@@ -1101,12 +1151,24 @@ public final class BuildToolsState {
         sendPreview(player);
     }
 
-    public static void toggleArchEdgeWalls(ServerPlayer player) {
-        boolean enabled = !archEdgeWalls(player);
-        archEdgeWallModes(player).put(activeProfile(player), enabled);
+    public static void cycleArchMode(ServerPlayer player) {
+        ArchMode mode = archMode(player).next();
+        archModes(player).put(activeProfile(player), mode);
         BuildOperationEngine.clearPendingOperation(player);
-        player.displayClientMessage(Component.translatable("buildtools.message.arch_edge_walls", archEdgeModeName(enabled)), true);
+        player.displayClientMessage(Component.translatable("buildtools.message.arch_mode", archModeName(mode)), true);
         sendPreview(player);
+    }
+
+    public static void cycleArchDirection(ServerPlayer player) {
+        ArchDirection direction = archDirection(player).next();
+        archDirections(player).put(activeProfile(player), direction);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.arch_direction", direction.displayName()), true);
+        sendPreview(player);
+    }
+
+    public static void toggleArchEdgeWalls(ServerPlayer player) {
+        cycleArchMode(player);
     }
 
     public static void changeArchPeak(ServerPlayer player, int delta) {
@@ -1142,7 +1204,11 @@ public final class BuildToolsState {
     }
 
     public static void cycleGradientDirection(ServerPlayer player) {
-        GradientDirection next = gradientDirection(player).next();
+        cycleGradientDirection(player, 1);
+    }
+
+    public static void cycleGradientDirection(ServerPlayer player, int step) {
+        GradientDirection next = gradientDirection(player).next(step);
         gradientDirections(player).put(activeProfile(player), next);
         BuildOperationEngine.clearPendingOperation(player);
         player.displayClientMessage(Component.translatable("buildtools.message.gradient_direction", DirectionDisplay.gradientDirection(player, next)), true);
@@ -1323,7 +1389,9 @@ public final class BuildToolsState {
     }
 
     public static Optional<BlockPos> advancedSelectionTarget(ServerPlayer player) {
-        return advancedSelectionHit(player).map(BlockHitResult::getBlockPos);
+        Optional<BlockHitResult> hit = advancedSelectionHit(player);
+        Optional<BlockPos> point = advancedPointTarget(player, hit);
+        return point.or(() -> hit.map(BlockHitResult::getBlockPos));
     }
 
     private static Optional<BlockHitResult> advancedSelectionHit(ServerPlayer player) {
@@ -1336,6 +1404,37 @@ public final class BuildToolsState {
                 ClipContext.Fluid.NONE,
                 player));
         return hit.getType() == HitResult.Type.BLOCK ? Optional.of(hit) : Optional.empty();
+    }
+
+    private static Optional<BlockPos> advancedPointTarget(ServerPlayer player, Optional<BlockHitResult> hit) {
+        List<BlockPos> points = ADVANCED_POINTS.getOrDefault(player.getUUID(), List.of());
+        if (points.isEmpty()) {
+            return Optional.empty();
+        }
+        Vec3 start = player.getEyePosition();
+        Vec3 view = player.getViewVector(1.0F).normalize();
+        double maxDistance = hit
+                .map(blockHit -> Math.sqrt(blockHit.getLocation().distanceToSqr(start)) + 0.5D)
+                .orElse(ADVANCED_SELECTION_DISTANCE);
+        BlockPos best = null;
+        double bestAlong = Double.MAX_VALUE;
+        double bestDistance = ADVANCED_POINT_RAY_PICK_DISTANCE_SQR;
+        for (BlockPos point : points) {
+            Vec3 center = Vec3.atCenterOf(point);
+            Vec3 offset = center.subtract(start);
+            double along = offset.dot(view);
+            if (along < 0.0D || along > maxDistance) {
+                continue;
+            }
+            Vec3 closest = start.add(view.scale(along));
+            double distance = center.distanceToSqr(closest);
+            if (distance <= bestDistance || distance == bestDistance && along < bestAlong) {
+                bestDistance = distance;
+                bestAlong = along;
+                best = point;
+            }
+        }
+        return Optional.ofNullable(best);
     }
 
     public static void rotateSelection(ServerPlayer player) {
@@ -1638,7 +1737,25 @@ public final class BuildToolsState {
     }
 
     private static SelectionShape shape(ServerPlayer player) {
-        return shapes(player).getOrDefault(activeProfile(player), selection(player).shape());
+        ToolProfile profile = activeProfile(player);
+        SelectionShape saved = shapes(player).get(profile);
+        if (saved != null && supportsShape(profile, saved)) {
+            return saved;
+        }
+        SelectionShape selectionShape = selection(player).shape();
+        if (supportsShape(profile, selectionShape)) {
+            return selectionShape;
+        }
+        return availableShapes(profile)[0];
+    }
+
+    private static boolean supportsShape(ToolProfile profile, SelectionShape shape) {
+        for (SelectionShape available : availableShapes(profile)) {
+            if (available == shape) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static ToolProfile activeProfile(ServerPlayer player) {
@@ -1675,8 +1792,12 @@ public final class BuildToolsState {
         return Math.max(MIN_ROAD_WIDTH, Math.min(MAX_ROAD_WIDTH, width));
     }
 
-    private static EnumMap<ToolProfile, Boolean> archEdgeWallModes(ServerPlayer player) {
-        return ARCH_EDGE_WALLS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    private static EnumMap<ToolProfile, ArchMode> archModes(ServerPlayer player) {
+        return ARCH_MODES.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, ArchDirection> archDirections(ServerPlayer player) {
+        return ARCH_DIRECTIONS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
     }
 
     private static EnumMap<ToolProfile, Integer> archPeaks(ServerPlayer player) {
@@ -1698,14 +1819,15 @@ public final class BuildToolsState {
     private static ShapeGenerator.Options shapeOptions(ServerPlayer player) {
         return new ShapeGenerator.Options(
                 roadWidth(player),
-                archEdgeWalls(player),
+                archMode(player),
                 archPeak(player),
+                archDirection(player),
                 sphereHollow(player),
                 ellipsoidHollow(player));
     }
 
-    private static Component archEdgeModeName(boolean enabled) {
-        return Component.translatable(enabled ? "buildtools.arch_edge_walls.on" : "buildtools.arch_edge_walls.off");
+    private static Component archModeName(ArchMode mode) {
+        return mode.displayName();
     }
 
     private static Component hollowModeName(boolean hollow) {
@@ -1744,7 +1866,8 @@ public final class BuildToolsState {
         tag.put("brushModes", writeEnumMap(BRUSH_MODES.get(uuid)));
         tag.put("brushRadii", writeIntMap(BRUSH_RADII.get(uuid)));
         tag.put("roadWidths", writeIntMap(ROAD_WIDTHS.get(uuid)));
-        tag.put("archEdgeWalls", writeBooleanMap(ARCH_EDGE_WALLS.get(uuid)));
+        tag.put("archModes", writeEnumMap(ARCH_MODES.get(uuid)));
+        tag.put("archDirections", writeEnumMap(ARCH_DIRECTIONS.get(uuid)));
         tag.put("archPeaks", writeIntMap(ARCH_PEAKS.get(uuid)));
         tag.put("sphereHollow", writeBooleanMap(SPHERE_HOLLOW.get(uuid)));
         tag.put("ellipsoidHollow", writeBooleanMap(ELLIPSOID_HOLLOW.get(uuid)));
@@ -1796,7 +1919,13 @@ public final class BuildToolsState {
         readBrushModes(tag.getList("brushModes", Tag.TAG_COMPOUND)).ifPresent(map -> BRUSH_MODES.put(uuid, map));
         readIntMap(tag.getList("brushRadii", Tag.TAG_COMPOUND)).ifPresent(map -> BRUSH_RADII.put(uuid, map));
         readIntMap(tag.getList("roadWidths", Tag.TAG_COMPOUND)).ifPresent(map -> ROAD_WIDTHS.put(uuid, map));
-        readBooleanMap(tag.getList("archEdgeWalls", Tag.TAG_COMPOUND)).ifPresent(map -> ARCH_EDGE_WALLS.put(uuid, map));
+        Optional<EnumMap<ToolProfile, ArchMode>> archModes = readArchModes(tag.getList("archModes", Tag.TAG_COMPOUND));
+        if (archModes.isPresent()) {
+            ARCH_MODES.put(uuid, archModes.get());
+        } else {
+            readBooleanMap(tag.getList("archEdgeWalls", Tag.TAG_COMPOUND)).ifPresent(map -> ARCH_MODES.put(uuid, legacyArchModes(map)));
+        }
+        readArchDirections(tag.getList("archDirections", Tag.TAG_COMPOUND)).ifPresent(map -> ARCH_DIRECTIONS.put(uuid, map));
         readIntMap(tag.getList("archPeaks", Tag.TAG_COMPOUND)).ifPresent(map -> ARCH_PEAKS.put(uuid, map));
         readBooleanMap(tag.getList("sphereHollow", Tag.TAG_COMPOUND)).ifPresent(map -> SPHERE_HOLLOW.put(uuid, map));
         readBooleanMap(tag.getList("ellipsoidHollow", Tag.TAG_COMPOUND)).ifPresent(map -> ELLIPSOID_HOLLOW.put(uuid, map));
@@ -1884,7 +2013,8 @@ public final class BuildToolsState {
         BRUSH_MODES.remove(uuid);
         BRUSH_RADII.remove(uuid);
         ROAD_WIDTHS.remove(uuid);
-        ARCH_EDGE_WALLS.remove(uuid);
+        ARCH_MODES.remove(uuid);
+        ARCH_DIRECTIONS.remove(uuid);
         ARCH_PEAKS.remove(uuid);
         SPHERE_HOLLOW.remove(uuid);
         ELLIPSOID_HOLLOW.remove(uuid);
@@ -2011,6 +2141,20 @@ public final class BuildToolsState {
 
     private static Optional<EnumMap<ToolProfile, GradientDirection>> readGradientDirections(ListTag list) {
         return readEnumMap(list, GradientDirection.class);
+    }
+
+    private static Optional<EnumMap<ToolProfile, ArchMode>> readArchModes(ListTag list) {
+        return readEnumMap(list, ArchMode.class);
+    }
+
+    private static Optional<EnumMap<ToolProfile, ArchDirection>> readArchDirections(ListTag list) {
+        return readEnumMap(list, ArchDirection.class);
+    }
+
+    private static EnumMap<ToolProfile, ArchMode> legacyArchModes(EnumMap<ToolProfile, Boolean> map) {
+        EnumMap<ToolProfile, ArchMode> modes = new EnumMap<>(ToolProfile.class);
+        map.forEach((profile, enabled) -> modes.put(profile, enabled ? ArchMode.EDGE_WALLS : ArchMode.OPEN));
+        return modes;
     }
 
     private static <E extends Enum<E>> Optional<EnumMap<ToolProfile, E>> readEnumMap(ListTag list, Class<E> enumClass) {
