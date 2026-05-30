@@ -57,15 +57,6 @@ public record ScrollToolPayload(int direction, boolean alternate) implements Cus
             }
         } else if (held.is(ModItems.SELECTION_STAFF.get())) {
             BuildToolsState.cycleShape(player);
-        } else if (held.is(ModItems.BUILDER_BRUSH.get())) {
-            if (!payload.alternate()) {
-                BuildToolsState.changeBrushRadius(player, step);
-            } else if (BuildToolsState.brushMode(player) == com.abhil.buildtools.shape.BrushMode.SCATTER
-                    || BuildToolsState.brushMode(player) == com.abhil.buildtools.shape.BrushMode.BLEND) {
-                BuildToolsState.changeBrushDensity(player, step);
-            } else {
-                BuildToolsState.changeBrushDepth(player, step);
-            }
         } else if (held.is(ModItems.ADVANCED_BUILDER_WAND.get())) {
             if (BuildToolsState.selectionShape(player) == SelectionShape.STAIRS) {
                 BuildToolsState.cycleStairDirection(player, step);

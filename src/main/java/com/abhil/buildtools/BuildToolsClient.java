@@ -208,14 +208,15 @@ public final class BuildToolsClient {
         addHint(lines, "Nudge Y", RELATIVE_NUDGE_UP, RELATIVE_NUDGE_DOWN);
         if (isShapeControlTool(stack)) {
             addHint(lines, "Shape", PREVIOUS_SHAPE, NEXT_SHAPE);
-            addHint(lines, "Option", ADJUST_OPTION_DOWN, ADJUST_OPTION_UP);
+            if (stack.is(ModItems.BUILDER_BRUSH.get())) {
+                addHint(lines, "Brush Size", ADJUST_OPTION_DOWN, ADJUST_OPTION_UP);
+            } else {
+                addHint(lines, "Option", ADJUST_OPTION_DOWN, ADJUST_OPTION_UP);
+            }
             addHint(lines, "Toggle", TOGGLE_SHAPE_OPTION);
         }
         if (isModeControlTool(stack)) {
             addHint(lines, "Mode", PREVIOUS_MODE, NEXT_MODE);
-        }
-        if (stack.is(ModItems.BUILDER_BRUSH.get())) {
-            addHint(lines, "Brush Size", ADJUST_OPTION_DOWN, ADJUST_OPTION_UP);
         }
         addHint(lines, "Confirm", CONFIRM_PREVIEW);
         addHint(lines, "Cancel", CANCEL_PREVIEW);
@@ -235,10 +236,22 @@ public final class BuildToolsClient {
         List<String> names = new ArrayList<>();
         for (KeyMapping key : keys) {
             if (!key.isUnbound()) {
-                names.add(key.getTranslatedKeyMessage().getString());
+                names.add(shortKeyName(key.getTranslatedKeyMessage().getString()));
             }
         }
         return String.join("/", names);
+    }
+
+    private static String shortKeyName(String name) {
+        return switch (name) {
+            case "Left Arrow" -> "Left";
+            case "Right Arrow" -> "Right";
+            case "Up Arrow" -> "Up";
+            case "Down Arrow" -> "Down";
+            case "Page Up" -> "PgUp";
+            case "Page Down" -> "PgDn";
+            default -> name;
+        };
     }
 
     private static int shortcutAmount() {
@@ -278,12 +291,6 @@ public final class BuildToolsClient {
             return;
         }
         ItemStack held = minecraft.player.getMainHandItem();
-        if (held.is(ModItems.BUILDER_BRUSH.get()) && minecraft.hitResult.getType() == HitResult.Type.BLOCK) {
-            PacketDistributor.sendToServer(new ShortcutActionPayload("apply_brush", "", 0));
-            event.setSwingHand(false);
-            event.setCanceled(true);
-            return;
-        }
         if (held.is(ModItems.ADVANCED_SELECTION_STAFF.get())) {
             if (advancedSelectionAttackDown) {
                 event.setSwingHand(false);
@@ -312,7 +319,6 @@ public final class BuildToolsClient {
                 || stack.is(ModItems.ADVANCED_SELECTION_STAFF.get())
                 || stack.is(ModItems.BUILDER_WAND.get())
                 || stack.is(ModItems.ADVANCED_BUILDER_WAND.get())
-                || stack.is(ModItems.BUILDER_BRUSH.get())
                 || stack.is(ModItems.AREA_BREAKER.get());
     }
 

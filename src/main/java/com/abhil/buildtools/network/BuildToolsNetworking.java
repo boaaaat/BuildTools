@@ -16,6 +16,7 @@ public final class BuildToolsNetworking {
         registrar.playToClient(ToolStatusPayload.TYPE, ToolStatusPayload.STREAM_CODEC, ToolStatusPayload::handle);
         registrar.playToServer(ArchPeakPayload.TYPE, ArchPeakPayload.STREAM_CODEC, ArchPeakPayload::handle);
         registrar.playToServer(AdvancedSelectionActionPayload.TYPE, AdvancedSelectionActionPayload.STREAM_CODEC, AdvancedSelectionActionPayload::handle);
+        registrar.playToServer(BrushSettingPayload.TYPE, BrushSettingPayload.STREAM_CODEC, BrushSettingPayload::handle);
         registrar.playToServer(GradientDirectionPayload.TYPE, GradientDirectionPayload.STREAM_CODEC, GradientDirectionPayload::handle);
         registrar.playToServer(PaletteWeightPayload.TYPE, PaletteWeightPayload.STREAM_CODEC, PaletteWeightPayload::handle);
         registrar.playToServer(RequestPreviewPayload.TYPE, RequestPreviewPayload.STREAM_CODEC, RequestPreviewPayload::handle);

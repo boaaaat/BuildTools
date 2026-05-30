@@ -199,7 +199,7 @@ public final class BuildToolActionbar {
                 + " | Density: " + BuildToolsState.brushDensity(player) + "%"
                 + " | Block: " + offhand
                 + " | Target: " + BuildToolsState.brushReplaceTarget(player).getBlock().getName().getString()
-                + " | Left-click: preview/apply | Right-click: pick target | Sneak right-click: menu");
+                + " | Right-click: preview/apply | Sneak right-click: pick target | Left-click: menu");
     }
 
     private static Component breakerMessage(ServerPlayer player) {

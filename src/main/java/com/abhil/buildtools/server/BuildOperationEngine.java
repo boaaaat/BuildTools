@@ -1000,8 +1000,7 @@ public final class BuildOperationEngine {
                 continue;
             }
             if (!matchesHistoryState(level, entry.pos(), entry.previousState(), entry.previousBlockEntity())) {
-                failHistoryConflict(player, entry.pos());
-                return false;
+                continue;
             }
             BlockState previous = level.getBlockState(entry.pos());
             positions.add(entry.pos().immutable());
@@ -1018,12 +1017,14 @@ public final class BuildOperationEngine {
             addUndoRefund(refund, entry.redoneState());
         }
         if (positions.isEmpty() && snapshot.removedEntities().isEmpty() && snapshot.addedEntities().isEmpty()) {
-            fail(player, "buildtools.error.no_targets");
-            return false;
+            BuildToolsState.takeRedo(player);
+            player.displayClientMessage(Component.translatable("buildtools.message.redo", 0), true);
+            return true;
         }
 
         boolean trackHistory = hasHistoryItems(player);
-        boolean queued = enqueue(player, level, positions, targets, copyBlockEntities(targetBlockEntities), List.copyOf(undoEntries), StoredItems.copyOf(refund), snapshot.producedDrops(), snapshot.removedEntities(), snapshot.addedEntities(), trackHistory, true);
+        List<ItemStack> producedDrops = withEntityDrops(dropsForChanges(player, level, undoEntries), snapshot.removedEntities());
+        boolean queued = enqueue(player, level, positions, targets, copyBlockEntities(targetBlockEntities), List.copyOf(undoEntries), StoredItems.copyOf(refund), producedDrops, snapshot.removedEntities(), snapshot.addedEntities(), trackHistory, true);
         if (queued) {
             BuildToolsState.takeRedo(player);
         }
@@ -1136,13 +1137,13 @@ public final class BuildOperationEngine {
     }
 
     private static String durabilityPreviewLine(ServerPlayer player, PendingOperation operation) {
-        ItemStack tool = activeDurabilityTool(player);
+        ItemStack tool = activeDurabilityTool(player, operation.undo(), operation.canBreak());
         if (tool.isEmpty() || !tool.isDamageableItem() || player.gameMode.isCreative()) {
             return "";
         }
         DurabilityBreakdown breakdown = durabilityBreakdown(player, player.serverLevel(), operation.undo(), operation.positions().size(), operation.canBreak());
         int cost = breakdown.totalCost();
-        int remaining = remainingDurability(tool);
+        int remaining = remainingDurabilityForOperation(player, operation.undo(), operation.canBreak(), tool);
         if (breakdown.miningBlocks() > 0 || breakdown.builtBlocks() > 0) {
             return "Break cost: " + breakdown.builtBlocks() + " built, " + breakdown.softBlocks() + " soft, " + breakdown.hardBlocks() + " hard, " + breakdown.resourceBlocks() + " ore/log | total: " + cost + " | remaining: " + remaining;
         }
@@ -1183,7 +1184,7 @@ public final class BuildOperationEngine {
             return false;
         }
         int durabilityCost = durabilityBreakdown(player, level, undo, positions.size(), canBreak).totalCost();
-        if (!hasDurabilityForOperation(player, durabilityCost)) {
+        if (!hasDurabilityForOperation(player, undo, canBreak, durabilityCost)) {
             return false;
         }
         BlockCostPlan costPlan = BlockCostPlan.create(player, targets);
@@ -1192,7 +1193,7 @@ public final class BuildOperationEngine {
             return false;
         }
         costPlan.consume(player);
-        damageOperationTool(player, durabilityCost);
+        damageOperationTool(player, undo, canBreak, durabilityCost);
         if (canBreak) {
             removeCapturedEntities(level, removedEntities);
         }
@@ -1224,10 +1225,10 @@ public final class BuildOperationEngine {
             return false;
         }
         int durabilityCost = durabilityBreakdown(player, level, undo, positions.size(), canBreak).totalCost();
-        if (!hasDurabilityForOperation(player, durabilityCost)) {
+        if (!hasDurabilityForOperation(player, undo, canBreak, durabilityCost)) {
             return false;
         }
-        damageOperationTool(player, durabilityCost);
+        damageOperationTool(player, undo, canBreak, durabilityCost);
         if (canBreak) {
             removeCapturedEntities(level, removedEntities);
         }
@@ -1416,8 +1417,7 @@ public final class BuildOperationEngine {
             if (matchesHistoryState(level, entry.pos(), entry.previousState(), entry.previousBlockEntity())) {
                 continue;
             }
-            failHistoryConflict(player, entry.pos());
-            return null;
+            continue;
         }
         return new HistoryReconciliation(List.copyOf(entries), StoredItems.copyOf(refund));
     }
@@ -1439,10 +1439,6 @@ public final class BuildOperationEngine {
         normalized.remove("y");
         normalized.remove("z");
         return normalized;
-    }
-
-    private static void failHistoryConflict(ServerPlayer player, BlockPos pos) {
-        fail(player, Component.translatable("buildtools.error.history_conflict", pos.toShortString()));
     }
 
     private static CompoundTag captureBlockEntity(ServerLevel level, BlockPos pos) {
@@ -2010,7 +2006,7 @@ public final class BuildOperationEngine {
     }
 
     private static int durabilityCost(int blockChanges) {
-        return 1 + Math.max(0, blockChanges) / 400;
+        return 1 + Math.max(0, blockChanges) / 250;
     }
 
     private static DurabilityBreakdown durabilityBreakdown(ServerPlayer player, ServerLevel level, List<UndoSnapshot.Entry> undo, int blockChanges, boolean areaBreaker) {
@@ -2071,12 +2067,19 @@ public final class BuildOperationEngine {
                 && !redone.is(previous.getBlock());
     }
 
-    private static boolean hasDurabilityForOperation(ServerPlayer player, int cost) {
-        ItemStack tool = activeDurabilityTool(player);
+    private static boolean hasDurabilityForOperation(ServerPlayer player, List<UndoSnapshot.Entry> undo, boolean canBreak, int cost) {
+        if (player.gameMode.isCreative()) {
+            return true;
+        }
+        if (requiresInventoryAreaBreaker(player, undo, canBreak) && inventoryAreaBreaker(player).isEmpty()) {
+            fail(player, "buildtools.error.brush_needs_area_breaker");
+            return false;
+        }
+        ItemStack tool = activeDurabilityTool(player, undo, canBreak);
         if (tool.isEmpty() || !tool.isDamageableItem() || player.gameMode.isCreative()) {
             return true;
         }
-        int remaining = remainingDurability(tool);
+        int remaining = remainingDurabilityForOperation(player, undo, canBreak, tool);
         if (cost <= remaining) {
             return true;
         }
@@ -2084,8 +2087,12 @@ public final class BuildOperationEngine {
         return false;
     }
 
-    private static void damageOperationTool(ServerPlayer player, int cost) {
+    private static void damageOperationTool(ServerPlayer player, List<UndoSnapshot.Entry> undo, boolean canBreak, int cost) {
         if (player.gameMode.isCreative()) {
+            return;
+        }
+        if (usesAreaBreakerDurabilityPool(player, undo, canBreak)) {
+            damageAreaBreakers(player, cost);
             return;
         }
         if (!damageOperationTool(player, InteractionHand.MAIN_HAND, cost)) {
@@ -2103,7 +2110,10 @@ public final class BuildOperationEngine {
         return true;
     }
 
-    private static ItemStack activeDurabilityTool(ServerPlayer player) {
+    private static ItemStack activeDurabilityTool(ServerPlayer player, List<UndoSnapshot.Entry> undo, boolean canBreak) {
+        if (requiresInventoryAreaBreaker(player, undo, canBreak)) {
+            return inventoryAreaBreaker(player);
+        }
         ItemStack mainHand = player.getMainHandItem();
         if (isDurabilityOperationTool(mainHand)) {
             return mainHand;
@@ -2120,6 +2130,78 @@ public final class BuildOperationEngine {
             case BUILDER, ADVANCED_BUILDER, BRUSH, BREAKER, TROWEL -> true;
             default -> false;
         };
+    }
+
+    private static boolean requiresInventoryAreaBreaker(ServerPlayer player, List<UndoSnapshot.Entry> undo, boolean canBreak) {
+        return canBreak
+                && player.getMainHandItem().is(com.abhil.buildtools.registry.ModItems.BUILDER_BRUSH.get())
+                && operationMinesBlocks(undo);
+    }
+
+    private static boolean usesAreaBreakerDurabilityPool(ServerPlayer player, List<UndoSnapshot.Entry> undo, boolean canBreak) {
+        return canBreak
+                && (player.getMainHandItem().is(com.abhil.buildtools.registry.ModItems.AREA_BREAKER.get())
+                        || requiresInventoryAreaBreaker(player, undo, canBreak));
+    }
+
+    private static boolean operationMinesBlocks(List<UndoSnapshot.Entry> undo) {
+        for (UndoSnapshot.Entry entry : undo) {
+            if (minesBlock(entry.previousState(), entry.redoneState())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static ItemStack inventoryAreaBreaker(ServerPlayer player) {
+        for (ItemStack stack : player.getInventory().items) {
+            if (stack.is(com.abhil.buildtools.registry.ModItems.AREA_BREAKER.get())) {
+                return stack;
+            }
+        }
+        ItemStack offhand = player.getOffhandItem();
+        return offhand.is(com.abhil.buildtools.registry.ModItems.AREA_BREAKER.get()) ? offhand : ItemStack.EMPTY;
+    }
+
+    private static List<ItemStack> inventoryAreaBreakers(ServerPlayer player) {
+        List<ItemStack> stacks = new ArrayList<>();
+        for (ItemStack stack : player.getInventory().items) {
+            if (stack.is(com.abhil.buildtools.registry.ModItems.AREA_BREAKER.get()) && stack.isDamageableItem()) {
+                stacks.add(stack);
+            }
+        }
+        ItemStack offhand = player.getOffhandItem();
+        if (offhand.is(com.abhil.buildtools.registry.ModItems.AREA_BREAKER.get()) && offhand.isDamageableItem()) {
+            stacks.add(offhand);
+        }
+        return stacks;
+    }
+
+    private static int remainingDurabilityForOperation(ServerPlayer player, List<UndoSnapshot.Entry> undo, boolean canBreak, ItemStack fallbackTool) {
+        if (!usesAreaBreakerDurabilityPool(player, undo, canBreak)) {
+            return remainingDurability(fallbackTool);
+        }
+        int remaining = 0;
+        for (ItemStack stack : inventoryAreaBreakers(player)) {
+            remaining += remainingDurability(stack);
+        }
+        return remaining;
+    }
+
+    private static void damageAreaBreakers(ServerPlayer player, int cost) {
+        int remainingCost = cost;
+        for (ItemStack stack : inventoryAreaBreakers(player)) {
+            if (remainingCost <= 0) {
+                return;
+            }
+            int damage = Math.min(remainingCost, remainingDurability(stack));
+            if (damage <= 0) {
+                continue;
+            }
+            stack.hurtAndBreak(damage, player.serverLevel(), player, broken -> {
+            });
+            remainingCost -= damage;
+        }
     }
 
     private static int remainingDurability(ItemStack stack) {

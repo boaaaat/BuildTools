@@ -1,6 +1,7 @@
 package com.abhil.buildtools.client;
 
 import com.abhil.buildtools.network.ArchPeakPayload;
+import com.abhil.buildtools.network.BrushSettingPayload;
 import com.abhil.buildtools.network.RoadWidthPayload;
 import com.abhil.buildtools.network.StairDirectionPayload;
 import com.abhil.buildtools.server.BuildToolsModeMenu;
@@ -53,6 +54,21 @@ public final class BuildToolsModeScreen extends AbstractContainerScreen<BuildToo
         if (slot != null && this.menu.isStairShapeSlot(slot) && slot.getItem().is(Items.STONE_STAIRS)) {
             int step = scrollY >= 0.0D ? 1 : -1;
             PacketDistributor.sendToServer(new StairDirectionPayload(step));
+            return true;
+        }
+        if (slot != null && this.menu.isBrushRadiusSlot(slot)) {
+            int step = scrollY >= 0.0D ? 1 : -1;
+            PacketDistributor.sendToServer(new BrushSettingPayload(BrushSettingPayload.RADIUS, step));
+            return true;
+        }
+        if (slot != null && this.menu.isBrushDepthSlot(slot)) {
+            int step = scrollY >= 0.0D ? 1 : -1;
+            PacketDistributor.sendToServer(new BrushSettingPayload(BrushSettingPayload.DEPTH, step));
+            return true;
+        }
+        if (slot != null && this.menu.isBrushDensitySlot(slot)) {
+            int step = scrollY >= 0.0D ? 1 : -1;
+            PacketDistributor.sendToServer(new BrushSettingPayload(BrushSettingPayload.DENSITY, step));
             return true;
         }
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);

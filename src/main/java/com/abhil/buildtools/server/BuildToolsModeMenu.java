@@ -32,6 +32,9 @@ import net.minecraft.world.item.component.ItemLore;
 public final class BuildToolsModeMenu extends AbstractContainerMenu {
     private static final int MENU_SIZE = 27;
     private static final int SHAPE_START_SLOT = 9;
+    private static final int BRUSH_RADIUS_SLOT = 9;
+    private static final int BRUSH_DEPTH_SLOT = 10;
+    private static final int BRUSH_DENSITY_SLOT = 11;
     private final SimpleContainer menuItems = new SimpleContainer(MENU_SIZE);
     private final ToolProfile profile;
     private final ServerPlayer owner;
@@ -174,11 +177,9 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(4, brushModeItem(Items.WHEAT_SEEDS, BrushMode.SCATTER, brushMode));
         menuItems.setItem(5, brushModeItem(Items.SNOWBALL, BrushMode.OVERLAY, brushMode));
         menuItems.setItem(6, brushModeItem(Items.AMETHYST_SHARD, BrushMode.BLEND, brushMode));
-        menuItems.setItem(9, utilityItem(Items.LIGHT_BLUE_DYE, "buildtools.menu.brush_smaller", "buildtools.menu.brush_radius.description"));
-        menuItems.setItem(10, named(Items.PAINTING, Component.translatable("buildtools.menu.brush_radius", radius)));
-        menuItems.setItem(11, utilityItem(Items.BLUE_DYE, "buildtools.menu.brush_larger", "buildtools.menu.brush_radius.description"));
-        menuItems.setItem(12, named(Items.DEEPSLATE, Component.translatable("buildtools.menu.brush_depth", depth)));
-        menuItems.setItem(13, named(Items.WHEAT_SEEDS, Component.translatable("buildtools.menu.brush_density", density)));
+        menuItems.setItem(BRUSH_RADIUS_SLOT, brushSettingItem(Items.PAINTING, "buildtools.menu.brush_radius", "buildtools.menu.brush_radius.description", radius));
+        menuItems.setItem(BRUSH_DEPTH_SLOT, brushSettingItem(Items.DEEPSLATE, "buildtools.menu.brush_depth", "buildtools.menu.brush_depth.description", depth));
+        menuItems.setItem(BRUSH_DENSITY_SLOT, brushSettingItem(Items.WHEAT_SEEDS, "buildtools.menu.brush_density", "buildtools.menu.brush_density.description", density));
         populateShapes(18);
     }
 
@@ -362,10 +363,6 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case 4 -> BuildToolsState.setBrushMode(player, BrushMode.SCATTER);
             case 5 -> BuildToolsState.setBrushMode(player, BrushMode.OVERLAY);
             case 6 -> BuildToolsState.setBrushMode(player, BrushMode.BLEND);
-            case 9 -> BuildToolsState.changeBrushRadius(player, -1);
-            case 11 -> BuildToolsState.changeBrushRadius(player, 1);
-            case 12 -> BuildToolsState.changeBrushDepth(player, 1);
-            case 13 -> BuildToolsState.changeBrushDensity(player, -1);
             default -> {
                 return handleShapeClick(player, slotId, 18, false);
             }
@@ -463,6 +460,33 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         populateMenuItems();
     }
 
+    public void adjustBrushSetting(ServerPlayer player, int setting, int delta) {
+        if (profile != ToolProfile.BRUSH) {
+            return;
+        }
+        switch (setting) {
+            case 0 -> BuildToolsState.changeBrushRadius(player, delta);
+            case 1 -> BuildToolsState.changeBrushDepth(player, delta);
+            case 2 -> BuildToolsState.changeBrushDensity(player, delta);
+            default -> {
+                return;
+            }
+        }
+        populateMenuItems();
+    }
+
+    public boolean isBrushRadiusSlot(Slot slot) {
+        return this.slots.indexOf(slot) == BRUSH_RADIUS_SLOT && slot.getItem().is(Items.PAINTING);
+    }
+
+    public boolean isBrushDepthSlot(Slot slot) {
+        return this.slots.indexOf(slot) == BRUSH_DEPTH_SLOT && slot.getItem().is(Items.DEEPSLATE);
+    }
+
+    public boolean isBrushDensitySlot(Slot slot) {
+        return this.slots.indexOf(slot) == BRUSH_DENSITY_SLOT && slot.getItem().is(Items.WHEAT_SEEDS);
+    }
+
     private SelectionShape[] visibleShapes() {
         return owner == null ? SelectionShape.basicShapes() : BuildToolsState.availableShapes(owner);
     }
@@ -525,6 +549,13 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
     private static ItemStack named(net.minecraft.world.item.Item item, Component name) {
         ItemStack stack = new ItemStack(item);
         stack.set(DataComponents.CUSTOM_NAME, name);
+        return stack;
+    }
+
+    private static ItemStack brushSettingItem(net.minecraft.world.item.Item item, String nameKey, String descriptionKey, int value) {
+        ItemStack stack = named(item, Component.translatable(nameKey, value));
+        Component description = Component.translatable(descriptionKey).withStyle(ChatFormatting.GRAY);
+        stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
         return stack;
     }
 
