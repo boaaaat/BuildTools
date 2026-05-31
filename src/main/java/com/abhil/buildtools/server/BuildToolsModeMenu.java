@@ -140,6 +140,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(4, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.save_preset", "buildtools.menu.save_preset.description"));
         menuItems.setItem(5, utilityItem(Items.BOOK, "buildtools.menu.presets", "buildtools.menu.presets.description"));
         menuItems.setItem(6, utilityItem(Items.CHEST, "buildtools.menu.material_checklist", "buildtools.menu.material_checklist.description"));
+        menuItems.setItem(7, utilityItem(Items.BRICKS, "buildtools.menu.material_selection", "buildtools.menu.material_selection.description"));
         menuItems.setItem(8, utilityItem(Items.KNOWLEDGE_BOOK, "buildtools.menu.help", "buildtools.menu.help.description"));
         populateShapes(SHAPE_START_SLOT);
     }
@@ -177,6 +178,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(4, brushModeItem(Items.WHEAT_SEEDS, BrushMode.SCATTER, brushMode));
         menuItems.setItem(5, brushModeItem(Items.SNOWBALL, BrushMode.OVERLAY, brushMode));
         menuItems.setItem(6, brushModeItem(Items.AMETHYST_SHARD, BrushMode.BLEND, brushMode));
+        menuItems.setItem(7, utilityItem(Items.BRICKS, "buildtools.menu.material_selection", "buildtools.menu.material_selection.description"));
         menuItems.setItem(BRUSH_RADIUS_SLOT, brushSettingItem(Items.PAINTING, "buildtools.menu.brush_radius", "buildtools.menu.brush_radius.description", radius));
         menuItems.setItem(BRUSH_DEPTH_SLOT, brushSettingItem(Items.DEEPSLATE, "buildtools.menu.brush_depth", "buildtools.menu.brush_depth.description", depth));
         menuItems.setItem(BRUSH_DENSITY_SLOT, brushSettingItem(Items.WHEAT_SEEDS, "buildtools.menu.brush_density", "buildtools.menu.brush_density.description", density));
@@ -325,6 +327,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case 4 -> BuildToolsState.savePreset(player);
             case 5 -> PresetLibraryMenu.open(player);
             case 6 -> MaterialChecklistMenu.open(player);
+            case 7 -> MaterialSelectionMenu.open(player);
             case 8 -> HelpMenu.open(player);
             default -> {
                 return handleShapeClick(player, slotId, SHAPE_START_SLOT, rightClick);
@@ -363,6 +366,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case 4 -> BuildToolsState.setBrushMode(player, BrushMode.SCATTER);
             case 5 -> BuildToolsState.setBrushMode(player, BrushMode.OVERLAY);
             case 6 -> BuildToolsState.setBrushMode(player, BrushMode.BLEND);
+            case 7 -> MaterialSelectionMenu.open(player);
             default -> {
                 return handleShapeClick(player, slotId, 18, false);
             }

@@ -7,10 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.core.Direction;
-import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
 public final class MaterialChecklist {
@@ -25,7 +22,7 @@ public final class MaterialChecklist {
                     .orElse(List.of());
         }
         if (held.is(ModItems.BUILDER_BRUSH.get())) {
-            BlockState target = materialState(player.getOffhandItem());
+            BlockState target = BuildToolsState.primaryMaterial(player);
             int radius = BuildToolsState.brushRadius(player);
             int roughCount = Math.max(1, radius * radius * radius);
             return repeated(target, roughCount);
@@ -35,24 +32,24 @@ public final class MaterialChecklist {
             return List.of();
         }
         List<net.minecraft.core.BlockPos> generated = BuildToolsState.generatedSelection(player);
-        List<PaletteEntry> palette = held.is(ModItems.ADVANCED_BUILDER_WAND.get()) ? BuildToolsState.paletteEntries(player) : List.of();
-        BlockState fallback = materialState(player.getOffhandItem());
-        if (fallback == null && !palette.isEmpty()) {
-            fallback = palette.getFirst().state();
-        }
-        if (fallback == null) {
+        List<PaletteEntry> materials = BuildToolsState.materialSelections(player);
+        if (materials.isEmpty()) {
             return List.of();
         }
+        boolean multiMaterial = held.is(ModItems.ADVANCED_BUILDER_WAND.get())
+                && BuildToolsState.paletteMode(player) != PaletteMode.SINGLE
+                && materials.size() > 1;
         BuildMode mode = BuildToolsState.mode(player);
         BlockState replaceMatch = BuildToolsState.replaceTarget(player);
         List<net.minecraft.core.BlockPos> placementCandidates = mode == BuildMode.SURFACE ? SurfacePlacementSupport.candidates(player.level(), generated) : generated;
         List<BlockState> targets = new ArrayList<>();
+        int index = 0;
         for (net.minecraft.core.BlockPos pos : placementCandidates) {
             BlockState previous = player.level().getBlockState(pos);
             if (!canPlaceForMode(player, pos, previous, mode, replaceMatch)) {
                 continue;
             }
-            targets.add(fallback);
+            targets.add(multiMaterial ? materials.get(index++ % materials.size()).state() : materials.getFirst().state());
         }
         return targets;
     }
@@ -91,16 +88,4 @@ public final class MaterialChecklist {
         return states;
     }
 
-    private static BlockState materialState(ItemStack stack) {
-        if (stack.getItem() instanceof BlockItem blockItem) {
-            return blockItem.getBlock().defaultBlockState();
-        }
-        if (stack.is(Items.WATER_BUCKET)) {
-            return Blocks.WATER.defaultBlockState();
-        }
-        if (stack.is(Items.LAVA_BUCKET)) {
-            return Blocks.LAVA.defaultBlockState();
-        }
-        return null;
-    }
 }

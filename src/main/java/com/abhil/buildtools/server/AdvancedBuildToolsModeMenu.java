@@ -3,16 +3,12 @@ package com.abhil.buildtools.server;
 import com.abhil.buildtools.registry.ModMenus;
 import com.abhil.buildtools.shape.BuildMode;
 import com.abhil.buildtools.shape.SelectionShape;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.Container;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.SimpleMenuProvider;
 import net.minecraft.world.entity.player.Inventory;
@@ -20,18 +16,14 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.Slot;
-import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.ItemLore;
-import net.minecraft.world.level.block.state.BlockState;
 
 public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
     private static final int MENU_SIZE = 54;
     private static final int SHAPE_START_SLOT = 9;
     private static final int GRADIENT_SLOT = 4;
-    public static final int PALETTE_START = 44;
-    public static final int PALETTE_COUNT = 10;
     private final SimpleContainer menuItems = new SimpleContainer(MENU_SIZE);
     private final ServerPlayer owner;
     private final ToolProfile profile;
@@ -64,9 +56,6 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
                     populateMenuItems();
                     return;
                 }
-            } else if (isPaletteSlot(slotId)) {
-                handlePaletteClick(serverPlayer, slotId);
-                return;
             } else if (slotId >= 0 && slotId < BuildMode.values().length) {
                 BuildToolsState.setMode(serverPlayer, BuildMode.values()[slotId]);
                 populateMenuItems();
@@ -88,25 +77,6 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
 
     @Override
     public ItemStack quickMoveStack(Player player, int index) {
-        if (isAdvancedSelectionMenu()) {
-            return ItemStack.EMPTY;
-        }
-        if (index < MENU_SIZE || index >= this.slots.size()) {
-            return ItemStack.EMPTY;
-        }
-        ItemStack source = this.slots.get(index).getItem();
-        BlockState state = paletteState(source);
-        if (state == null) {
-            return ItemStack.EMPTY;
-        }
-        for (int slot = PALETTE_START; slot < PALETTE_START + PALETTE_COUNT; slot++) {
-            if (menuItems.getItem(slot).isEmpty()) {
-                ItemStack original = source.copy();
-                setPaletteEntry(slot, new PaletteEntry(state, PaletteEntry.DEFAULT_WEIGHT));
-                source.shrink(1);
-                return original;
-            }
-        }
         return ItemStack.EMPTY;
     }
 
@@ -124,11 +94,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         for (int row = 0; row < 6; row++) {
             for (int column = 0; column < 9; column++) {
                 int slot = column + row * 9;
-                if (isPaletteSlot(slot)) {
-                    addSlot(new PaletteSlot(menuItems, slot, 8 + column * 18, 18 + row * 18));
-                } else {
-                    addSlot(new FakeSlot(menuItems, slot, 8 + column * 18, 18 + row * 18));
-                }
+                addSlot(new FakeSlot(menuItems, slot, 8 + column * 18, 18 + row * 18));
             }
         }
     }
@@ -173,13 +139,10 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(6, utilityItem(Items.FILLED_MAP, "buildtools.menu.build_plan", "buildtools.menu.build_plan.description"));
         menuItems.setItem(7, utilityItem(Items.DISPENSER, "buildtools.menu.random_pattern", "buildtools.menu.random_pattern.description",
                 owner != null && BuildToolsState.paletteMode(owner) == PaletteMode.RANDOM));
-        menuItems.setItem(8, utilityItem(Items.HOPPER, "buildtools.menu.return_palette", "buildtools.menu.return_palette.description"));
-        menuItems.setItem(40, utilityItem(Items.BOOKSHELF, "buildtools.menu.palettes", "buildtools.menu.palettes.description"));
+        menuItems.setItem(8, utilityItem(Items.BRICKS, "buildtools.menu.material_selection", "buildtools.menu.material_selection.description"));
 
         populateShapes(SHAPE_START_SLOT);
 
-        menuItems.setItem(43, utilityItem(Items.CHEST, "buildtools.menu.replace_palette", "buildtools.menu.replace_palette.description"));
-        populatePaletteItems();
         menuItems.setItem(39, utilityItem(Items.KNOWLEDGE_BOOK, "buildtools.menu.help", "buildtools.menu.help.description"));
     }
 
@@ -327,8 +290,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             case 5 -> BuildOperationEngine.createPlan(player);
             case 6 -> BuildOperationEngine.applyPlan(player);
             case 7 -> BuildToolsState.toggleRandomPattern(player);
-            case 8 -> returnPalette(player);
-            case 40 -> PaletteLibraryMenu.open(player);
+            case 8 -> MaterialSelectionMenu.open(player);
             case 39 -> HelpMenu.open(player);
             default -> {
                 return false;
@@ -370,49 +332,6 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             }
         }
         return true;
-    }
-
-    private void populatePaletteItems() {
-        if (owner == null || isAdvancedSelectionMenu()) {
-            return;
-        }
-        List<PaletteEntry> entries = BuildToolsState.paletteEntries(owner);
-        int totalWeight = entries.stream().mapToInt(PaletteEntry::weight).sum();
-        for (int i = 0; i < PALETTE_COUNT; i++) {
-            int slot = PALETTE_START + i;
-            menuItems.setItem(slot, i < entries.size() ? paletteItem(entries.get(i), totalWeight) : ItemStack.EMPTY);
-        }
-    }
-
-    private void handlePaletteClick(ServerPlayer player, int slotId) {
-        if (isAdvancedSelectionMenu()) {
-            return;
-        }
-        ItemStack carried = getCarried();
-        BlockState state = paletteState(carried);
-        if (state == null || !menuItems.getItem(slotId).isEmpty()) {
-            return;
-        }
-        setPaletteEntry(slotId, new PaletteEntry(state, PaletteEntry.DEFAULT_WEIGHT));
-        carried.shrink(1);
-        if (carried.isEmpty()) {
-            setCarried(ItemStack.EMPTY);
-        }
-    }
-
-    public void adjustPaletteWeight(ServerPlayer player, int slotId, int delta) {
-        if (isAdvancedSelectionMenu() || !isPaletteSlot(slotId)) {
-            return;
-        }
-        List<PaletteEntry> entries = new ArrayList<>(BuildToolsState.paletteEntries(player));
-        int index = slotId - PALETTE_START;
-        if (index < 0 || index >= entries.size()) {
-            return;
-        }
-        PaletteEntry entry = entries.get(index);
-        entries.set(index, new PaletteEntry(entry.state(), entry.weight() + delta));
-        BuildToolsState.setPaletteEntries(player, entries);
-        populateMenuItems();
     }
 
     public void adjustRoadWidth(ServerPlayer player, int delta) {
@@ -458,54 +377,6 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             }
             default -> false;
         };
-    }
-
-    private void setPaletteEntry(int slotId, PaletteEntry entry) {
-        if (owner == null || isAdvancedSelectionMenu() || !isPaletteSlot(slotId)) {
-            return;
-        }
-        List<PaletteEntry> entries = new ArrayList<>(BuildToolsState.paletteEntries(owner));
-        int index = slotId - PALETTE_START;
-        while (entries.size() < index) {
-            entries.add(new PaletteEntry(net.minecraft.world.level.block.Blocks.AIR.defaultBlockState(), PaletteEntry.DEFAULT_WEIGHT));
-        }
-        if (index < entries.size()) {
-            entries.set(index, entry);
-        } else {
-            entries.add(entry);
-        }
-        entries.removeIf(paletteEntry -> paletteEntry.state().isAir());
-        BuildToolsState.setPaletteEntries(owner, entries);
-        populateMenuItems();
-    }
-
-    private static ItemStack paletteItem(PaletteEntry entry, int totalWeight) {
-        ItemStack stack = paletteStack(entry.state());
-        double chance = totalWeight <= 0 ? 100.0D : (entry.weight() * 100.0D) / totalWeight;
-        Component weight = Component.literal("Pattern weight: " + entry.weight() + " (" + Math.round(chance) + "%)").withStyle(ChatFormatting.GRAY);
-        Component scroll = Component.translatable("buildtools.menu.palette_weight.description").withStyle(ChatFormatting.DARK_GRAY);
-        stack.set(DataComponents.LORE, new ItemLore(List.of(weight, scroll), List.of(weight, scroll)));
-        return stack;
-    }
-
-    private static void returnPalette(ServerPlayer player) {
-        List<PaletteEntry> entries = BuildToolsState.paletteEntries(player);
-        if (entries.isEmpty()) {
-            return;
-        }
-        Map<ItemStackKey, Integer> returned = new LinkedHashMap<>();
-        for (PaletteEntry entry : entries) {
-            ItemStack stack = paletteStack(entry.state());
-            if (!stack.isEmpty()) {
-                returned.merge(new ItemStackKey(stack.getItem()), stack.getCount(), Integer::sum);
-            }
-        }
-        BuildingStorageManager.depositOrGive(player, returned);
-        BuildToolsState.setPaletteEntries(player, List.of());
-    }
-
-    public static boolean isPaletteSlot(int slot) {
-        return slot >= PALETTE_START && slot < PALETTE_START + PALETTE_COUNT;
     }
 
     private boolean isAdvancedSelectionMenu() {
@@ -586,29 +457,6 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         return false;
     }
 
-    private static BlockState paletteState(ItemStack stack) {
-        if (stack.getItem() instanceof BlockItem blockItem) {
-            return blockItem.getBlock().defaultBlockState();
-        }
-        if (stack.is(Items.WATER_BUCKET)) {
-            return net.minecraft.world.level.block.Blocks.WATER.defaultBlockState();
-        }
-        if (stack.is(Items.LAVA_BUCKET)) {
-            return net.minecraft.world.level.block.Blocks.LAVA.defaultBlockState();
-        }
-        return null;
-    }
-
-    private static ItemStack paletteStack(BlockState state) {
-        if (state.is(net.minecraft.world.level.block.Blocks.WATER)) {
-            return new ItemStack(Items.WATER_BUCKET);
-        }
-        if (state.is(net.minecraft.world.level.block.Blocks.LAVA)) {
-            return new ItemStack(Items.LAVA_BUCKET);
-        }
-        return new ItemStack(state.getBlock().asItem());
-    }
-
     private static final class FakeSlot extends Slot {
         private FakeSlot(SimpleContainer container, int slot, int x, int y) {
             super(container, slot, x, y);
@@ -630,19 +478,4 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         }
     }
 
-    private static final class PaletteSlot extends Slot {
-        private PaletteSlot(Container container, int slot, int x, int y) {
-            super(container, slot, x, y);
-        }
-
-        @Override
-        public boolean mayPlace(ItemStack stack) {
-            return false;
-        }
-
-        @Override
-        public boolean mayPickup(Player player) {
-            return false;
-        }
-    }
 }

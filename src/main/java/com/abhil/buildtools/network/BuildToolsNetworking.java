@@ -18,12 +18,13 @@ public final class BuildToolsNetworking {
         registrar.playToServer(AdvancedSelectionActionPayload.TYPE, AdvancedSelectionActionPayload.STREAM_CODEC, AdvancedSelectionActionPayload::handle);
         registrar.playToServer(BrushSettingPayload.TYPE, BrushSettingPayload.STREAM_CODEC, BrushSettingPayload::handle);
         registrar.playToServer(GradientDirectionPayload.TYPE, GradientDirectionPayload.STREAM_CODEC, GradientDirectionPayload::handle);
-        registrar.playToServer(PaletteWeightPayload.TYPE, PaletteWeightPayload.STREAM_CODEC, PaletteWeightPayload::handle);
+        registrar.playToServer(MaterialWeightPayload.TYPE, MaterialWeightPayload.STREAM_CODEC, MaterialWeightPayload::handle);
         registrar.playToServer(RequestPreviewPayload.TYPE, RequestPreviewPayload.STREAM_CODEC, RequestPreviewPayload::handle);
         registrar.playToServer(RoadWidthPayload.TYPE, RoadWidthPayload.STREAM_CODEC, RoadWidthPayload::handle);
         registrar.playToServer(StairDirectionPayload.TYPE, StairDirectionPayload.STREAM_CODEC, StairDirectionPayload::handle);
         registrar.playToServer(ScrollToolPayload.TYPE, ScrollToolPayload.STREAM_CODEC, ScrollToolPayload::handle);
         registrar.playToServer(OpenToolMenuPayload.TYPE, OpenToolMenuPayload.STREAM_CODEC, OpenToolMenuPayload::handle);
+        registrar.playToServer(PickMaterialPayload.TYPE, PickMaterialPayload.STREAM_CODEC, PickMaterialPayload::handle);
         registrar.playToServer(ShortcutActionPayload.TYPE, ShortcutActionPayload.STREAM_CODEC, ShortcutActionPayload::handle);
         registrar.playToServer(BlueprintLibraryQueryPayload.TYPE, BlueprintLibraryQueryPayload.STREAM_CODEC, BlueprintLibraryQueryPayload::handle);
     }

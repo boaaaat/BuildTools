@@ -6,11 +6,13 @@ import com.abhil.buildtools.client.BuildToolStatusOverlay;
 import com.abhil.buildtools.client.BuildToolsModeScreen;
 import com.abhil.buildtools.client.ClientSelectionRenderer;
 import com.abhil.buildtools.client.MaterialChecklistScreen;
+import com.abhil.buildtools.client.MaterialSelectionScreen;
 import com.abhil.buildtools.client.HelpScreen;
 import com.abhil.buildtools.client.PaletteLibraryScreen;
 import com.abhil.buildtools.client.PresetLibraryScreen;
 import com.abhil.buildtools.network.AdvancedSelectionActionPayload;
 import com.abhil.buildtools.network.OpenToolMenuPayload;
+import com.abhil.buildtools.network.PickMaterialPayload;
 import com.abhil.buildtools.network.ScrollToolPayload;
 import com.abhil.buildtools.network.ShortcutActionPayload;
 import com.abhil.buildtools.registry.ModItems;
@@ -20,7 +22,6 @@ import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
-import net.minecraft.core.Direction;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.HitResult;
 import net.neoforged.api.distmarker.Dist;
@@ -52,12 +53,6 @@ public final class BuildToolsClient {
     private static final KeyMapping CANCEL_PREVIEW = key("cancel_preview");
     private static final KeyMapping UNDO = key("undo");
     private static final KeyMapping REDO = key("redo");
-    private static final KeyMapping NUDGE_WEST = key("nudge_west");
-    private static final KeyMapping NUDGE_EAST = key("nudge_east");
-    private static final KeyMapping NUDGE_NORTH = key("nudge_north");
-    private static final KeyMapping NUDGE_SOUTH = key("nudge_south");
-    private static final KeyMapping NUDGE_UP = key("nudge_up");
-    private static final KeyMapping NUDGE_DOWN = key("nudge_down");
     private static final KeyMapping RELATIVE_NUDGE_LEFT = key("relative_nudge_left", GLFW.GLFW_KEY_LEFT);
     private static final KeyMapping RELATIVE_NUDGE_RIGHT = key("relative_nudge_right", GLFW.GLFW_KEY_RIGHT);
     private static final KeyMapping RELATIVE_NUDGE_FORWARD = key("relative_nudge_forward", GLFW.GLFW_KEY_UP);
@@ -71,6 +66,7 @@ public final class BuildToolsClient {
     private static final KeyMapping ADJUST_OPTION_DOWN = key("adjust_option_down", GLFW.GLFW_KEY_MINUS);
     private static final KeyMapping ADJUST_OPTION_UP = key("adjust_option_up", GLFW.GLFW_KEY_EQUAL);
     private static final KeyMapping TOGGLE_SHAPE_OPTION = key("toggle_shape_option", GLFW.GLFW_KEY_H);
+    private static final KeyMapping OPEN_MATERIAL_SELECTION = key("open_material_selection", GLFW.GLFW_KEY_M);
 
     public BuildToolsClient(IEventBus modEventBus, ModContainer container) {
         modEventBus.addListener(this::registerScreens);
@@ -94,12 +90,6 @@ public final class BuildToolsClient {
         event.register(CANCEL_PREVIEW);
         event.register(UNDO);
         event.register(REDO);
-        event.register(NUDGE_WEST);
-        event.register(NUDGE_EAST);
-        event.register(NUDGE_NORTH);
-        event.register(NUDGE_SOUTH);
-        event.register(NUDGE_UP);
-        event.register(NUDGE_DOWN);
         event.register(RELATIVE_NUDGE_LEFT);
         event.register(RELATIVE_NUDGE_RIGHT);
         event.register(RELATIVE_NUDGE_FORWARD);
@@ -113,6 +103,7 @@ public final class BuildToolsClient {
         event.register(ADJUST_OPTION_DOWN);
         event.register(ADJUST_OPTION_UP);
         event.register(TOGGLE_SHAPE_OPTION);
+        event.register(OPEN_MATERIAL_SELECTION);
     }
 
     private void registerScreens(RegisterMenuScreensEvent event) {
@@ -120,6 +111,7 @@ public final class BuildToolsClient {
         event.register(ModMenus.ADVANCED_MODE_MENU.get(), AdvancedBuildToolsModeScreen::new);
         event.register(ModMenus.BLUEPRINT_LIBRARY_MENU.get(), BlueprintLibraryScreen::new);
         event.register(ModMenus.MATERIAL_CHECKLIST_MENU.get(), MaterialChecklistScreen::new);
+        event.register(ModMenus.MATERIAL_SELECTION_MENU.get(), MaterialSelectionScreen::new);
         event.register(ModMenus.PRESET_LIBRARY_MENU.get(), PresetLibraryScreen::new);
         event.register(ModMenus.PALETTE_LIBRARY_MENU.get(), PaletteLibraryScreen::new);
         event.register(ModMenus.HELP_MENU.get(), HelpScreen::new);
@@ -145,18 +137,13 @@ public final class BuildToolsClient {
             return;
         }
         handleShortcut(OPEN_TOOL_MENU, "open_menu");
+        handleShortcut(OPEN_MATERIAL_SELECTION, "open_materials");
         handleShortcut(CYCLE_SHAPE, "cycle_shape");
         handleShortcut(CYCLE_MODE, "cycle_mode");
         handleShortcut(CONFIRM_PREVIEW, "confirm_preview");
         handleShortcut(CANCEL_PREVIEW, "cancel_preview");
         handleShortcut(UNDO, "undo");
         handleShortcut(REDO, "redo");
-        handleNudge(NUDGE_WEST, Direction.WEST);
-        handleNudge(NUDGE_EAST, Direction.EAST);
-        handleNudge(NUDGE_NORTH, Direction.NORTH);
-        handleNudge(NUDGE_SOUTH, Direction.SOUTH);
-        handleNudge(NUDGE_UP, Direction.UP);
-        handleNudge(NUDGE_DOWN, Direction.DOWN);
         if (!isShortcutBuildTool(minecraft.player.getMainHandItem())) {
             return;
         }
@@ -181,12 +168,6 @@ public final class BuildToolsClient {
         }
     }
 
-    private static void handleNudge(KeyMapping key, Direction direction) {
-        while (key.consumeClick()) {
-            PacketDistributor.sendToServer(new ShortcutActionPayload("nudge", direction.name(), shortcutAmount()));
-        }
-    }
-
     private static void handleRelativeNudge(KeyMapping key, String direction) {
         while (key.consumeClick()) {
             PacketDistributor.sendToServer(new ShortcutActionPayload("nudge_relative", direction, shortcutAmount()));
@@ -197,6 +178,10 @@ public final class BuildToolsClient {
         while (key.consumeClick()) {
             PacketDistributor.sendToServer(new ShortcutActionPayload(action, "", step));
         }
+    }
+
+    public static boolean isOpenMaterialSelectionKey(int keyCode, int scanCode) {
+        return OPEN_MATERIAL_SELECTION.matches(keyCode, scanCode);
     }
 
     public static List<String> shortcutHintLines(ItemStack stack) {
@@ -217,6 +202,9 @@ public final class BuildToolsClient {
         }
         if (isModeControlTool(stack)) {
             addHint(lines, "Mode", PREVIOUS_MODE, NEXT_MODE);
+        }
+        if (isMaterialSelectionTool(stack)) {
+            addHint(lines, "Materials", OPEN_MATERIAL_SELECTION);
         }
         addHint(lines, "Confirm", CONFIRM_PREVIEW);
         addHint(lines, "Cancel", CANCEL_PREVIEW);
@@ -284,6 +272,17 @@ public final class BuildToolsClient {
     @SubscribeEvent
     static void attackClicked(InputEvent.InteractionKeyMappingTriggered event) {
         Minecraft minecraft = Minecraft.getInstance();
+        if (event.isPickBlock()
+                && minecraft.player != null
+                && minecraft.screen == null
+                && minecraft.hitResult != null
+                && minecraft.hitResult.getType() == HitResult.Type.BLOCK
+                && isMaterialSelectionTool(minecraft.player.getMainHandItem())) {
+            PacketDistributor.sendToServer(new PickMaterialPayload(((net.minecraft.world.phys.BlockHitResult) minecraft.hitResult).getBlockPos()));
+            event.setSwingHand(false);
+            event.setCanceled(true);
+            return;
+        }
         if (!event.isAttack()
                 || minecraft.player == null
                 || minecraft.screen != null
@@ -341,6 +340,12 @@ public final class BuildToolsClient {
     private static boolean isModeControlTool(ItemStack stack) {
         return stack.is(ModItems.BUILDER_WAND.get())
                 || stack.is(ModItems.ADVANCED_BUILDER_WAND.get());
+    }
+
+    private static boolean isMaterialSelectionTool(ItemStack stack) {
+        return stack.is(ModItems.BUILDER_WAND.get())
+                || stack.is(ModItems.ADVANCED_BUILDER_WAND.get())
+                || stack.is(ModItems.BUILDER_BRUSH.get());
     }
 
     private static boolean isAirMenuTool(ItemStack stack) {

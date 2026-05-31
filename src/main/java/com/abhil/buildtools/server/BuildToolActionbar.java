@@ -14,7 +14,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.network.PacketDistributor;
@@ -154,24 +153,20 @@ public final class BuildToolActionbar {
             return Component.literal("Builder Wand | " + stats.status()).withStyle(ChatFormatting.YELLOW);
         }
 
-        ItemStack source = player.getOffhandItem();
-        if (!(source.getItem() instanceof BlockItem blockItem)) {
+        BlockState selected = BuildToolsState.primaryMaterial(player);
+        if (selected == null) {
             return Component.literal("Builder Wand | " + stats.shapeName()
                     + " | Size: " + stats.dimensions()
                     + " | Area: " + stats.total()
-                    + " | Put the block to place in your offhand").withStyle(ChatFormatting.YELLOW);
+                    + " | Select material: middle-click block or press M").withStyle(ChatFormatting.YELLOW);
         }
 
         BuildMode mode = BuildToolsState.mode(player);
-        int targets = stats.targetsFor(mode);
-        List<BlockState> targetStates = new ArrayList<>(targets);
-        BlockState target = blockItem.getBlock().defaultBlockState();
-        for (int i = 0; i < targets; i++) {
-            targetStates.add(target);
-        }
+        List<BlockState> targetStates = MaterialChecklist.targetsFor(player);
+        int targets = targetStates.size();
         BlockCostPlan costPlan = BlockCostPlan.create(player, targetStates);
         return Component.literal("Builder Wand | " + modeName(mode)
-                + " " + source.getHoverName().getString()
+                + " " + materialName(player)
                 + " | Size: " + stats.dimensions()
                 + " | Will place: " + targets
                 + " | Air: " + stats.air()
@@ -183,23 +178,23 @@ public final class BuildToolActionbar {
 
     private static Component advancedBuilderMessage(ServerPlayer player) {
         Component base = builderMessage(player);
-        int paletteSize = BuildToolsState.paletteEntries(player).size();
+        int paletteSize = BuildToolsState.materialSelections(player).size();
         String materialMode = BuildToolsState.paletteMode(player).displayName().getString();
         String gradientDirection = DirectionDisplay.gradientDirection(player, BuildToolsState.gradientDirection(player)).getString();
-        return Component.literal("Advanced " + base.getString() + " | Palette: " + paletteSize + " | Material mode: " + materialMode + " | Gradient: " + gradientDirection + " | Ghost/plan ready in menu");
+        return Component.literal("Advanced " + base.getString() + " | Materials: " + paletteSize + " | Material mode: " + materialMode + " | Gradient: " + gradientDirection + " | Ghost/plan ready in menu");
     }
 
     private static Component brushMessage(ServerPlayer player) {
-        ItemStack source = player.getOffhandItem();
-        String offhand = source.getItem() instanceof BlockItem ? source.getHoverName().getString() : "Air";
+        BlockState selected = BuildToolsState.primaryMaterial(player);
+        String material = selected == null ? "None" : selected.getBlock().getName().getString();
         return Component.literal("Builder Brush | " + BuildToolsState.brushMode(player).displayName().getString()
                 + " | Shape: " + BuildToolsState.selectionShape(player).displayName().getString()
                 + " | Radius: " + BuildToolsState.brushRadius(player)
                 + " | Depth: " + BuildToolsState.brushDepth(player)
                 + " | Density: " + BuildToolsState.brushDensity(player) + "%"
-                + " | Block: " + offhand
+                + " | Block: " + material
                 + " | Target: " + BuildToolsState.brushReplaceTarget(player).getBlock().getName().getString()
-                + " | Right-click: preview/apply | Sneak right-click: pick target | Left-click: menu");
+                + " | Right-click: preview/apply | Sneak right-click: pick target | Middle-click: material | M: materials | Left-click: menu");
     }
 
     private static Component breakerMessage(ServerPlayer player) {
@@ -353,6 +348,16 @@ public final class BuildToolActionbar {
             return " | Need: " + required + " | Missing: " + missing + " " + compactMissing(costPlan.missing());
         }
         return " | Need: " + required + " | Materials ready";
+    }
+
+    private static String materialName(ServerPlayer player) {
+        List<PaletteEntry> materials = BuildToolsState.materialSelections(player);
+        if (materials.isEmpty()) {
+            return "None";
+        }
+        String name = materials.getFirst().state().getBlock().getName().getString();
+        int extra = materials.size() - 1;
+        return extra <= 0 ? name : name + " +" + extra;
     }
 
     private static String limitSuffix(int changes) {

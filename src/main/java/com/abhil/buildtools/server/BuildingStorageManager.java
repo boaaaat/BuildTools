@@ -1,5 +1,6 @@
 package com.abhil.buildtools.server;
 
+import java.util.LinkedHashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -72,6 +73,13 @@ public final class BuildingStorageManager {
             }
         }
         return count;
+    }
+
+    public static Map<ItemStackKey, Integer> accessibleMaterialCounts(ServerPlayer player) {
+        Map<ItemStackKey, Integer> counts = new LinkedHashMap<>();
+        addInventoryMaterialCounts(player, counts);
+        addStorageMaterialCounts(player, counts);
+        return counts;
     }
 
     public static int extract(ServerPlayer player, ItemStackKey key, int amount) {
@@ -209,6 +217,33 @@ public final class BuildingStorageManager {
             }
         }
         return count;
+    }
+
+    private static void addInventoryMaterialCounts(ServerPlayer player, Map<ItemStackKey, Integer> counts) {
+        for (int slot = 0; slot < player.getInventory().getContainerSize(); slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            addMaterialCount(counts, stack);
+        }
+    }
+
+    private static void addStorageMaterialCounts(ServerPlayer player, Map<ItemStackKey, Integer> counts) {
+        ServerLevel level = player.serverLevel();
+        for (BlockPos pos : trackedStorages(player)) {
+            IItemHandler handler = handler(level, pos);
+            if (handler == null) {
+                continue;
+            }
+            for (int slot = 0; slot < handler.getSlots(); slot++) {
+                addMaterialCount(counts, handler.getStackInSlot(slot));
+            }
+        }
+    }
+
+    private static void addMaterialCount(Map<ItemStackKey, Integer> counts, ItemStack stack) {
+        if (stack.isEmpty() || BuildMaterialSource.stateFromStack(stack) == null) {
+            return;
+        }
+        counts.merge(new ItemStackKey(stack.getItem()), stack.getCount(), Integer::sum);
     }
 
     private static int extractPlayerInventory(ServerPlayer player, ItemStackKey key, int amount) {

@@ -37,7 +37,6 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
-import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -123,6 +122,7 @@ public final class BuildToolsState {
             ToolProfile.ADVANCED_BUILDER
     };
     public static final int MAX_SAVED_BLUEPRINTS = 45;
+    public static final int MAX_MATERIAL_SELECTIONS = 15;
     private static final int MAX_BLUEPRINT_NAME_LENGTH = 32;
 
     private BuildToolsState() {
@@ -1143,19 +1143,71 @@ public final class BuildToolsState {
         return palettes(player).getOrDefault(activeProfile(player), List.of());
     }
 
-    public static List<PaletteEntry> brushPaletteEntries(ServerPlayer player) {
-        EnumMap<ToolProfile, List<PaletteEntry>> map = palettes(player);
-        List<PaletteEntry> brush = map.get(ToolProfile.BRUSH);
-        if (brush != null && !brush.isEmpty()) {
-            return brush;
+    public static List<PaletteEntry> materialSelections(ServerPlayer player) {
+        return paletteEntries(player);
+    }
+
+    public static BlockState primaryMaterial(ServerPlayer player) {
+        List<PaletteEntry> entries = materialSelections(player);
+        return entries.isEmpty() ? null : entries.getFirst().state();
+    }
+
+    public static void setPrimaryMaterial(ServerPlayer player, BlockState state) {
+        setMaterialSelections(player, List.of(new PaletteEntry(state, PaletteEntry.DEFAULT_WEIGHT)));
+    }
+
+    public static void toggleMaterialSelection(ServerPlayer player, BlockState state) {
+        toggleMaterialSelection(player, state, Integer.MAX_VALUE);
+    }
+
+    public static void toggleMaterialSelection(ServerPlayer player, BlockState state, int maxSelections) {
+        List<PaletteEntry> entries = new ArrayList<>(materialSelections(player));
+        entries.removeIf(entry -> entry.state().is(state.getBlock()));
+        if (entries.size() == materialSelections(player).size()) {
+            if (entries.size() >= maxSelections) {
+                return;
+            }
+            entries.add(new PaletteEntry(state, PaletteEntry.DEFAULT_WEIGHT));
         }
-        return map.getOrDefault(ToolProfile.ADVANCED_BUILDER, List.of());
+        setMaterialSelections(player, entries);
+    }
+
+    public static void clearMaterialSelections(ServerPlayer player) {
+        setMaterialSelections(player, List.of());
+    }
+
+    public static void adjustMaterialWeight(ServerPlayer player, BlockState state, int delta) {
+        List<PaletteEntry> entries = new ArrayList<>(materialSelections(player));
+        for (int i = 0; i < entries.size(); i++) {
+            PaletteEntry entry = entries.get(i);
+            if (entry.state().is(state.getBlock())) {
+                entries.set(i, new PaletteEntry(entry.state(), entry.weight() + delta));
+                setMaterialSelections(player, entries);
+                return;
+            }
+        }
+    }
+
+    public static void resetMaterialWeights(ServerPlayer player) {
+        List<PaletteEntry> entries = materialSelections(player);
+        if (entries.isEmpty()) {
+            return;
+        }
+        setMaterialSelections(player, entries.stream()
+                .map(entry -> new PaletteEntry(entry.state(), PaletteEntry.DEFAULT_WEIGHT))
+                .toList());
+    }
+
+    public static void setMaterialSelections(ServerPlayer player, List<PaletteEntry> entries) {
+        setPaletteEntries(player, entries.stream().limit(MAX_MATERIAL_SELECTIONS).toList());
+    }
+
+    public static List<PaletteEntry> brushPaletteEntries(ServerPlayer player) {
+        return paletteEntries(player);
     }
 
     public static PaletteMode brushPaletteMode(ServerPlayer player) {
-        EnumMap<ToolProfile, PaletteMode> modes = paletteModes(player);
-        PaletteMode brush = modes.get(ToolProfile.BRUSH);
-        return brush != null ? brush : modes.getOrDefault(ToolProfile.ADVANCED_BUILDER, PaletteMode.SINGLE);
+        return paletteMode(player);
     }
 
     public static void setPaletteEntries(ServerPlayer player, List<PaletteEntry> entries) {
@@ -1622,25 +1674,7 @@ public final class BuildToolsState {
     }
 
     private static BlockState materialPreviewFallback(ServerPlayer player) {
-        BlockState source = materialState(player.getOffhandItem());
-        if (source != null) {
-            return source;
-        }
-        List<PaletteEntry> palette = paletteEntries(player);
-        return palette.isEmpty() ? null : palette.getFirst().state();
-    }
-
-    private static BlockState materialState(ItemStack stack) {
-        if (stack.getItem() instanceof BlockItem blockItem) {
-            return blockItem.getBlock().defaultBlockState();
-        }
-        if (stack.is(Items.WATER_BUCKET)) {
-            return net.minecraft.world.level.block.Blocks.WATER.defaultBlockState();
-        }
-        if (stack.is(Items.LAVA_BUCKET)) {
-            return net.minecraft.world.level.block.Blocks.LAVA.defaultBlockState();
-        }
-        return null;
+        return primaryMaterial(player);
     }
 
     private static List<BlockState> gradientPreviewPalette(BlockState fallback, List<PaletteEntry> entries) {

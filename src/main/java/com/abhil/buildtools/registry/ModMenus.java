@@ -6,6 +6,7 @@ import com.abhil.buildtools.server.BlueprintLibraryMenu;
 import com.abhil.buildtools.server.BuildToolsModeMenu;
 import com.abhil.buildtools.server.HelpMenu;
 import com.abhil.buildtools.server.MaterialChecklistMenu;
+import com.abhil.buildtools.server.MaterialSelectionMenu;
 import com.abhil.buildtools.server.PaletteLibraryMenu;
 import com.abhil.buildtools.server.PresetLibraryMenu;
 import net.minecraft.core.registries.Registries;
@@ -32,6 +33,10 @@ public final class ModMenus {
     public static final DeferredHolder<MenuType<?>, MenuType<MaterialChecklistMenu>> MATERIAL_CHECKLIST_MENU = MENUS.register(
             "material_checklist_menu",
             () -> new MenuType<>(MaterialChecklistMenu::new, FeatureFlags.DEFAULT_FLAGS));
+
+    public static final DeferredHolder<MenuType<?>, MenuType<MaterialSelectionMenu>> MATERIAL_SELECTION_MENU = MENUS.register(
+            "material_selection_menu",
+            () -> new MenuType<>(MaterialSelectionMenu::new, FeatureFlags.DEFAULT_FLAGS));
 
     public static final DeferredHolder<MenuType<?>, MenuType<PresetLibraryMenu>> PRESET_LIBRARY_MENU = MENUS.register(
             "preset_library_menu",

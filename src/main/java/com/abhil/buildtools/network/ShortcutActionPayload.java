@@ -6,6 +6,7 @@ import com.abhil.buildtools.server.AdvancedBuildToolsModeMenu;
 import com.abhil.buildtools.server.BuildOperationEngine;
 import com.abhil.buildtools.server.BuildToolsModeMenu;
 import com.abhil.buildtools.server.BuildToolsState;
+import com.abhil.buildtools.server.MaterialSelectionMenu;
 import com.abhil.buildtools.shape.SelectionShape;
 import net.minecraft.core.Direction;
 import net.minecraft.network.RegistryFriendlyByteBuf;
@@ -37,6 +38,7 @@ public record ShortcutActionPayload(String action, String direction, int amount)
         }
         switch (payload.action()) {
             case "open_menu" -> openMenu(player);
+            case "open_materials" -> openMaterials(player);
             case "cycle_shape" -> BuildToolsState.cycleShape(player);
             case "cycle_mode" -> BuildToolsState.cycleMode(player);
             case "confirm_preview" -> confirm(player);
@@ -97,6 +99,18 @@ public record ShortcutActionPayload(String action, String direction, int amount)
 
     private static boolean isBrushTool(ItemStack stack) {
         return stack.is(ModItems.BUILDER_BRUSH.get());
+    }
+
+    private static boolean isMaterialSelectionTool(ItemStack stack) {
+        return stack.is(ModItems.BUILDER_WAND.get())
+                || stack.is(ModItems.ADVANCED_BUILDER_WAND.get())
+                || stack.is(ModItems.BUILDER_BRUSH.get());
+    }
+
+    private static void openMaterials(ServerPlayer player) {
+        if (isMaterialSelectionTool(player.getMainHandItem())) {
+            MaterialSelectionMenu.open(player);
+        }
     }
 
     private static void confirm(ServerPlayer player) {

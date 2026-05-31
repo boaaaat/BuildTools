@@ -42,7 +42,6 @@ import net.minecraft.world.entity.decoration.ItemFrame;
 import net.minecraft.world.entity.decoration.LeashFenceKnotEntity;
 import net.minecraft.world.entity.decoration.Painting;
 import net.minecraft.world.entity.item.ItemEntity;
-import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -132,14 +131,10 @@ public final class BuildOperationEngine {
             fail(player, "buildtools.error.dimension_mismatch");
             return false;
         }
-        List<PaletteEntry> palette = advanced ? BuildToolsState.paletteEntries(player) : List.of();
-        ItemStack source = player.getOffhandItem();
-        BlockState target = materialState(source);
-        if (target == null && advanced && !palette.isEmpty()) {
-            target = palette.getFirst().state();
-        }
+        List<PaletteEntry> palette = BuildToolsState.materialSelections(player);
+        BlockState target = BuildToolsState.primaryMaterial(player);
         if (target == null) {
-            fail(player, "buildtools.error.offhand_block");
+            fail(player, "buildtools.error.no_material_selection");
             return false;
         }
         if (!isSupportedTarget(target)) {
@@ -298,14 +293,10 @@ public final class BuildOperationEngine {
             fail(player, "buildtools.error.dimension_mismatch");
             return false;
         }
-        List<PaletteEntry> palette = BuildToolsState.paletteEntries(player);
-        ItemStack source = player.getOffhandItem();
-        BlockState target = materialState(source);
-        if (target == null && !palette.isEmpty()) {
-            target = palette.getFirst().state();
-        }
+        List<PaletteEntry> palette = BuildToolsState.materialSelections(player);
+        BlockState target = BuildToolsState.primaryMaterial(player);
         if (target == null) {
-            fail(player, "buildtools.error.offhand_block");
+            fail(player, "buildtools.error.no_material_selection");
             return false;
         }
         if (!isSupportedTarget(target)) {
@@ -426,6 +417,10 @@ public final class BuildOperationEngine {
     private static boolean executeBrush(ServerPlayer player, BlockPos origin, Direction face) {
         BrushMode brushMode = BuildToolsState.brushMode(player);
         BlockState target = brushMaterialFallback(player);
+        if (target.isAir() && brushMode != BrushMode.ERASE) {
+            fail(player, "buildtools.error.no_material_selection");
+            return false;
+        }
         if (!target.isAir() && !isSupportedTarget(target)) {
             fail(player, "buildtools.error.unsupported_block");
             return false;
@@ -447,7 +442,7 @@ public final class BuildOperationEngine {
         int radius = BuildToolsState.brushRadius(player);
         int density = BuildToolsState.brushDensity(player);
         BlockState replaceMatch = BuildToolsState.brushReplaceTarget(player);
-        List<PaletteEntry> palette = BuildToolsState.brushPaletteEntries(player);
+        List<PaletteEntry> palette = BuildToolsState.materialSelections(player);
         PaletteMode paletteMode = BuildToolsState.brushPaletteMode(player);
         List<BlockPos> positions = new ArrayList<>();
         List<BlockState> targets = new ArrayList<>();
@@ -669,19 +664,8 @@ public final class BuildOperationEngine {
     }
 
     private static BlockState brushMaterialFallback(ServerPlayer player) {
-        ItemStack source = player.getOffhandItem();
-        if (source.isEmpty()) {
-            return Blocks.AIR.defaultBlockState();
-        }
-        BlockState target = materialState(source);
-        if (target != null) {
-            return target;
-        }
-        List<PaletteEntry> palette = BuildToolsState.brushPaletteEntries(player);
-        if (!palette.isEmpty()) {
-            return palette.getFirst().state();
-        }
-        return Blocks.AIR.defaultBlockState();
+        BlockState target = BuildToolsState.primaryMaterial(player);
+        return target == null ? Blocks.AIR.defaultBlockState() : target;
     }
 
     private static BlockState brushMaterialTarget(
@@ -1737,19 +1721,6 @@ public final class BuildOperationEngine {
             return false;
         }
         return true;
-    }
-
-    private static BlockState materialState(ItemStack stack) {
-        if (stack.getItem() instanceof BlockItem blockItem) {
-            return blockItem.getBlock().defaultBlockState();
-        }
-        if (stack.is(Items.WATER_BUCKET)) {
-            return Blocks.WATER.defaultBlockState();
-        }
-        if (stack.is(Items.LAVA_BUCKET)) {
-            return Blocks.LAVA.defaultBlockState();
-        }
-        return null;
     }
 
     private static void addUndoRefund(List<ItemStack> refund, BlockState state) {
