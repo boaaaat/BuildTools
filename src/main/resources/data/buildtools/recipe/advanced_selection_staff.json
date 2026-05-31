@@ -3,7 +3,7 @@
   "pattern": [
     "AEA",
     "ASA",
-    " C "
+    "NCN"
   ],
   "key": {
     "A": {
@@ -17,6 +17,9 @@
     },
     "S": {
       "item": "buildtools:selection_staff"
+    },
+    "N": {
+      "item": "minecraft:netherite_ingot"
     }
   },
   "result": {

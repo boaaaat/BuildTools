@@ -2,7 +2,7 @@
   "type": "minecraft:crafting_shaped",
   "pattern": [
     "LSA",
-    "CR ",
+    "CRB",
     "S  "
   ],
   "key": {
@@ -20,6 +20,9 @@
     },
     "S": {
       "item": "minecraft:scaffolding"
+    },
+    "B": {
+      "item": "minecraft:dragon_breath"
     }
   },
   "result": {
