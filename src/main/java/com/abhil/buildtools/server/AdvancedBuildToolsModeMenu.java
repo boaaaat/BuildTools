@@ -2,6 +2,7 @@ package com.abhil.buildtools.server;
 
 import com.abhil.buildtools.registry.ModMenus;
 import com.abhil.buildtools.shape.BuildMode;
+import com.abhil.buildtools.shape.CustomShapeMode;
 import com.abhil.buildtools.shape.SelectionShape;
 import java.util.List;
 import net.minecraft.ChatFormatting;
@@ -24,9 +25,15 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
     private static final int MENU_SIZE = 54;
     private static final int SHAPE_START_SLOT = 9;
     private static final int GRADIENT_SLOT = 4;
+    private static final int MEASURE_CYCLE_SLOT = 6;
+    private static final int INSERT_MEASURE_POINT_SLOT = 7;
+    private static final int ADVANCED_SHAPES_SLOT = 34;
+    private static final int ADVANCED_SHAPE_START_SLOT = 9;
+    private static final int ROTATION_SLOT = 35;
     private final SimpleContainer menuItems = new SimpleContainer(MENU_SIZE);
     private final ServerPlayer owner;
     private final ToolProfile profile;
+    private boolean advancedShapesPage;
 
     public AdvancedBuildToolsModeMenu(int containerId, Inventory inventory) {
         this(containerId, inventory, inventory.player instanceof ServerPlayer serverPlayer ? serverPlayer : null);
@@ -51,6 +58,12 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
     public void clicked(int slotId, int button, ClickType clickType, Player player) {
         if (slotId >= 0 && slotId < MENU_SIZE && player instanceof ServerPlayer serverPlayer) {
             boolean rightClick = clickType == ClickType.PICKUP && button == 1;
+            if (advancedShapesPage) {
+                if (handleAdvancedShapesClick(serverPlayer, slotId, rightClick)) {
+                    populateMenuItems();
+                    return;
+                }
+            }
             if (isAdvancedSelectionMenu()) {
                 if (handleSelectionClick(serverPlayer, slotId, rightClick)) {
                     populateMenuItems();
@@ -119,6 +132,10 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             populateAdvancedSelectionMenu();
             return;
         }
+        if (advancedShapesPage) {
+            populateAdvancedShapesPage();
+            return;
+        }
         populateAdvancedBuilderMenu();
     }
 
@@ -140,6 +157,8 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(7, utilityItem(Items.DISPENSER, "buildtools.menu.random_pattern", "buildtools.menu.random_pattern.description",
                 owner != null && BuildToolsState.paletteMode(owner) == PaletteMode.RANDOM));
         menuItems.setItem(8, utilityItem(Items.BRICKS, "buildtools.menu.material_selection", "buildtools.menu.material_selection.description"));
+        menuItems.setItem(ADVANCED_SHAPES_SLOT, utilityItem(Items.NETHER_STAR, "buildtools.menu.advanced_shapes", "buildtools.menu.advanced_shapes.description"));
+        menuItems.setItem(ROTATION_SLOT, rotationModeItem());
 
         populateShapes(SHAPE_START_SLOT);
 
@@ -147,6 +166,10 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
     }
 
     private void populateAdvancedSelectionMenu() {
+        if (advancedShapesPage) {
+            populateAdvancedShapesPage();
+            return;
+        }
         boolean shared = owner != null && BuildToolsState.selectionVisibleToOthers(owner);
         menuItems.setItem(0, utilityItem(Items.BARRIER, "buildtools.menu.clear_advanced_points", "buildtools.menu.clear_advanced_points.description"));
         menuItems.setItem(1, utilityItem(Items.RED_DYE, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
@@ -159,26 +182,97 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
                         ? Component.translatable("buildtools.custom_shape_mode.auto")
                         : BuildToolsState.customShapeMode(owner).displayName()),
                 Component.translatable("buildtools.menu.custom_shape_mode.description"),
-                owner != null && BuildToolsState.selectionShape(owner) == SelectionShape.CUSTOM_SMART));
+                owner != null && (BuildToolsState.selectionShape(owner) == SelectionShape.CUSTOM_SMART
+                        || BuildToolsState.customShapeMode(owner) != CustomShapeMode.AUTO)));
+        SelectionMeasure measure = owner == null ? SelectionMeasure.OFF : BuildToolsState.selectionMeasure(owner);
+        menuItems.setItem(MEASURE_CYCLE_SLOT, stateItem(
+                Items.COMPASS,
+                Component.translatable("buildtools.menu.measurements").append(": ").append(measure.displayName()),
+                Component.translatable("buildtools.menu.measurements.description"),
+                measure != SelectionMeasure.OFF));
+        menuItems.setItem(INSERT_MEASURE_POINT_SLOT, utilityItem(
+                Items.LIME_DYE,
+                "buildtools.menu.insert_measurement_point",
+                "buildtools.menu.insert_measurement_point.description",
+                measure == SelectionMeasure.MIDPOINT));
         populateShapes(SHAPE_START_SLOT);
-        menuItems.setItem(27, NudgeMenuItems.item(owner, Direction.WEST, "buildtools.menu.nudge.description"));
-        menuItems.setItem(28, NudgeMenuItems.item(owner, Direction.EAST, "buildtools.menu.nudge.description"));
-        menuItems.setItem(29, NudgeMenuItems.item(owner, Direction.DOWN, "buildtools.menu.nudge.description"));
-        menuItems.setItem(30, NudgeMenuItems.item(owner, Direction.UP, "buildtools.menu.nudge.description"));
-        menuItems.setItem(31, NudgeMenuItems.item(owner, Direction.NORTH, "buildtools.menu.nudge.description"));
-        menuItems.setItem(32, NudgeMenuItems.item(owner, Direction.SOUTH, "buildtools.menu.nudge.description"));
-        menuItems.setItem(33, utilityItem(
+        menuItems.setItem(36, NudgeMenuItems.item(owner, Direction.WEST, "buildtools.menu.nudge.description"));
+        menuItems.setItem(37, NudgeMenuItems.item(owner, Direction.EAST, "buildtools.menu.nudge.description"));
+        menuItems.setItem(38, NudgeMenuItems.item(owner, Direction.DOWN, "buildtools.menu.nudge.description"));
+        menuItems.setItem(39, NudgeMenuItems.item(owner, Direction.UP, "buildtools.menu.nudge.description"));
+        menuItems.setItem(40, NudgeMenuItems.item(owner, Direction.NORTH, "buildtools.menu.nudge.description"));
+        menuItems.setItem(41, NudgeMenuItems.item(owner, Direction.SOUTH, "buildtools.menu.nudge.description"));
+        menuItems.setItem(42, utilityItem(
                 shared ? Items.ENDER_EYE : Items.ENDER_PEARL,
                 "buildtools.menu.selection_visibility",
                 "buildtools.menu.selection_visibility.description",
                 shared));
-        menuItems.setItem(36, NudgeMenuItems.expandItem(owner, Direction.WEST));
-        menuItems.setItem(37, NudgeMenuItems.expandItem(owner, Direction.EAST));
-        menuItems.setItem(38, NudgeMenuItems.expandItem(owner, Direction.DOWN));
-        menuItems.setItem(39, NudgeMenuItems.expandItem(owner, Direction.UP));
-        menuItems.setItem(40, NudgeMenuItems.expandItem(owner, Direction.NORTH));
-        menuItems.setItem(41, NudgeMenuItems.expandItem(owner, Direction.SOUTH));
+        menuItems.setItem(ADVANCED_SHAPES_SLOT, utilityItem(Items.NETHER_STAR, "buildtools.menu.advanced_shapes", "buildtools.menu.advanced_shapes.description"));
+        menuItems.setItem(ROTATION_SLOT, rotationModeItem());
+        menuItems.setItem(45, NudgeMenuItems.expandItem(owner, Direction.WEST));
+        menuItems.setItem(46, NudgeMenuItems.expandItem(owner, Direction.EAST));
+        menuItems.setItem(47, NudgeMenuItems.expandItem(owner, Direction.DOWN));
+        menuItems.setItem(48, NudgeMenuItems.expandItem(owner, Direction.UP));
+        menuItems.setItem(49, NudgeMenuItems.expandItem(owner, Direction.NORTH));
+        menuItems.setItem(50, NudgeMenuItems.expandItem(owner, Direction.SOUTH));
         menuItems.setItem(53, utilityItem(Items.KNOWLEDGE_BOOK, "buildtools.menu.help", "buildtools.menu.help.description"));
+    }
+
+    private void populateAdvancedShapesPage() {
+        menuItems.setItem(0, utilityItem(Items.ARROW, "buildtools.menu.back", "buildtools.menu.back.description"));
+        SelectionShape[] shapes = SelectionShape.advancedStructureShapes();
+        for (int i = 0; i < shapes.length; i++) {
+            ItemStack stack = shapeIcon(shapes[i]);
+            stack.set(DataComponents.CUSTOM_NAME, shapeName(shapes[i]));
+            Component description = structureShapeDescription(shapes[i]).copy().withStyle(ChatFormatting.GRAY);
+            stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
+            setSelected(stack, owner != null && BuildToolsState.selectionShape(owner) == shapes[i]);
+            menuItems.setItem(ADVANCED_SHAPE_START_SLOT + i, stack);
+        }
+        if (owner != null && BuildToolsState.selectionShape(owner).isAdvancedStructure()) {
+            populateAdvancedShapeOptions(BuildToolsState.selectionShape(owner));
+        }
+    }
+
+    private void populateAdvancedShapeOptions(SelectionShape shape) {
+        switch (shape) {
+            case GABLE_ROOF -> {
+                option(18, Items.PAPER, AdvancedShapeOption.DETAIL, shapeDetailName());
+                option(19, Items.COMPASS, AdvancedShapeOption.RIDGE, Component.translatable("buildtools.menu.advanced_shape.ridge", BuildToolsState.roofDirection(owner).displayName()));
+                option(20, Items.FEATHER, AdvancedShapeOption.OVERHANG, Component.translatable("buildtools.menu.advanced_shape.overhang", BuildToolsState.roofOverhang(owner)));
+                option(21, Items.OAK_TRAPDOOR, AdvancedShapeOption.END_CAPS, Component.translatable("buildtools.menu.advanced_shape.end_caps", onOff(BuildToolsState.gableEndCaps(owner))));
+            }
+            case HIP_ROOF -> {
+                option(18, Items.PAPER, AdvancedShapeOption.DETAIL, shapeDetailName());
+                option(19, Items.COMPASS, AdvancedShapeOption.RIDGE, Component.translatable("buildtools.menu.advanced_shape.cap_direction", BuildToolsState.roofDirection(owner).displayName()));
+                option(20, Items.FEATHER, AdvancedShapeOption.OVERHANG, Component.translatable("buildtools.menu.advanced_shape.overhang", BuildToolsState.roofOverhang(owner)));
+            }
+            case A_FRAME -> {
+                option(18, Items.PAPER, AdvancedShapeOption.DETAIL, shapeDetailName());
+                option(19, Items.COMPASS, AdvancedShapeOption.RIDGE, Component.translatable("buildtools.menu.advanced_shape.ridge", BuildToolsState.roofDirection(owner).displayName()));
+                option(20, Items.FEATHER, AdvancedShapeOption.OVERHANG, Component.translatable("buildtools.menu.advanced_shape.overhang", BuildToolsState.roofOverhang(owner)));
+                option(21, Items.OAK_PLANKS, AdvancedShapeOption.FLOOR_FRAME, Component.translatable("buildtools.menu.advanced_shape.floor_frame", onOff(BuildToolsState.aFrameFloorFrame(owner))));
+            }
+            case ROOM_FRAME -> {
+                option(18, Items.OAK_FENCE, AdvancedShapeOption.STUD_SPACING, Component.translatable("buildtools.menu.advanced_shape.stud_spacing", BuildToolsState.roomStudSpacing(owner)));
+                option(19, Items.OAK_PLANKS, AdvancedShapeOption.FLOOR_BEAMS, Component.translatable("buildtools.menu.advanced_shape.floor_beams", onOff(BuildToolsState.roomFloorBeams(owner))));
+                option(20, Items.OAK_SLAB, AdvancedShapeOption.CEILING_JOISTS, Component.translatable("buildtools.menu.advanced_shape.ceiling_joists", onOff(BuildToolsState.roomCeilingJoists(owner))));
+            }
+            case BRIDGE -> {
+                option(18, Items.OAK_SLAB, AdvancedShapeOption.BRIDGE_WIDTH, Component.translatable("buildtools.menu.advanced_shape.bridge_width", BuildToolsState.bridgeWidth(owner)));
+                option(19, Items.OAK_FENCE, AdvancedShapeOption.BRIDGE_RAILS, Component.translatable("buildtools.menu.advanced_shape.rails", onOff(BuildToolsState.bridgeRails(owner))));
+                option(20, Items.CHAIN, AdvancedShapeOption.BRIDGE_SUPPORTS, Component.translatable("buildtools.menu.advanced_shape.supports", BuildToolsState.bridgeSupportMode(owner).displayName()));
+                option(21, Items.SCAFFOLDING, AdvancedShapeOption.BRIDGE_SUPPORT_SPACING, Component.translatable("buildtools.menu.advanced_shape.support_spacing", BuildToolsState.bridgeSupportSpacing(owner)));
+            }
+            case TOWER -> {
+                option(18, Items.PAPER, AdvancedShapeOption.DETAIL, shapeDetailName());
+                option(19, Items.LADDER, AdvancedShapeOption.TOWER_FLOOR_HEIGHT, Component.translatable("buildtools.menu.advanced_shape.floor_height", BuildToolsState.towerFloorHeight(owner)));
+                option(20, Items.STONE_BRICKS, AdvancedShapeOption.TOWER_WALL_THICKNESS, Component.translatable("buildtools.menu.advanced_shape.wall_thickness", BuildToolsState.towerWallThickness(owner)));
+                option(21, Items.STONE_BRICK_STAIRS, AdvancedShapeOption.TOWER_TOP_STYLE, Component.translatable("buildtools.menu.advanced_shape.top_style", BuildToolsState.towerTopStyle(owner).displayName()));
+            }
+            default -> {
+            }
+        }
     }
 
     private void populateShapes(int startSlot) {
@@ -208,6 +302,10 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
                 Component description = Component.translatable("buildtools.menu.shape_hollow.description").withStyle(ChatFormatting.GRAY);
                 stack.set(DataComponents.CUSTOM_NAME, Component.translatable("buildtools.menu.shape_hollow", shapes[i].displayName(), fill));
                 stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
+            } else if (BuildToolsState.supportsDetailMode(shapes[i])) {
+                Component description = structureShapeDescription(shapes[i]).copy().withStyle(ChatFormatting.GRAY);
+                stack.set(DataComponents.CUSTOM_NAME, shapeName(shapes[i]));
+                stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
             } else {
                 stack.set(DataComponents.CUSTOM_NAME, shapeName(shapes[i]));
             }
@@ -228,7 +326,41 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
                     .append(": ")
                     .append(DirectionDisplay.stairDirection(owner, BuildToolsState.stairDirectionOverride(owner)));
         }
+        if (BuildToolsState.supportsDetailMode(shape)) {
+            Component detail = owner == null
+                    ? Component.translatable("buildtools.shape_detail.plain")
+                    : BuildToolsState.shapeDetailMode(owner).displayName();
+            var name = shape.displayName().copy().append(": ").append(detail);
+            if (BuildToolsState.supportsRoofDirection(shape)) {
+                Component direction = owner == null
+                        ? Component.translatable("buildtools.roof_direction.auto")
+                        : BuildToolsState.roofDirection(owner).displayName();
+                name.append(" / ").append(direction);
+            } else if (shape == SelectionShape.BRIDGE) {
+                int width = owner == null ? BuildToolsState.DEFAULT_BRIDGE_WIDTH : BuildToolsState.bridgeWidth(owner);
+                name.append(" / ").append(Component.translatable("buildtools.menu.bridge_width_short", width));
+            } else if (shape == SelectionShape.TOWER) {
+                int height = owner == null ? BuildToolsState.DEFAULT_TOWER_FLOOR_HEIGHT : BuildToolsState.towerFloorHeight(owner);
+                name.append(" / ").append(Component.translatable("buildtools.menu.tower_floor_short", height));
+            }
+            return name;
+        }
         return shape.displayName();
+    }
+
+    private Component structureShapeDescription(SelectionShape shape) {
+        if (BuildToolsState.supportsRoofDirection(shape)) {
+            return Component.translatable("buildtools.menu.roof_shape.description");
+        }
+        if (shape == SelectionShape.BRIDGE) {
+            int width = owner == null ? BuildToolsState.DEFAULT_BRIDGE_WIDTH : BuildToolsState.bridgeWidth(owner);
+            return Component.translatable("buildtools.menu.bridge.description", width);
+        }
+        if (shape == SelectionShape.TOWER) {
+            int height = owner == null ? BuildToolsState.DEFAULT_TOWER_FLOOR_HEIGHT : BuildToolsState.towerFloorHeight(owner);
+            return Component.translatable("buildtools.menu.tower.description", height);
+        }
+        return Component.translatable("buildtools.menu.structure_shape.description");
     }
 
     private static Component menuTitle(ServerPlayer player) {
@@ -277,13 +409,22 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         return stack;
     }
 
+    private ItemStack rotationModeItem() {
+        BlockRotationMode mode = owner == null ? BlockRotationMode.FIXED : BuildToolsState.blockRotationMode(owner);
+        return stateItem(
+                Items.COMPASS,
+                Component.translatable("buildtools.menu.block_rotation").append(": ").append(mode.displayName()),
+                Component.translatable("buildtools.menu.block_rotation.description"),
+                mode != BlockRotationMode.UNCHANGED);
+    }
+
     private static void setSelected(ItemStack stack, boolean selected) {
         if (selected) {
             stack.set(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true);
         }
     }
 
-    private static boolean handleUtilityClick(ServerPlayer player, int slotId) {
+    private boolean handleUtilityClick(ServerPlayer player, int slotId) {
         switch (slotId) {
             case 3 -> MaterialChecklistMenu.open(player);
             case 4 -> BuildToolsState.toggleGradient(player);
@@ -291,6 +432,8 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             case 6 -> BuildOperationEngine.applyPlan(player);
             case 7 -> BuildToolsState.toggleRandomPattern(player);
             case 8 -> MaterialSelectionMenu.open(player);
+            case ADVANCED_SHAPES_SLOT -> openAdvancedShapesPage();
+            case ROTATION_SLOT -> BuildToolsState.cycleBlockRotationMode(player, 1);
             case 39 -> HelpMenu.open(player);
             default -> {
                 return false;
@@ -307,19 +450,23 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             case 3 -> BuildToolsState.savePreset(player);
             case 4 -> PresetLibraryMenu.open(player);
             case 5 -> BuildToolsState.cycleCustomShapeMode(player);
-            case 27 -> BuildToolsState.nudgeSelection(player, Direction.WEST);
-            case 28 -> BuildToolsState.nudgeSelection(player, Direction.EAST);
-            case 29 -> BuildToolsState.nudgeSelection(player, Direction.DOWN);
-            case 30 -> BuildToolsState.nudgeSelection(player, Direction.UP);
-            case 31 -> BuildToolsState.nudgeSelection(player, Direction.NORTH);
-            case 32 -> BuildToolsState.nudgeSelection(player, Direction.SOUTH);
-            case 33 -> BuildToolsState.toggleSelectionVisibility(player);
-            case 36 -> BuildToolsState.resizeSelection(player, Direction.WEST, 1);
-            case 37 -> BuildToolsState.resizeSelection(player, Direction.EAST, 1);
-            case 38 -> BuildToolsState.resizeSelection(player, Direction.DOWN, 1);
-            case 39 -> BuildToolsState.resizeSelection(player, Direction.UP, 1);
-            case 40 -> BuildToolsState.resizeSelection(player, Direction.NORTH, 1);
-            case 41 -> BuildToolsState.resizeSelection(player, Direction.SOUTH, 1);
+            case MEASURE_CYCLE_SLOT -> BuildToolsState.cycleSelectionMeasure(player);
+            case INSERT_MEASURE_POINT_SLOT -> BuildToolsState.insertMeasurementPoint(player);
+            case ADVANCED_SHAPES_SLOT -> openAdvancedShapesPage();
+            case ROTATION_SLOT -> BuildToolsState.cycleBlockRotationMode(player, 1);
+            case 36 -> BuildToolsState.nudgeSelection(player, Direction.WEST);
+            case 37 -> BuildToolsState.nudgeSelection(player, Direction.EAST);
+            case 38 -> BuildToolsState.nudgeSelection(player, Direction.DOWN);
+            case 39 -> BuildToolsState.nudgeSelection(player, Direction.UP);
+            case 40 -> BuildToolsState.nudgeSelection(player, Direction.NORTH);
+            case 41 -> BuildToolsState.nudgeSelection(player, Direction.SOUTH);
+            case 42 -> BuildToolsState.toggleSelectionVisibility(player);
+            case 45 -> BuildToolsState.resizeSelection(player, Direction.WEST, 1);
+            case 46 -> BuildToolsState.resizeSelection(player, Direction.EAST, 1);
+            case 47 -> BuildToolsState.resizeSelection(player, Direction.DOWN, 1);
+            case 48 -> BuildToolsState.resizeSelection(player, Direction.UP, 1);
+            case 49 -> BuildToolsState.resizeSelection(player, Direction.NORTH, 1);
+            case 50 -> BuildToolsState.resizeSelection(player, Direction.SOUTH, 1);
             case 53 -> HelpMenu.open(player);
             default -> {
                 int shapeIndex = shapeIndex(slotId);
@@ -332,6 +479,29 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             }
         }
         return true;
+    }
+
+    private void openAdvancedShapesPage() {
+        advancedShapesPage = true;
+    }
+
+    private boolean handleAdvancedShapesClick(ServerPlayer player, int slotId, boolean rightClick) {
+        if (slotId == 0) {
+            advancedShapesPage = false;
+            return true;
+        }
+        int shapeIndex = slotId - ADVANCED_SHAPE_START_SLOT;
+        SelectionShape[] shapes = SelectionShape.advancedStructureShapes();
+        if (shapeIndex >= 0 && shapeIndex < shapes.length) {
+            BuildToolsState.setShape(player, shapes[shapeIndex]);
+            return true;
+        }
+        AdvancedShapeOption option = advancedShapeOption(slotId);
+        if (option != null) {
+            BuildToolsState.adjustAdvancedShapeOption(player, option, rightClick ? -1 : 1);
+            return true;
+        }
+        return false;
     }
 
     public void adjustRoadWidth(ServerPlayer player, int delta) {
@@ -351,6 +521,26 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
 
     public void adjustGradientDirection(ServerPlayer player, int delta) {
         BuildToolsState.cycleGradientDirection(player, delta);
+        populateMenuItems();
+    }
+
+    public void adjustBlockRotationMode(ServerPlayer player, int delta) {
+        BuildToolsState.cycleBlockRotationMode(player, delta);
+        populateMenuItems();
+    }
+
+    public void adjustBridgeWidth(ServerPlayer player, int delta) {
+        BuildToolsState.changeBridgeWidth(player, delta);
+        populateMenuItems();
+    }
+
+    public void adjustTowerFloorHeight(ServerPlayer player, int delta) {
+        BuildToolsState.changeTowerFloorHeight(player, delta);
+        populateMenuItems();
+    }
+
+    public void adjustAdvancedShapeOption(ServerPlayer player, AdvancedShapeOption option, int delta) {
+        BuildToolsState.adjustAdvancedShapeOption(player, option, delta);
         populateMenuItems();
     }
 
@@ -375,7 +565,17 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
                 BuildToolsState.toggleShapeHollow(player, shape);
                 yield true;
             }
-            default -> false;
+            default -> {
+                if (!BuildToolsState.supportsDetailMode(shape)) {
+                    yield false;
+                }
+                if (rightClick && BuildToolsState.supportsRoofDirection(shape)) {
+                    BuildToolsState.cycleRoofDirection(player);
+                } else {
+                    BuildToolsState.toggleShapeDetailMode(player, shape);
+                }
+                yield true;
+            }
         };
     }
 
@@ -385,9 +585,19 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
 
     private SelectionShape[] visibleShapes() {
         if (owner != null) {
-            return BuildToolsState.availableShapes(owner);
+            return mainVisibleShapes(BuildToolsState.availableShapes(owner));
         }
-        return isAdvancedSelectionMenu() ? SelectionShape.advancedSelectionShapes() : SelectionShape.shapesWithStairs();
+        return mainVisibleShapes(isAdvancedSelectionMenu() ? SelectionShape.advancedSelectionShapes() : SelectionShape.shapesWithStairs());
+    }
+
+    private static SelectionShape[] mainVisibleShapes(SelectionShape[] shapes) {
+        List<SelectionShape> visible = new java.util.ArrayList<>();
+        for (SelectionShape shape : shapes) {
+            if (!shape.isAdvancedStructure()) {
+                visible.add(shape);
+            }
+        }
+        return visible.toArray(SelectionShape[]::new);
     }
 
     private static ItemStack shapeIcon(SelectionShape shape) {
@@ -405,9 +615,34 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             case TUNNEL -> Items.RAIL;
             case ARCH -> Items.STONE_BRICK_STAIRS;
             case DOME -> Items.COPPER_BLOCK;
+            case PYRAMID -> Items.POINTED_DRIPSTONE;
+            case GABLE_ROOF -> Items.OAK_STAIRS;
+            case HIP_ROOF -> Items.DARK_OAK_STAIRS;
+            case A_FRAME -> Items.SPRUCE_LOG;
+            case ROOM_FRAME -> Items.OAK_LOG;
+            case BRIDGE -> Items.OAK_SLAB;
+            case TOWER -> Items.STONE_BRICKS;
             case CUSTOM_SMART -> Items.AMETHYST_SHARD;
             case STAIRS -> Items.STONE_STAIRS;
         });
+    }
+
+    private void option(int slot, net.minecraft.world.item.Item item, AdvancedShapeOption option, Component name) {
+        ItemStack stack = named(item, name);
+        Component description = Component.translatable("buildtools.menu.advanced_shape.option.description").withStyle(ChatFormatting.GRAY);
+        stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
+        setSelected(stack, advancedShapeOption(slot) == option);
+        menuItems.setItem(slot, stack);
+    }
+
+    private Component shapeDetailName() {
+        return Component.translatable("buildtools.menu.advanced_shape.detail", owner == null
+                ? Component.translatable("buildtools.shape_detail.plain")
+                : BuildToolsState.shapeDetailMode(owner).displayName());
+    }
+
+    private static Component onOff(boolean enabled) {
+        return Component.translatable(enabled ? "buildtools.option.on" : "buildtools.option.off");
     }
 
     private static int shapeIndex(int slotId) {
@@ -430,6 +665,10 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         return slot == GRADIENT_SLOT;
     }
 
+    public static boolean isRotationSlot(int slot) {
+        return slot == ROTATION_SLOT;
+    }
+
     public boolean isRoadShapeSlot(Slot slot) {
         return isShapeSlot(slot, SelectionShape.ROAD);
     }
@@ -439,11 +678,80 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
     }
 
     public boolean isStairShapeSlot(Slot slot) {
+        if (owner == null) {
+            return slot.getItem().is(Items.STONE_STAIRS);
+        }
         return isShapeSlot(slot, SelectionShape.STAIRS);
+    }
+
+    public boolean isBridgeShapeSlot(Slot slot) {
+        return isShapeSlot(slot, SelectionShape.BRIDGE);
+    }
+
+    public boolean isTowerShapeSlot(Slot slot) {
+        return isShapeSlot(slot, SelectionShape.TOWER);
+    }
+
+    public AdvancedShapeOption advancedShapeOption(Slot slot) {
+        return advancedShapesPage ? advancedShapeOption(this.slots.indexOf(slot)) : null;
+    }
+
+    private AdvancedShapeOption advancedShapeOption(int slotId) {
+        if (owner == null) {
+            return null;
+        }
+        SelectionShape shape = BuildToolsState.selectionShape(owner);
+        return switch (shape) {
+            case GABLE_ROOF -> switch (slotId) {
+                case 18 -> AdvancedShapeOption.DETAIL;
+                case 19 -> AdvancedShapeOption.RIDGE;
+                case 20 -> AdvancedShapeOption.OVERHANG;
+                case 21 -> AdvancedShapeOption.END_CAPS;
+                default -> null;
+            };
+            case HIP_ROOF -> switch (slotId) {
+                case 18 -> AdvancedShapeOption.DETAIL;
+                case 19 -> AdvancedShapeOption.RIDGE;
+                case 20 -> AdvancedShapeOption.OVERHANG;
+                default -> null;
+            };
+            case A_FRAME -> switch (slotId) {
+                case 18 -> AdvancedShapeOption.DETAIL;
+                case 19 -> AdvancedShapeOption.RIDGE;
+                case 20 -> AdvancedShapeOption.OVERHANG;
+                case 21 -> AdvancedShapeOption.FLOOR_FRAME;
+                default -> null;
+            };
+            case ROOM_FRAME -> switch (slotId) {
+                case 18 -> AdvancedShapeOption.STUD_SPACING;
+                case 19 -> AdvancedShapeOption.FLOOR_BEAMS;
+                case 20 -> AdvancedShapeOption.CEILING_JOISTS;
+                default -> null;
+            };
+            case BRIDGE -> switch (slotId) {
+                case 18 -> AdvancedShapeOption.BRIDGE_WIDTH;
+                case 19 -> AdvancedShapeOption.BRIDGE_RAILS;
+                case 20 -> AdvancedShapeOption.BRIDGE_SUPPORTS;
+                case 21 -> AdvancedShapeOption.BRIDGE_SUPPORT_SPACING;
+                default -> null;
+            };
+            case TOWER -> switch (slotId) {
+                case 18 -> AdvancedShapeOption.DETAIL;
+                case 19 -> AdvancedShapeOption.TOWER_FLOOR_HEIGHT;
+                case 20 -> AdvancedShapeOption.TOWER_WALL_THICKNESS;
+                case 21 -> AdvancedShapeOption.TOWER_TOP_STYLE;
+                default -> null;
+            };
+            default -> null;
+        };
     }
 
     public boolean isGradientSlot(Slot slot) {
         return isGradientSlot(this.slots.indexOf(slot));
+    }
+
+    public boolean isRotationSlot(Slot slot) {
+        return isRotationSlot(this.slots.indexOf(slot));
     }
 
     private boolean isShapeSlot(Slot slot, SelectionShape shape) {

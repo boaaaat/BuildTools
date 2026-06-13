@@ -43,6 +43,7 @@ public final class ClientSelectionRenderer {
         ClientSelectionData.second().ifPresent(pos -> renderBox(poseStack, lines, new AABB(pos), 1.0F, 0.7F, 0.1F, 1.0F));
         renderSelectionHandles(poseStack, lines);
         renderAdvancedPointBoxes(poseStack, lines);
+        renderMeasurementMarkers(poseStack, lines);
         if (BuildToolsClientConfig.SHOW_SHARED_SELECTIONS.get()) {
             renderSharedSelections(poseStack, lines, shared);
         }
@@ -65,6 +66,7 @@ public final class ClientSelectionRenderer {
 
         buffers.endBatch(RenderType.lines());
         renderAdvancedPointLabels(event, poseStack, buffers);
+        renderMeasurementMarkerLabels(event, poseStack, buffers);
         if (BuildToolsClientConfig.SHOW_SHARED_SELECTIONS.get()) {
             renderSharedPointLabels(event, poseStack, buffers);
         }
@@ -106,6 +108,22 @@ public final class ClientSelectionRenderer {
                             z + size), 1.0F, 1.0F, 0.15F, 1.0F);
                 }
             }
+        }
+    }
+
+    private static void renderMeasurementMarkers(PoseStack poseStack, VertexConsumer lines) {
+        for (ClientSelectionData.MeasurementMarker marker : ClientSelectionData.measurementMarkers()) {
+            double x = marker.x() + 0.5D;
+            double y = marker.y() + 0.5D;
+            double z = marker.z() + 0.5D;
+            double size = 0.16D;
+            renderBox(poseStack, lines, new AABB(
+                    x - size,
+                    y - size,
+                    z - size,
+                    x + size,
+                    y + size,
+                    z + size), 0.25F, 1.0F, 0.65F, 1.0F);
         }
     }
 
@@ -186,17 +204,27 @@ public final class ClientSelectionRenderer {
         }
     }
 
+    private static void renderMeasurementMarkerLabels(RenderLevelStageEvent event, PoseStack poseStack, MultiBufferSource buffers) {
+        for (ClientSelectionData.MeasurementMarker marker : ClientSelectionData.measurementMarkers()) {
+            renderLabel(event, poseStack, buffers, marker.x() + 0.5D, marker.y() + 1.1D, marker.z() + 0.5D, Component.literal(marker.label()));
+        }
+    }
+
     private static void renderPointLabel(RenderLevelStageEvent event, PoseStack poseStack, MultiBufferSource buffers, BlockPos point, Component label) {
+        renderLabel(event, poseStack, buffers, point.getX() + 0.5D, point.getY() + 1.45D, point.getZ() + 0.5D, label);
+    }
+
+    private static void renderLabel(RenderLevelStageEvent event, PoseStack poseStack, MultiBufferSource buffers, double x, double y, double z, Component label) {
         Font font = Minecraft.getInstance().font;
         poseStack.pushPose();
-        poseStack.translate(point.getX() + 0.5D, point.getY() + 1.45D, point.getZ() + 0.5D);
+        poseStack.translate(x, y, z);
         poseStack.mulPose(event.getCamera().rotation());
         poseStack.scale(0.04F, -0.04F, 0.04F);
         Matrix4f matrix = poseStack.last().pose();
         int background = (int)(Minecraft.getInstance().options.getBackgroundOpacity(0.35F) * 255.0F) << 24;
-        float x = -font.width(label) / 2.0F;
-        font.drawInBatch(label, x, 0.0F, 0x55FFFFFF, false, matrix, buffers, Font.DisplayMode.SEE_THROUGH, background, LightTexture.FULL_BRIGHT);
-        font.drawInBatch(label, x, 0.0F, 0xFFFFFFFF, false, matrix, buffers, Font.DisplayMode.NORMAL, 0, LightTexture.FULL_BRIGHT);
+        float labelX = -font.width(label) / 2.0F;
+        font.drawInBatch(label, labelX, 0.0F, 0x55FFFFFF, false, matrix, buffers, Font.DisplayMode.SEE_THROUGH, background, LightTexture.FULL_BRIGHT);
+        font.drawInBatch(label, labelX, 0.0F, 0xFFFFFFFF, false, matrix, buffers, Font.DisplayMode.NORMAL, 0, LightTexture.FULL_BRIGHT);
         poseStack.popPose();
     }
 

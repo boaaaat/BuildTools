@@ -17,6 +17,7 @@ public final class ClientSelectionData {
     private static List<BlockPos> points = List.of();
     private static List<BlockPos> preview = List.of();
     private static List<Integer> previewColors = List.of();
+    private static List<MeasurementMarker> measurementMarkers = List.of();
     private static boolean detailedPreview;
     private static final Map<UUID, SharedSelection> sharedSelections = new LinkedHashMap<>();
 
@@ -77,6 +78,14 @@ public final class ClientSelectionData {
         return points;
     }
 
+    public static void setMeasurementMarkers(List<MeasurementMarker> markers) {
+        measurementMarkers = List.copyOf(markers);
+    }
+
+    public static List<MeasurementMarker> measurementMarkers() {
+        return measurementMarkers;
+    }
+
     public static SelectionShape shape() {
         return shape;
     }
@@ -98,5 +107,8 @@ public final class ClientSelectionData {
             List<BlockPos> points,
             List<BlockPos> preview,
             boolean detailedPreview) {
+    }
+
+    public record MeasurementMarker(String label, double x, double y, double z) {
     }
 }

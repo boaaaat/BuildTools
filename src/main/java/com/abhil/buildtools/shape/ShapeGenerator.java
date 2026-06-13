@@ -21,11 +21,18 @@ public final class ShapeGenerator {
     }
 
     public static List<BlockPos> generate(Selection selection, CustomShapeMode customMode, StairDirectionOverride stairDirection, int roadWidth) {
-        return generate(selection, customMode, stairDirection, new Options(roadWidth, ArchMode.OPEN, 50, ArchDirection.X, false, false));
+        return generate(selection, customMode, stairDirection, new Options(roadWidth, ArchMode.OPEN, 50, ArchDirection.X, false, false, ShapeDetailMode.PLAIN, RoofDirection.AUTO, 0, true, false, 3, false, true, roadWidth, true, BridgeSupportMode.POSTS, 4, 4, 1, TowerTopStyle.BATTLEMENTS));
     }
 
     public static List<BlockPos> generate(Selection selection, CustomShapeMode customMode, StairDirectionOverride stairDirection, Options options) {
+        return generate(selection, customMode, stairDirection, options, false);
+    }
+
+    public static List<BlockPos> generate(Selection selection, CustomShapeMode customMode, StairDirectionOverride stairDirection, Options options, boolean advancedSelectionMode) {
         if (selection.shape() == SelectionShape.CUSTOM_SMART) {
+            return customSmart(selection.points(), customMode);
+        }
+        if (usesAdvancedSmartMode(selection, customMode)) {
             return customSmart(selection.points(), customMode);
         }
         if (!selection.isComplete()) {
@@ -38,7 +45,7 @@ public final class ShapeGenerator {
         BlockPos b = selection.second();
         return switch (selection.shape()) {
             case CUBOID -> cuboid(a, b, Filter.ALL);
-            case WALLS -> cuboid(a, b, Filter.WALLS);
+            case WALLS -> walls(selection, a, b, advancedSelectionMode);
             case FLOOR -> cuboid(a, b, Filter.FLOOR);
             case CEILING -> cuboid(a, b, Filter.CEILING);
             case HOLLOW_BOX -> cuboid(a, b, Filter.SHELL);
@@ -50,6 +57,13 @@ public final class ShapeGenerator {
             case TUNNEL -> tunnel(a, b);
             case ARCH -> arch(a, b, options.archMode(), options.archPeak(), options.archDirection());
             case DOME -> dome(a, b);
+            case PYRAMID -> pyramid(a, b);
+            case GABLE_ROOF -> gableRoof(a, b, options.roofDirection(), options.shapeDetailMode(), options.roofOverhang(), options.gableEndCaps());
+            case HIP_ROOF -> hipRoof(a, b, options.roofDirection(), options.shapeDetailMode(), options.roofOverhang());
+            case A_FRAME -> aFrame(a, b, options.roofDirection(), options.shapeDetailMode(), options.roofOverhang(), options.aFrameFloorFrame());
+            case ROOM_FRAME -> roomFrame(a, b, options.shapeDetailMode(), options.roomStudSpacing(), options.roomFloorBeams(), options.roomCeilingJoists());
+            case BRIDGE -> bridge(selection.points().size() > 1 ? selection.points() : List.of(a, b), a, b, options.bridgeWidth(), options.bridgeRails(), options.bridgeSupportMode(), options.bridgeSupportSpacing());
+            case TOWER -> tower(a, b, options.shapeDetailMode(), options.towerFloorHeight(), options.towerWallThickness(), options.towerTopStyle());
             case CUSTOM_SMART -> customSmart(selection.points(), customMode);
             case STAIRS -> stairs(selection, stairDirection);
         };
@@ -74,6 +88,40 @@ public final class ShapeGenerator {
             }
         }
         return positions;
+    }
+
+    private static boolean usesAdvancedSmartMode(Selection selection, CustomShapeMode customMode) {
+        return customMode != CustomShapeMode.AUTO
+                && selection.points().size() >= 3
+                && selection.shape() != SelectionShape.WALLS;
+    }
+
+    public static List<BlockPos> walls(Selection selection, BlockPos a, BlockPos b, boolean advancedSelectionMode) {
+        List<BlockPos> points = selection.points();
+        if (points.size() < 3) {
+            return cuboid(a, b, advancedSelectionMode ? Filter.ALL : Filter.WALLS);
+        }
+        int minY = Math.min(a.getY(), b.getY());
+        int maxY = Math.max(a.getY(), b.getY());
+        Set<BlockPos> footprint = new LinkedHashSet<>();
+        for (int i = 1; i < points.size(); i++) {
+            footprint.addAll(horizontalLine(points.get(i - 1), points.get(i), minY));
+        }
+        if (points.size() >= 3) {
+            footprint.addAll(horizontalLine(points.getLast(), points.getFirst(), minY));
+        }
+
+        Set<BlockPos> positions = new LinkedHashSet<>();
+        for (BlockPos floorPos : footprint) {
+            for (int y = minY; y <= maxY; y++) {
+                positions.add(new BlockPos(floorPos.getX(), y, floorPos.getZ()));
+            }
+        }
+        return List.copyOf(positions);
+    }
+
+    private static List<BlockPos> horizontalLine(BlockPos a, BlockPos b, int y) {
+        return line(new BlockPos(a.getX(), y, a.getZ()), new BlockPos(b.getX(), y, b.getZ()));
     }
 
     public static List<BlockPos> line(BlockPos a, BlockPos b) {
@@ -426,6 +474,378 @@ public final class ShapeGenerator {
         return shell;
     }
 
+    public static List<BlockPos> pyramid(BlockPos a, BlockPos b) {
+        int minX = Math.min(a.getX(), b.getX());
+        int minY = Math.min(a.getY(), b.getY());
+        int minZ = Math.min(a.getZ(), b.getZ());
+        int maxX = Math.max(a.getX(), b.getX());
+        int maxY = Math.max(a.getY(), b.getY());
+        int maxZ = Math.max(a.getZ(), b.getZ());
+        Set<BlockPos> positions = new LinkedHashSet<>();
+
+        for (int y = minY; y <= maxY; y++) {
+            int inset = y - minY;
+            int layerMinX = minX + inset;
+            int layerMaxX = maxX - inset;
+            int layerMinZ = minZ + inset;
+            int layerMaxZ = maxZ - inset;
+            if (layerMinX > layerMaxX || layerMinZ > layerMaxZ) {
+                break;
+            }
+            for (int z = layerMinZ; z <= layerMaxZ; z++) {
+                for (int x = layerMinX; x <= layerMaxX; x++) {
+                    if (x == layerMinX || x == layerMaxX || z == layerMinZ || z == layerMaxZ
+                            || layerMaxX - layerMinX <= 1 || layerMaxZ - layerMinZ <= 1) {
+                        positions.add(new BlockPos(x, y, z));
+                    }
+                }
+            }
+            if (layerMaxX - layerMinX <= 1 && layerMaxZ - layerMinZ <= 1) {
+                break;
+            }
+        }
+        return List.copyOf(positions);
+    }
+
+    public static List<BlockPos> gableRoof(BlockPos a, BlockPos b, RoofDirection direction, ShapeDetailMode detailMode, int overhang, boolean endCaps) {
+        Bounds bounds = Bounds.of(a, b).expandHorizontal(overhang);
+        Direction.Axis ridgeAxis = roofAxis(bounds, direction);
+        Set<BlockPos> positions = new LinkedHashSet<>();
+        int slopeMin = ridgeAxis == Direction.Axis.X ? bounds.minZ() : bounds.minX();
+        int slopeMax = ridgeAxis == Direction.Axis.X ? bounds.maxZ() : bounds.maxX();
+        int halfSpan = (slopeMax - slopeMin) / 2;
+        int roofHeight = Math.min(bounds.height() - 1, halfSpan);
+        for (int yOffset = 0; yOffset <= roofHeight; yOffset++) {
+            int y = bounds.minY() + yOffset;
+            int left = slopeMin + yOffset;
+            int right = slopeMax - yOffset;
+            addRoofLine(positions, bounds, ridgeAxis, left, y);
+            if (right != left) {
+                addRoofLine(positions, bounds, ridgeAxis, right, y);
+            }
+            if (endCaps && detailMode == ShapeDetailMode.DETAILED) {
+                addRoofEndFill(positions, bounds, ridgeAxis, left, right, y);
+            }
+        }
+        return List.copyOf(positions);
+    }
+
+    public static List<BlockPos> hipRoof(BlockPos a, BlockPos b, RoofDirection direction, ShapeDetailMode detailMode, int overhang) {
+        Bounds bounds = Bounds.of(a, b).expandHorizontal(overhang);
+        Set<BlockPos> positions = new LinkedHashSet<>();
+        Direction.Axis axis = roofAxis(bounds, direction);
+        int maxInset = Math.min(Math.min(bounds.widthX(), bounds.widthZ()) / 2, bounds.height() - 1);
+        for (int inset = 0; inset <= maxInset; inset++) {
+            int y = bounds.minY() + inset;
+            addRectangleRing(positions, bounds.minX() + inset, bounds.maxX() - inset, y, bounds.minZ() + inset, bounds.maxZ() - inset);
+            if (detailMode == ShapeDetailMode.DETAILED && inset % 3 == 0) {
+                if (axis == Direction.Axis.X) {
+                    addLineX(positions, bounds.minX() + inset, bounds.maxX() - inset, y, Mth.floor((bounds.minZ() + bounds.maxZ()) / 2.0D));
+                } else {
+                    addLineZ(positions, Mth.floor((bounds.minX() + bounds.maxX()) / 2.0D), y, bounds.minZ() + inset, bounds.maxZ() - inset);
+                }
+            }
+        }
+        return List.copyOf(positions);
+    }
+
+    public static List<BlockPos> aFrame(BlockPos a, BlockPos b, RoofDirection direction, ShapeDetailMode detailMode, int overhang, boolean floorFrame) {
+        Bounds bounds = Bounds.of(a, b).expandHorizontal(overhang);
+        Direction.Axis ridgeAxis = roofAxis(bounds, direction);
+        Set<BlockPos> positions = new LinkedHashSet<>();
+        int slopeMin = ridgeAxis == Direction.Axis.X ? bounds.minZ() : bounds.minX();
+        int slopeMax = ridgeAxis == Direction.Axis.X ? bounds.maxZ() : bounds.maxX();
+        int halfSpan = (slopeMax - slopeMin) / 2;
+        int roofHeight = Math.min(bounds.height() - 1, halfSpan);
+        for (int yOffset = 0; yOffset <= roofHeight; yOffset++) {
+            int y = bounds.minY() + yOffset;
+            int left = slopeMin + yOffset;
+            int right = slopeMax - yOffset;
+            addRoofLine(positions, bounds, ridgeAxis, left, y);
+            if (right != left) {
+                addRoofLine(positions, bounds, ridgeAxis, right, y);
+            }
+        }
+        if (detailMode == ShapeDetailMode.DETAILED) {
+            for (int yOffset = 0; yOffset <= roofHeight; yOffset++) {
+                int y = bounds.minY() + yOffset;
+                addRoofEndFill(positions, bounds, ridgeAxis, slopeMin + yOffset, slopeMax - yOffset, y);
+            }
+            int step = 3;
+            int alongMin = ridgeAxis == Direction.Axis.X ? bounds.minX() : bounds.minZ();
+            int alongMax = ridgeAxis == Direction.Axis.X ? bounds.maxX() : bounds.maxZ();
+            for (int along = alongMin; along <= alongMax; along += step) {
+                addAFrameRafter(positions, bounds, ridgeAxis, along, roofHeight);
+            }
+            addAFrameRafter(positions, bounds, ridgeAxis, alongMax, roofHeight);
+        }
+        if (floorFrame) {
+            addRectangleRing(positions, bounds.minX(), bounds.maxX(), bounds.minY(), bounds.minZ(), bounds.maxZ());
+        }
+        return List.copyOf(positions);
+    }
+
+    public static List<BlockPos> roomFrame(BlockPos a, BlockPos b, ShapeDetailMode detailMode, int studSpacing, boolean floorBeams, boolean ceilingJoists) {
+        Bounds bounds = Bounds.of(a, b);
+        Set<BlockPos> positions = new LinkedHashSet<>();
+        for (int y = bounds.minY(); y <= bounds.maxY(); y++) {
+            positions.add(new BlockPos(bounds.minX(), y, bounds.minZ()));
+            positions.add(new BlockPos(bounds.minX(), y, bounds.maxZ()));
+            positions.add(new BlockPos(bounds.maxX(), y, bounds.minZ()));
+            positions.add(new BlockPos(bounds.maxX(), y, bounds.maxZ()));
+        }
+        addRectangleRing(positions, bounds.minX(), bounds.maxX(), bounds.minY(), bounds.minZ(), bounds.maxZ());
+        addRectangleRing(positions, bounds.minX(), bounds.maxX(), bounds.maxY(), bounds.minZ(), bounds.maxZ());
+        if (floorBeams) {
+            addRectangleCross(positions, bounds.minX(), bounds.maxX(), bounds.minY(), bounds.minZ(), bounds.maxZ());
+        }
+        if (detailMode == ShapeDetailMode.DETAILED) {
+            addStuds(positions, bounds, studSpacing);
+        }
+        if (ceilingJoists) {
+            int spacing = Math.max(1, studSpacing);
+            for (int x = bounds.minX(); x <= bounds.maxX(); x += spacing) {
+                addLineZ(positions, x, bounds.maxY(), bounds.minZ(), bounds.maxZ());
+            }
+            for (int z = bounds.minZ(); z <= bounds.maxZ(); z += spacing) {
+                addLineX(positions, bounds.minX(), bounds.maxX(), bounds.maxY(), z);
+            }
+        }
+        return List.copyOf(positions);
+    }
+
+    public static List<BlockPos> bridge(List<BlockPos> points, BlockPos a, BlockPos b, int width, boolean rails, BridgeSupportMode supportMode, int supportSpacing) {
+        if (points.isEmpty()) {
+            return List.of();
+        }
+        Bounds bounds = Bounds.of(a, b);
+        List<PathPoint> center = points.size() < 3 ? linearPath(points) : smoothPath(points);
+        Set<BlockPos> positions = new LinkedHashSet<>();
+        int bridgeWidth = Math.max(1, width);
+        for (int i = 0; i < center.size(); i++) {
+            PathPoint previous = center.get(Math.max(0, i - 1));
+            PathPoint current = center.get(i);
+            PathPoint next = center.get(Math.min(center.size() - 1, i + 1));
+            stampBridgeCrossSection(positions, previous, current, next, bridgeWidth, bounds, rails, supportMode, supportSpacing, i);
+        }
+        return List.copyOf(positions);
+    }
+
+    public static List<BlockPos> tower(BlockPos a, BlockPos b, ShapeDetailMode detailMode, int floorHeight, int wallThickness, TowerTopStyle topStyle) {
+        Bounds bounds = Bounds.of(a, b);
+        Set<BlockPos> positions = new LinkedHashSet<>();
+        double centerX = (bounds.minX() + bounds.maxX()) / 2.0D;
+        double centerZ = (bounds.minZ() + bounds.maxZ()) / 2.0D;
+        double radiusX = Math.max(0.5D, (bounds.maxX() - bounds.minX()) / 2.0D);
+        double radiusZ = Math.max(0.5D, (bounds.maxZ() - bounds.minZ()) / 2.0D);
+        double innerScale = Math.max(0.0D, 1.0D - (double) Math.max(1, wallThickness) / Math.max(1.0D, Math.min(radiusX, radiusZ)));
+        for (int y = bounds.minY(); y <= bounds.maxY(); y++) {
+            for (int z = bounds.minZ(); z <= bounds.maxZ(); z++) {
+                for (int x = bounds.minX(); x <= bounds.maxX(); x++) {
+                    double nx = (x - centerX) / radiusX;
+                    double nz = (z - centerZ) / radiusZ;
+                    double value = nx * nx + nz * nz;
+                    if (value <= 1.0D && value >= innerScale * innerScale) {
+                        positions.add(new BlockPos(x, y, z));
+                    }
+                }
+            }
+        }
+        if (detailMode == ShapeDetailMode.DETAILED) {
+            int spacing = Math.max(1, floorHeight);
+            for (int y = bounds.minY() + spacing; y < bounds.maxY(); y += spacing) {
+                addTowerFloor(positions, bounds, centerX, centerZ, radiusX, radiusZ, y);
+            }
+        }
+        if (topStyle == TowerTopStyle.FLAT) {
+            addTowerFloor(positions, bounds, centerX, centerZ, radiusX, radiusZ, bounds.maxY());
+        } else if (topStyle == TowerTopStyle.BATTLEMENTS) {
+            addTowerCrenellations(positions, bounds, centerX, centerZ, radiusX, radiusZ);
+        } else {
+            addTowerRoof(positions, bounds, centerX, centerZ, radiusX, radiusZ);
+        }
+        return List.copyOf(positions);
+    }
+
+    private static Direction.Axis roofAxis(Bounds bounds, RoofDirection direction) {
+        if (direction == RoofDirection.X) {
+            return Direction.Axis.X;
+        }
+        if (direction == RoofDirection.Z) {
+            return Direction.Axis.Z;
+        }
+        return bounds.widthX() >= bounds.widthZ() ? Direction.Axis.X : Direction.Axis.Z;
+    }
+
+    private static void addRoofLine(Set<BlockPos> positions, Bounds bounds, Direction.Axis ridgeAxis, int slopeCoord, int y) {
+        if (ridgeAxis == Direction.Axis.X) {
+            addLineX(positions, bounds.minX(), bounds.maxX(), y, slopeCoord);
+        } else {
+            addLineZ(positions, slopeCoord, y, bounds.minZ(), bounds.maxZ());
+        }
+    }
+
+    private static void addRoofEndFill(Set<BlockPos> positions, Bounds bounds, Direction.Axis ridgeAxis, int left, int right, int y) {
+        if (ridgeAxis == Direction.Axis.X) {
+            for (int z = left; z <= right; z++) {
+                positions.add(new BlockPos(bounds.minX(), y, z));
+                positions.add(new BlockPos(bounds.maxX(), y, z));
+            }
+        } else {
+            for (int x = left; x <= right; x++) {
+                positions.add(new BlockPos(x, y, bounds.minZ()));
+                positions.add(new BlockPos(x, y, bounds.maxZ()));
+            }
+        }
+    }
+
+    private static void addAFrameRafter(Set<BlockPos> positions, Bounds bounds, Direction.Axis ridgeAxis, int along, int roofHeight) {
+        int slopeMin = ridgeAxis == Direction.Axis.X ? bounds.minZ() : bounds.minX();
+        int slopeMax = ridgeAxis == Direction.Axis.X ? bounds.maxZ() : bounds.maxX();
+        for (int yOffset = 0; yOffset <= roofHeight; yOffset++) {
+            int y = bounds.minY() + yOffset;
+            int left = slopeMin + yOffset;
+            int right = slopeMax - yOffset;
+            if (ridgeAxis == Direction.Axis.X) {
+                positions.add(new BlockPos(along, y, left));
+                positions.add(new BlockPos(along, y, right));
+            } else {
+                positions.add(new BlockPos(left, y, along));
+                positions.add(new BlockPos(right, y, along));
+            }
+        }
+    }
+
+    private static void addRectangleRing(Set<BlockPos> positions, int minX, int maxX, int y, int minZ, int maxZ) {
+        if (minX > maxX || minZ > maxZ) {
+            return;
+        }
+        addLineX(positions, minX, maxX, y, minZ);
+        addLineX(positions, minX, maxX, y, maxZ);
+        addLineZ(positions, minX, y, minZ, maxZ);
+        addLineZ(positions, maxX, y, minZ, maxZ);
+    }
+
+    private static void addRectangleCross(Set<BlockPos> positions, int minX, int maxX, int y, int minZ, int maxZ) {
+        int centerX = Mth.floor((minX + maxX) / 2.0D);
+        int centerZ = Mth.floor((minZ + maxZ) / 2.0D);
+        addLineX(positions, minX, maxX, y, centerZ);
+        addLineZ(positions, centerX, y, minZ, maxZ);
+    }
+
+    private static void addLineX(Set<BlockPos> positions, int minX, int maxX, int y, int z) {
+        for (int x = minX; x <= maxX; x++) {
+            positions.add(new BlockPos(x, y, z));
+        }
+    }
+
+    private static void addLineZ(Set<BlockPos> positions, int x, int y, int minZ, int maxZ) {
+        for (int z = minZ; z <= maxZ; z++) {
+            positions.add(new BlockPos(x, y, z));
+        }
+    }
+
+    private static void addStuds(Set<BlockPos> positions, Bounds bounds, int spacing) {
+        int step = Math.max(1, spacing);
+        for (int x = bounds.minX(); x <= bounds.maxX(); x += step) {
+            addVertical(positions, x, bounds.minY(), bounds.maxY(), bounds.minZ());
+            addVertical(positions, x, bounds.minY(), bounds.maxY(), bounds.maxZ());
+        }
+        for (int z = bounds.minZ(); z <= bounds.maxZ(); z += step) {
+            addVertical(positions, bounds.minX(), bounds.minY(), bounds.maxY(), z);
+            addVertical(positions, bounds.maxX(), bounds.minY(), bounds.maxY(), z);
+        }
+    }
+
+    private static void addVertical(Set<BlockPos> positions, int x, int minY, int maxY, int z) {
+        for (int y = minY; y <= maxY; y++) {
+            positions.add(new BlockPos(x, y, z));
+        }
+    }
+
+    private static void stampBridgeCrossSection(Set<BlockPos> positions, PathPoint previous, PathPoint current, PathPoint next, int width, Bounds bounds, boolean rails, BridgeSupportMode supportMode, int supportSpacing, int index) {
+        double dx = next.x() - previous.x();
+        double dz = next.z() - previous.z();
+        double length = Math.sqrt(dx * dx + dz * dz);
+        if (length < 0.0001D) {
+            dx = 0.0D;
+            dz = 1.0D;
+            length = 1.0D;
+        }
+        double perpendicularX = -dz / length;
+        double perpendicularZ = dx / length;
+        double centerOffset = (width - 1) / 2.0D;
+        int y = Mth.clamp(roundedBlock(current.y()), bounds.minY(), bounds.maxY());
+        for (int offsetIndex = 0; offsetIndex < width; offsetIndex++) {
+            double offset = offsetIndex - centerOffset;
+            int x = Mth.clamp(roundedBlock(current.x() + perpendicularX * offset), bounds.minX(), bounds.maxX());
+            int z = Mth.clamp(roundedBlock(current.z() + perpendicularZ * offset), bounds.minZ(), bounds.maxZ());
+            positions.add(new BlockPos(x, y, z));
+            boolean edge = offsetIndex == 0 || offsetIndex == width - 1;
+            if (rails && edge && y + 1 <= bounds.maxY()) {
+                positions.add(new BlockPos(x, y + 1, z));
+            }
+            if (edge && supportMode != BridgeSupportMode.NONE && index % Math.max(1, supportSpacing) == 0) {
+                if (supportMode == BridgeSupportMode.POSTS) {
+                    for (int supportY = bounds.minY(); supportY < y; supportY++) {
+                        positions.add(new BlockPos(x, supportY, z));
+                    }
+                } else if (supportMode == BridgeSupportMode.ARCHES) {
+                    int span = Math.max(1, width - 1);
+                    int archRise = Math.max(1, Math.min(3, y - bounds.minY()));
+                    int archY = Math.max(bounds.minY(), y - archRise + Mth.floor(Math.sin((double) offsetIndex / (double) span * Math.PI) * archRise));
+                    for (int supportY = archY; supportY < y; supportY++) {
+                        positions.add(new BlockPos(x, supportY, z));
+                    }
+                }
+            }
+        }
+    }
+
+    private static void addTowerFloor(Set<BlockPos> positions, Bounds bounds, double centerX, double centerZ, double radiusX, double radiusZ, int y) {
+        for (int z = bounds.minZ(); z <= bounds.maxZ(); z++) {
+            for (int x = bounds.minX(); x <= bounds.maxX(); x++) {
+                double nx = (x - centerX) / radiusX;
+                double nz = (z - centerZ) / radiusZ;
+                if (nx * nx + nz * nz <= 0.82D) {
+                    positions.add(new BlockPos(x, y, z));
+                }
+            }
+        }
+    }
+
+    private static void addTowerCrenellations(Set<BlockPos> positions, Bounds bounds, double centerX, double centerZ, double radiusX, double radiusZ) {
+        int index = 0;
+        for (int z = bounds.minZ(); z <= bounds.maxZ(); z++) {
+            for (int x = bounds.minX(); x <= bounds.maxX(); x++) {
+                double nx = (x - centerX) / radiusX;
+                double nz = (z - centerZ) / radiusZ;
+                double value = nx * nx + nz * nz;
+                if (value <= 1.0D && value >= 0.68D && index++ % 2 == 0) {
+                    positions.add(new BlockPos(x, bounds.maxY(), z));
+                }
+            }
+        }
+    }
+
+    private static void addTowerRoof(Set<BlockPos> positions, Bounds bounds, double centerX, double centerZ, double radiusX, double radiusZ) {
+        int roofHeight = Math.min(4, bounds.height());
+        for (int offset = 0; offset < roofHeight; offset++) {
+            int y = bounds.maxY() - roofHeight + 1 + offset;
+            double scale = Math.max(0.15D, 1.0D - (double) offset / (double) Math.max(1, roofHeight));
+            for (int z = bounds.minZ(); z <= bounds.maxZ(); z++) {
+                for (int x = bounds.minX(); x <= bounds.maxX(); x++) {
+                    double nx = (x - centerX) / Math.max(0.5D, radiusX * scale);
+                    double nz = (z - centerZ) / Math.max(0.5D, radiusZ * scale);
+                    double value = nx * nx + nz * nz;
+                    if (value <= 1.0D && value >= 0.65D) {
+                        positions.add(new BlockPos(x, y, z));
+                    }
+                }
+            }
+        }
+    }
+
     public static List<BlockPos> customSmart(List<BlockPos> points, CustomShapeMode mode) {
         if (points.isEmpty()) {
             return List.of();
@@ -771,14 +1191,74 @@ public final class ShapeGenerator {
     private record PathPoint(double x, double y, double z) {
     }
 
-    public record Options(int roadWidth, ArchMode archMode, int archPeak, ArchDirection archDirection, boolean sphereHollow, boolean ellipsoidHollow) {
-        public static final Options DEFAULT = new Options(3, ArchMode.OPEN, 50, ArchDirection.X, false, false);
+    private record Bounds(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
+        private static Bounds of(BlockPos a, BlockPos b) {
+            return new Bounds(
+                    Math.min(a.getX(), b.getX()),
+                    Math.min(a.getY(), b.getY()),
+                    Math.min(a.getZ(), b.getZ()),
+                    Math.max(a.getX(), b.getX()),
+                    Math.max(a.getY(), b.getY()),
+                    Math.max(a.getZ(), b.getZ()));
+        }
+
+        private int widthX() {
+            return maxX - minX + 1;
+        }
+
+        private int widthZ() {
+            return maxZ - minZ + 1;
+        }
+
+        private int height() {
+            return maxY - minY + 1;
+        }
+
+        private Bounds expandHorizontal(int amount) {
+            int distance = Math.max(0, amount);
+            return new Bounds(minX - distance, minY, minZ - distance, maxX + distance, maxY, maxZ + distance);
+        }
+    }
+
+    public record Options(
+            int roadWidth,
+            ArchMode archMode,
+            int archPeak,
+            ArchDirection archDirection,
+            boolean sphereHollow,
+            boolean ellipsoidHollow,
+            ShapeDetailMode shapeDetailMode,
+            RoofDirection roofDirection,
+            int roofOverhang,
+            boolean gableEndCaps,
+            boolean aFrameFloorFrame,
+            int roomStudSpacing,
+            boolean roomFloorBeams,
+            boolean roomCeilingJoists,
+            int bridgeWidth,
+            boolean bridgeRails,
+            BridgeSupportMode bridgeSupportMode,
+            int bridgeSupportSpacing,
+            int towerFloorHeight,
+            int towerWallThickness,
+            TowerTopStyle towerTopStyle) {
+        public static final Options DEFAULT = new Options(3, ArchMode.OPEN, 50, ArchDirection.X, false, false, ShapeDetailMode.PLAIN, RoofDirection.AUTO, 0, true, false, 3, false, true, 3, true, BridgeSupportMode.POSTS, 4, 4, 1, TowerTopStyle.BATTLEMENTS);
 
         public Options {
             roadWidth = Math.max(1, roadWidth);
             archMode = archMode == null ? ArchMode.OPEN : archMode;
             archPeak = Mth.clamp(archPeak, 0, 100);
             archDirection = archDirection == null ? ArchDirection.X : archDirection;
+            shapeDetailMode = shapeDetailMode == null ? ShapeDetailMode.PLAIN : shapeDetailMode;
+            roofDirection = roofDirection == null ? RoofDirection.AUTO : roofDirection;
+            roofOverhang = Mth.clamp(roofOverhang, 0, 3);
+            roomStudSpacing = Mth.clamp(roomStudSpacing, 2, 6);
+            bridgeWidth = Math.max(1, bridgeWidth);
+            bridgeSupportMode = bridgeSupportMode == null ? BridgeSupportMode.POSTS : bridgeSupportMode;
+            bridgeSupportSpacing = Mth.clamp(bridgeSupportSpacing, 2, 12);
+            towerFloorHeight = Mth.clamp(towerFloorHeight, 2, 16);
+            towerWallThickness = Mth.clamp(towerWallThickness, 1, 3);
+            towerTopStyle = towerTopStyle == null ? TowerTopStyle.BATTLEMENTS : towerTopStyle;
         }
     }
 

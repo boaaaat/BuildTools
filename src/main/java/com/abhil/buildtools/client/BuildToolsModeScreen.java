@@ -1,9 +1,13 @@
 package com.abhil.buildtools.client;
 
 import com.abhil.buildtools.network.ArchPeakPayload;
+import com.abhil.buildtools.network.AdvancedShapeOptionPayload;
+import com.abhil.buildtools.network.BridgeWidthPayload;
 import com.abhil.buildtools.network.BrushSettingPayload;
 import com.abhil.buildtools.network.RoadWidthPayload;
 import com.abhil.buildtools.network.StairDirectionPayload;
+import com.abhil.buildtools.network.TowerFloorHeightPayload;
+import com.abhil.buildtools.server.AdvancedShapeOption;
 import com.abhil.buildtools.server.BuildToolsModeMenu;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
@@ -16,7 +20,7 @@ import net.neoforged.neoforge.network.PacketDistributor;
 
 public final class BuildToolsModeScreen extends AbstractContainerScreen<BuildToolsModeMenu> {
     private static final ResourceLocation BACKGROUND = ResourceLocation.withDefaultNamespace("textures/gui/container/generic_54.png");
-    private static final int ROWS = 3;
+    private static final int ROWS = 4;
 
     public BuildToolsModeScreen(BuildToolsModeMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
@@ -41,6 +45,12 @@ public final class BuildToolsModeScreen extends AbstractContainerScreen<BuildToo
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
         Slot slot = this.hoveredSlot;
+        AdvancedShapeOption option = slot == null ? null : this.menu.advancedShapeOption(slot);
+        if (option != null) {
+            int step = scrollY >= 0.0D ? 1 : -1;
+            PacketDistributor.sendToServer(new AdvancedShapeOptionPayload(option, step));
+            return true;
+        }
         if (slot != null && this.menu.isRoadShapeSlot(slot) && slot.getItem().is(Items.RAIL)) {
             int step = scrollY >= 0.0D ? 1 : -1;
             PacketDistributor.sendToServer(new RoadWidthPayload(step));
@@ -54,6 +64,16 @@ public final class BuildToolsModeScreen extends AbstractContainerScreen<BuildToo
         if (slot != null && this.menu.isStairShapeSlot(slot) && slot.getItem().is(Items.STONE_STAIRS)) {
             int step = scrollY >= 0.0D ? 1 : -1;
             PacketDistributor.sendToServer(new StairDirectionPayload(step));
+            return true;
+        }
+        if (slot != null && this.menu.isBridgeShapeSlot(slot)) {
+            int step = scrollY >= 0.0D ? 1 : -1;
+            PacketDistributor.sendToServer(new BridgeWidthPayload(step));
+            return true;
+        }
+        if (slot != null && this.menu.isTowerShapeSlot(slot)) {
+            int step = scrollY >= 0.0D ? 1 : -1;
+            PacketDistributor.sendToServer(new TowerFloorHeightPayload(step));
             return true;
         }
         if (slot != null && this.menu.isBrushRadiusSlot(slot)) {

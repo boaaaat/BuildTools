@@ -4,6 +4,7 @@ import com.abhil.buildtools.config.BuildToolsConfig;
 import com.abhil.buildtools.network.ToolStatusPayload;
 import com.abhil.buildtools.registry.ModItems;
 import com.abhil.buildtools.shape.BuildMode;
+import com.abhil.buildtools.shape.CustomShapeMode;
 import com.abhil.buildtools.shape.Selection;
 import com.abhil.buildtools.shape.SelectionShape;
 import java.util.ArrayList;
@@ -36,7 +37,13 @@ public final class BuildToolActionbar {
         ItemStack held = heldBuildTool(player);
         if (held.isEmpty()) {
             PacketDistributor.sendToPlayer(player, ToolStatusPayload.hidden());
+            BuildToolsState.clearMeasurementOverlay(player);
             return;
+        }
+        if (held.is(ModItems.ADVANCED_SELECTION_STAFF.get())) {
+            BuildToolsState.refreshMeasurementOverlay(player);
+        } else {
+            BuildToolsState.clearMeasurementOverlay(player);
         }
 
         Component message = messageFor(player, held);
@@ -102,11 +109,7 @@ public final class BuildToolActionbar {
             return selectionMessage(player);
         }
         if (held.is(ModItems.ADVANCED_SELECTION_STAFF.get())) {
-            String details = "";
-            if (BuildToolsState.selectionShape(player) == SelectionShape.CUSTOM_SMART) {
-                details = " | Custom: " + BuildToolsState.customShapeMode(player).displayName().getString();
-            }
-            return Component.literal("Advanced Selection Staff | Points: " + BuildToolsState.advancedPointCount(player) + details + " | " + selectionMessage(player).getString());
+            return advancedSelectionMessage(player);
         }
         if (held.is(ModItems.BUILDER_WAND.get())) {
             return builderMessage(player);
@@ -130,6 +133,23 @@ public final class BuildToolActionbar {
             return historyMessage("Redo", BuildToolsState.peekRedo(player).orElse(null), player);
         }
         return null;
+    }
+
+    private static Component advancedSelectionMessage(ServerPlayer player) {
+        String details = "";
+        SelectionShape shape = BuildToolsState.selectionShape(player);
+        CustomShapeMode smartMode = BuildToolsState.customShapeMode(player);
+        if (shape == SelectionShape.CUSTOM_SMART || smartMode != CustomShapeMode.AUTO) {
+            details = " | Smart: " + smartMode.displayName().getString();
+        }
+        List<String> measurementLines = BuildToolsState.measurementStatusLines(player);
+        if (!measurementLines.isEmpty()) {
+            return Component.literal("Advanced Selection Staff | Points: " + BuildToolsState.advancedPointCount(player)
+                    + details
+                    + " | "
+                    + String.join(" | ", measurementLines));
+        }
+        return Component.literal("Advanced Selection Staff | Points: " + BuildToolsState.advancedPointCount(player) + details + " | " + selectionMessage(player).getString());
     }
 
     private static Component selectionMessage(ServerPlayer player) {
@@ -179,9 +199,17 @@ public final class BuildToolActionbar {
     private static Component advancedBuilderMessage(ServerPlayer player) {
         Component base = builderMessage(player);
         int paletteSize = BuildToolsState.materialSelections(player).size();
-        String materialMode = BuildToolsState.paletteMode(player).displayName().getString();
-        String gradientDirection = DirectionDisplay.gradientDirection(player, BuildToolsState.gradientDirection(player)).getString();
-        return Component.literal("Advanced " + base.getString() + " | Materials: " + paletteSize + " | Material mode: " + materialMode + " | Gradient: " + gradientDirection + " | Ghost/plan ready in menu");
+        PaletteMode paletteMode = BuildToolsState.paletteMode(player);
+        String materialMode = paletteMode.displayName().getString();
+        String gradientDirection = paletteMode == PaletteMode.GRADIENT
+                ? " | Gradient: " + DirectionDisplay.gradientDirection(player, BuildToolsState.gradientDirection(player)).getString()
+                : "";
+        return Component.literal("Advanced " + base.getString()
+                + " | Materials: " + paletteSize
+                + " | Material mode: " + materialMode
+                + gradientDirection
+                + " | Rotation: " + BuildToolsState.blockRotationMode(player).displayName().getString()
+                + " | Ghost/plan ready in menu");
     }
 
     private static Component brushMessage(ServerPlayer player) {

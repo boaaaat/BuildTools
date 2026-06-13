@@ -40,6 +40,14 @@ public record ScrollToolPayload(int direction, boolean alternate) implements Cus
             BuildToolsState.changeArchPeak(player, step);
             return;
         }
+        if (isShapeOptionScrollTool(held) && BuildToolsState.selectionShape(player) == SelectionShape.BRIDGE) {
+            BuildToolsState.changeBridgeWidth(player, step);
+            return;
+        }
+        if (isShapeOptionScrollTool(held) && BuildToolsState.selectionShape(player) == SelectionShape.TOWER) {
+            BuildToolsState.changeTowerFloorHeight(player, step);
+            return;
+        }
         if (held.is(ModItems.ADVANCED_SELECTION_STAFF.get())) {
             if (BuildToolsState.selectionShape(player) == SelectionShape.STAIRS) {
                 BuildToolsState.cycleStairDirection(player, step);

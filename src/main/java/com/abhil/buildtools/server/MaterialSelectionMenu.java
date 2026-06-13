@@ -57,7 +57,8 @@ public final class MaterialSelectionMenu extends AbstractContainerMenu {
     @Override
     public void clicked(int slotId, int button, ClickType clickType, Player player) {
         if (slotId >= 0 && slotId < MENU_SIZE && player instanceof ServerPlayer serverPlayer) {
-            if (handleClick(serverPlayer, slotId)) {
+            boolean rightClick = clickType == ClickType.PICKUP && button == 1;
+            if (handleClick(serverPlayer, slotId, rightClick)) {
                 populateMenuItems();
                 return;
             }
@@ -116,7 +117,7 @@ public final class MaterialSelectionMenu extends AbstractContainerMenu {
         menuItems.setItem(NEXT_SLOT, controlItem(Items.ARROW, Component.literal("Next Page"), page < maxPage));
     }
 
-    private boolean handleClick(ServerPlayer player, int slotId) {
+    private boolean handleClick(ServerPlayer player, int slotId, boolean rightClick) {
         List<MaterialOption> options = options();
         int maxPage = maxPage(options.size());
         if (slotId == PREVIOUS_SLOT && page > 0) {
@@ -142,7 +143,11 @@ public final class MaterialSelectionMenu extends AbstractContainerMenu {
         if (slotId >= 0 && slotId < PAGE_SIZE) {
             int index = page * PAGE_SIZE + slotId;
             if (index >= 0 && index < options.size()) {
-                BuildToolsState.toggleMaterialSelection(player, options.get(index).state(), BuildToolsState.MAX_MATERIAL_SELECTIONS);
+                if (rightClick) {
+                    BuildToolsState.setPrimaryMaterial(player, options.get(index).state());
+                } else {
+                    BuildToolsState.toggleMaterialSelection(player, options.get(index).state(), BuildToolsState.MAX_MATERIAL_SELECTIONS);
+                }
                 return true;
             }
         }

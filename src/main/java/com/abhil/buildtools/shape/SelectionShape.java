@@ -16,6 +16,13 @@ public enum SelectionShape {
     TUNNEL("tunnel"),
     ARCH("arch"),
     DOME("dome"),
+    PYRAMID("pyramid"),
+    GABLE_ROOF("gable_roof"),
+    HIP_ROOF("hip_roof"),
+    A_FRAME("a_frame"),
+    ROOM_FRAME("room_frame"),
+    BRIDGE("bridge"),
+    TOWER("tower"),
     CUSTOM_SMART("custom_smart"),
     STAIRS("stairs");
 
@@ -32,7 +39,8 @@ public enum SelectionShape {
             ROAD,
             TUNNEL,
             ARCH,
-            DOME
+            DOME,
+            PYRAMID
     };
 
     private static final SelectionShape[] WITH_STAIRS = {
@@ -49,6 +57,13 @@ public enum SelectionShape {
             TUNNEL,
             ARCH,
             DOME,
+            PYRAMID,
+            GABLE_ROOF,
+            HIP_ROOF,
+            A_FRAME,
+            ROOM_FRAME,
+            BRIDGE,
+            TOWER,
             STAIRS
     };
 
@@ -66,6 +81,13 @@ public enum SelectionShape {
             TUNNEL,
             ARCH,
             DOME,
+            PYRAMID,
+            GABLE_ROOF,
+            HIP_ROOF,
+            A_FRAME,
+            ROOM_FRAME,
+            BRIDGE,
+            TOWER,
             CUSTOM_SMART,
             STAIRS
     };
@@ -75,6 +97,15 @@ public enum SelectionShape {
             CYLINDER,
             CUBOID,
             FLOOR
+    };
+
+    private static final SelectionShape[] ADVANCED_STRUCTURES = {
+            GABLE_ROOF,
+            HIP_ROOF,
+            A_FRAME,
+            ROOM_FRAME,
+            BRIDGE,
+            TOWER
     };
 
     private final String key;
@@ -106,5 +137,18 @@ public enum SelectionShape {
 
     public static SelectionShape[] brushShapes() {
         return BRUSH.clone();
+    }
+
+    public static SelectionShape[] advancedStructureShapes() {
+        return ADVANCED_STRUCTURES.clone();
+    }
+
+    public boolean isAdvancedStructure() {
+        for (SelectionShape shape : ADVANCED_STRUCTURES) {
+            if (shape == this) {
+                return true;
+            }
+        }
+        return false;
     }
 }

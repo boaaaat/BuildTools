@@ -1,18 +1,23 @@
 package com.abhil.buildtools.server;
 
 import com.abhil.buildtools.network.BuildToolsNetworking;
+import com.abhil.buildtools.network.MeasurementOverlayPayload;
 import com.abhil.buildtools.network.PreviewPayload;
 import com.abhil.buildtools.network.SelectionSyncPayload;
 import com.abhil.buildtools.registry.ModItems;
 import com.abhil.buildtools.shape.ArchDirection;
 import com.abhil.buildtools.shape.ArchMode;
+import com.abhil.buildtools.shape.BridgeSupportMode;
 import com.abhil.buildtools.shape.BrushMode;
 import com.abhil.buildtools.shape.BuildMode;
 import com.abhil.buildtools.shape.CustomShapeMode;
+import com.abhil.buildtools.shape.RoofDirection;
 import com.abhil.buildtools.shape.Selection;
 import com.abhil.buildtools.shape.SelectionShape;
 import com.abhil.buildtools.shape.ShapeGenerator;
+import com.abhil.buildtools.shape.ShapeDetailMode;
 import com.abhil.buildtools.shape.StairDirectionOverride;
+import com.abhil.buildtools.shape.TowerTopStyle;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -80,10 +85,27 @@ public final class BuildToolsState {
     private static final Map<UUID, EnumMap<ToolProfile, Integer>> ARCH_PEAKS = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, Boolean>> SPHERE_HOLLOW = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, Boolean>> ELLIPSOID_HOLLOW = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, ShapeDetailMode>> SHAPE_DETAIL_MODES = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, RoofDirection>> ROOF_DIRECTIONS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Integer>> ROOF_OVERHANGS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Boolean>> GABLE_END_CAPS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Boolean>> A_FRAME_FLOOR_FRAMES = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Integer>> ROOM_STUD_SPACINGS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Boolean>> ROOM_FLOOR_BEAMS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Boolean>> ROOM_CEILING_JOISTS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Integer>> BRIDGE_WIDTHS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Boolean>> BRIDGE_RAILS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, BridgeSupportMode>> BRIDGE_SUPPORTS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Integer>> BRIDGE_SUPPORT_SPACINGS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Integer>> TOWER_FLOOR_HEIGHTS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Integer>> TOWER_WALL_THICKNESSES = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, TowerTopStyle>> TOWER_TOP_STYLES = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, Boolean>> GRADIENTS = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, PaletteMode>> PALETTE_MODES = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, GradientDirection>> GRADIENT_DIRECTIONS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, BlockRotationMode>> BLOCK_ROTATION_MODES = new HashMap<>();
     private static final Map<UUID, List<BlockPos>> ADVANCED_POINTS = new HashMap<>();
+    private static final Map<UUID, SelectionMeasure> SELECTION_MEASURES = new HashMap<>();
     private static final Map<UUID, Boolean> SHARED_SELECTION_VISIBILITY = new HashMap<>();
     private static final Map<UUID, CustomShapeMode> CUSTOM_SHAPE_MODES = new HashMap<>();
     private static final Map<UUID, StairDirectionOverride> STAIR_DIRECTIONS = new HashMap<>();
@@ -100,9 +122,25 @@ public final class BuildToolsState {
     private static final int MIN_ROAD_WIDTH = 1;
     private static final int MAX_ROAD_WIDTH = 16;
     public static final int DEFAULT_ARCH_PEAK = 50;
+    public static final int DEFAULT_BRIDGE_WIDTH = 3;
+    public static final int DEFAULT_TOWER_FLOOR_HEIGHT = 4;
     private static final int ARCH_PEAK_STEP = 5;
     private static final int MIN_ARCH_PEAK = 0;
     private static final int MAX_ARCH_PEAK = 100;
+    private static final int MIN_BRIDGE_WIDTH = 1;
+    private static final int MAX_BRIDGE_WIDTH = 16;
+    private static final int MIN_ROOF_OVERHANG = 0;
+    private static final int MAX_ROOF_OVERHANG = 3;
+    private static final int MIN_ROOM_STUD_SPACING = 2;
+    private static final int MAX_ROOM_STUD_SPACING = 6;
+    private static final int DEFAULT_ROOM_STUD_SPACING = 3;
+    private static final int MIN_BRIDGE_SUPPORT_SPACING = 2;
+    private static final int MAX_BRIDGE_SUPPORT_SPACING = 12;
+    private static final int DEFAULT_BRIDGE_SUPPORT_SPACING = 4;
+    private static final int MIN_TOWER_FLOOR_HEIGHT = 2;
+    private static final int MAX_TOWER_FLOOR_HEIGHT = 16;
+    private static final int MIN_TOWER_WALL_THICKNESS = 1;
+    private static final int MAX_TOWER_WALL_THICKNESS = 3;
     private static final int ADVANCED_SELECTION_ACTION_COOLDOWN = 6;
     private static final double ADVANCED_SELECTION_DISTANCE = 100.0D;
     private static final double ADVANCED_POINT_PICK_DISTANCE_SQR = 6.25D;
@@ -184,6 +222,74 @@ public final class BuildToolsState {
         return sharedShapeOption(ellipsoidHollows(player), SelectionShape.ELLIPSOID, false);
     }
 
+    public static ShapeDetailMode shapeDetailMode(ServerPlayer player) {
+        SelectionShape shape = selectionShape(player);
+        if (!supportsDetailMode(shape)) {
+            return ShapeDetailMode.PLAIN;
+        }
+        return sharedShapeOption(shapeDetailModes(player), shape, ShapeDetailMode.PLAIN);
+    }
+
+    public static RoofDirection roofDirection(ServerPlayer player) {
+        SelectionShape shape = selectionShape(player);
+        if (!supportsRoofDirection(shape)) {
+            return RoofDirection.AUTO;
+        }
+        return sharedShapeOption(roofDirections(player), shape, RoofDirection.AUTO);
+    }
+
+    public static int bridgeWidth(ServerPlayer player) {
+        return clampBridgeWidth(sharedShapeOption(bridgeWidths(player), SelectionShape.BRIDGE, DEFAULT_BRIDGE_WIDTH));
+    }
+
+    public static int roofOverhang(ServerPlayer player) {
+        return clampRoofOverhang(sharedShapeOption(roofOverhangs(player), selectionShape(player), 0));
+    }
+
+    public static boolean gableEndCaps(ServerPlayer player) {
+        return sharedShapeOption(gableEndCapsMap(player), SelectionShape.GABLE_ROOF, true);
+    }
+
+    public static boolean aFrameFloorFrame(ServerPlayer player) {
+        return sharedShapeOption(aFrameFloorFrames(player), SelectionShape.A_FRAME, false);
+    }
+
+    public static int roomStudSpacing(ServerPlayer player) {
+        return clampRoomStudSpacing(sharedShapeOption(roomStudSpacings(player), SelectionShape.ROOM_FRAME, DEFAULT_ROOM_STUD_SPACING));
+    }
+
+    public static boolean roomFloorBeams(ServerPlayer player) {
+        return sharedShapeOption(roomFloorBeamsMap(player), SelectionShape.ROOM_FRAME, false);
+    }
+
+    public static boolean roomCeilingJoists(ServerPlayer player) {
+        return sharedShapeOption(roomCeilingJoistsMap(player), SelectionShape.ROOM_FRAME, true);
+    }
+
+    public static boolean bridgeRails(ServerPlayer player) {
+        return sharedShapeOption(bridgeRailsMap(player), SelectionShape.BRIDGE, true);
+    }
+
+    public static BridgeSupportMode bridgeSupportMode(ServerPlayer player) {
+        return sharedShapeOption(bridgeSupports(player), SelectionShape.BRIDGE, BridgeSupportMode.POSTS);
+    }
+
+    public static int bridgeSupportSpacing(ServerPlayer player) {
+        return clampBridgeSupportSpacing(sharedShapeOption(bridgeSupportSpacings(player), SelectionShape.BRIDGE, DEFAULT_BRIDGE_SUPPORT_SPACING));
+    }
+
+    public static int towerFloorHeight(ServerPlayer player) {
+        return clampTowerFloorHeight(sharedShapeOption(towerFloorHeights(player), SelectionShape.TOWER, DEFAULT_TOWER_FLOOR_HEIGHT));
+    }
+
+    public static int towerWallThickness(ServerPlayer player) {
+        return clampTowerWallThickness(sharedShapeOption(towerWallThicknesses(player), SelectionShape.TOWER, 1));
+    }
+
+    public static TowerTopStyle towerTopStyle(ServerPlayer player) {
+        return sharedShapeOption(towerTopStyles(player), SelectionShape.TOWER, TowerTopStyle.BATTLEMENTS);
+    }
+
     public static boolean gradientEnabled(ServerPlayer player) {
         return paletteMode(player) == PaletteMode.GRADIENT || gradients(player).getOrDefault(activeProfile(player), false);
     }
@@ -213,12 +319,25 @@ public final class BuildToolsState {
         return STAIR_DIRECTIONS.getOrDefault(player.getUUID(), StairDirectionOverride.POINT_ORDER);
     }
 
+    public static BlockRotationMode blockRotationMode(ServerPlayer player) {
+        return blockRotationModes(player).getOrDefault(activeProfile(player), BlockRotationMode.FIXED);
+    }
+
     public static AreaBreakerPreset areaBreakerPreset(ServerPlayer player) {
         return AREA_BREAKER_PRESETS.getOrDefault(player.getUUID(), AreaBreakerPreset.NORMAL);
     }
 
+    public static SelectionMeasure selectionMeasure(ServerPlayer player) {
+        return SELECTION_MEASURES.getOrDefault(player.getUUID(), SelectionMeasure.OFF);
+    }
+
     public static List<BlockPos> generatedSelection(ServerPlayer player) {
-        return ShapeGenerator.generate(selection(player), customShapeMode(player), stairDirectionOverride(player), shapeOptions(player));
+        return ShapeGenerator.generate(
+                selection(player),
+                customShapeMode(player),
+                stairDirectionOverride(player),
+                shapeOptions(player),
+                activeProfile(player) == ToolProfile.ADVANCED_SELECTION);
     }
 
     public static ToolProfile activeToolProfile(ServerPlayer player) {
@@ -343,6 +462,14 @@ public final class BuildToolsState {
         STAIR_DIRECTIONS.put(player.getUUID(), next);
         BuildOperationEngine.clearPendingOperation(player);
         player.displayClientMessage(Component.translatable("buildtools.message.stair_direction", DirectionDisplay.stairDirection(player, next)), true);
+        sendPreview(player);
+    }
+
+    public static void cycleBlockRotationMode(ServerPlayer player, int step) {
+        BlockRotationMode next = blockRotationMode(player).next(step);
+        blockRotationModes(player).put(activeProfile(player), next);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.block_rotation_mode", next.displayName()), true);
         sendPreview(player);
     }
 
@@ -784,6 +911,71 @@ public final class BuildToolsState {
         syncSharedSelectionsTo(player);
     }
 
+    public static void setSelectionMeasure(ServerPlayer player, SelectionMeasure measure) {
+        if (measure == null) {
+            measure = SelectionMeasure.OFF;
+        }
+        SELECTION_MEASURES.put(player.getUUID(), measure);
+        refreshMeasurementOverlay(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.measurement_mode", measure.displayName()), true);
+    }
+
+    public static void cycleSelectionMeasure(ServerPlayer player) {
+        setSelectionMeasure(player, selectionMeasure(player).next());
+    }
+
+    public static List<String> measurementStatusLines(ServerPlayer player) {
+        SelectionMeasure measure = selectionMeasure(player);
+        if (measure == SelectionMeasure.OFF) {
+            return List.of();
+        }
+        return SelectionMeasurements.measure(player, measure).lines();
+    }
+
+    public static void insertMeasurementPoint(ServerPlayer player) {
+        SelectionMeasure measure = selectionMeasure(player);
+        if (measure != SelectionMeasure.MIDPOINT) {
+            player.displayClientMessage(Component.translatable("buildtools.error.no_measurement_point"), false);
+            return;
+        }
+        List<BlockPos> insertPoints = SelectionMeasurements.measure(player, measure).insertPoints();
+        if (insertPoints.isEmpty()) {
+            player.displayClientMessage(Component.translatable("buildtools.error.no_measurement_point"), false);
+            return;
+        }
+        List<BlockPos> points = new ArrayList<>(ADVANCED_POINTS.getOrDefault(player.getUUID(), List.of()));
+        int added = 0;
+        for (BlockPos insertPoint : insertPoints) {
+            BlockPos point = insertPoint.immutable();
+            if (!points.contains(point)) {
+                points.add(point);
+                added++;
+            }
+        }
+        if (added > 0) {
+            setAdvancedPoints(player, points);
+        }
+        if (added == 0) {
+            player.displayClientMessage(Component.translatable("buildtools.message.measurement_points_unchanged"), true);
+        } else {
+            player.displayClientMessage(Component.translatable(added == 1
+                    ? "buildtools.message.measurement_point_inserted"
+                    : "buildtools.message.measurement_points_inserted", added), true);
+        }
+    }
+
+    public static void refreshMeasurementOverlay(ServerPlayer player) {
+        SelectionMeasure measure = selectionMeasure(player);
+        SelectionMeasurements.Result result = measure == SelectionMeasure.OFF
+                ? SelectionMeasurements.Result.empty()
+                : SelectionMeasurements.measure(player, measure);
+        PacketDistributor.sendToPlayer(player, new MeasurementOverlayPayload(result));
+    }
+
+    public static void clearMeasurementOverlay(ServerPlayer player) {
+        PacketDistributor.sendToPlayer(player, new MeasurementOverlayPayload(SelectionMeasurements.Result.empty()));
+    }
+
     public static void nudgeSelection(ServerPlayer player, Direction direction) {
         Selection selection = selection(player);
         if (!selection.isComplete() || selection.dimension() == null) {
@@ -807,6 +999,25 @@ public final class BuildToolsState {
         BuildOperationEngine.clearPendingOperation(player);
         sync(player);
         player.displayClientMessage(Component.translatable("buildtools.message.selection_nudged", DirectionDisplay.direction(player, direction)), true);
+    }
+
+    public static boolean nudgeClosestAdvancedPoint(ServerPlayer player, Direction direction, int amount) {
+        List<BlockPos> points = new ArrayList<>(ADVANCED_POINTS.getOrDefault(player.getUUID(), List.of()));
+        if (points.isEmpty()) {
+            player.displayClientMessage(Component.translatable("buildtools.error.no_advanced_point"), false);
+            return false;
+        }
+        int index = closestAdvancedPoint(player, points);
+        if (index < 0) {
+            player.displayClientMessage(Component.translatable("buildtools.error.no_advanced_point"), false);
+            return false;
+        }
+        int steps = Math.max(1, Math.min(10, Math.abs(amount)));
+        BlockPos moved = points.get(index).relative(direction, steps);
+        points.set(index, moved);
+        setAdvancedPoints(player, points);
+        player.displayClientMessage(Component.translatable("buildtools.message.advanced_point_nudged", index + 1, DirectionDisplay.direction(player, direction), format(moved)), true);
+        return true;
     }
 
     public static void resizeSelection(ServerPlayer player, Direction direction, int amount) {
@@ -1319,6 +1530,169 @@ public final class BuildToolsState {
         }
     }
 
+    public static void toggleShapeDetailMode(ServerPlayer player, SelectionShape shape) {
+        if (!supportsDetailMode(shape)) {
+            return;
+        }
+        changeShapeDetailMode(player, shape, 1);
+    }
+
+    public static void changeShapeDetailMode(ServerPlayer player, SelectionShape shape, int delta) {
+        if (!supportsDetailMode(shape)) {
+            return;
+        }
+        ShapeDetailMode mode = shapeDetailMode(player).next(delta);
+        putForProfilesSupportingShape(shapeDetailModes(player), shape, mode);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.shape_detail_mode", shape.displayName(), mode.displayName()), true);
+        sendPreview(player);
+    }
+
+    public static void cycleRoofDirection(ServerPlayer player) {
+        cycleRoofDirection(player, 1);
+    }
+
+    public static void cycleRoofDirection(ServerPlayer player, int delta) {
+        SelectionShape shape = selectionShape(player);
+        if (!supportsRoofDirection(shape)) {
+            return;
+        }
+        RoofDirection direction = roofDirection(player).next(delta);
+        putForProfilesSupportingShape(roofDirections(player), shape, direction);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.roof_direction", direction.displayName()), true);
+        sendPreview(player);
+    }
+
+    public static void changeBridgeWidth(ServerPlayer player, int delta) {
+        int width = clampBridgeWidth(bridgeWidth(player) + delta);
+        putForProfilesSupportingShape(bridgeWidths(player), SelectionShape.BRIDGE, width);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.bridge_width", width), true);
+        sendPreview(player);
+    }
+
+    public static void changeTowerFloorHeight(ServerPlayer player, int delta) {
+        int height = clampTowerFloorHeight(towerFloorHeight(player) + delta);
+        putForProfilesSupportingShape(towerFloorHeights(player), SelectionShape.TOWER, height);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.tower_floor_height", height), true);
+        sendPreview(player);
+    }
+
+    public static void adjustAdvancedShapeOption(ServerPlayer player, AdvancedShapeOption option, int delta) {
+        SelectionShape shape = selectionShape(player);
+        switch (option) {
+            case DETAIL -> changeShapeDetailMode(player, shape, delta);
+            case RIDGE -> cycleRoofDirection(player, delta);
+            case OVERHANG -> changeRoofOverhang(player, delta);
+            case END_CAPS -> toggleGableEndCaps(player);
+            case FLOOR_FRAME -> toggleAFrameFloorFrame(player);
+            case STUD_SPACING -> changeRoomStudSpacing(player, delta);
+            case FLOOR_BEAMS -> toggleRoomFloorBeams(player);
+            case CEILING_JOISTS -> toggleRoomCeilingJoists(player);
+            case BRIDGE_WIDTH -> changeBridgeWidth(player, delta);
+            case BRIDGE_RAILS -> toggleBridgeRails(player);
+            case BRIDGE_SUPPORTS -> cycleBridgeSupportMode(player, delta);
+            case BRIDGE_SUPPORT_SPACING -> changeBridgeSupportSpacing(player, delta);
+            case TOWER_FLOOR_HEIGHT -> changeTowerFloorHeight(player, delta);
+            case TOWER_WALL_THICKNESS -> changeTowerWallThickness(player, delta);
+            case TOWER_TOP_STYLE -> cycleTowerTopStyle(player, delta);
+        }
+    }
+
+    public static void changeRoofOverhang(ServerPlayer player, int delta) {
+        SelectionShape shape = selectionShape(player);
+        int overhang = clampRoofOverhang(roofOverhang(player) + delta);
+        putForProfilesSupportingShape(roofOverhangs(player), shape, overhang);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.roof_overhang", overhang), true);
+        sendPreview(player);
+    }
+
+    public static void toggleGableEndCaps(ServerPlayer player) {
+        boolean enabled = !gableEndCaps(player);
+        putForProfilesSupportingShape(gableEndCapsMap(player), SelectionShape.GABLE_ROOF, enabled);
+        sendBooleanOptionMessage(player, "buildtools.message.gable_end_caps", enabled);
+    }
+
+    public static void toggleAFrameFloorFrame(ServerPlayer player) {
+        boolean enabled = !aFrameFloorFrame(player);
+        putForProfilesSupportingShape(aFrameFloorFrames(player), SelectionShape.A_FRAME, enabled);
+        sendBooleanOptionMessage(player, "buildtools.message.a_frame_floor_frame", enabled);
+    }
+
+    public static void changeRoomStudSpacing(ServerPlayer player, int delta) {
+        int spacing = clampRoomStudSpacing(roomStudSpacing(player) + delta);
+        putForProfilesSupportingShape(roomStudSpacings(player), SelectionShape.ROOM_FRAME, spacing);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.room_stud_spacing", spacing), true);
+        sendPreview(player);
+    }
+
+    public static void toggleRoomFloorBeams(ServerPlayer player) {
+        boolean enabled = !roomFloorBeams(player);
+        putForProfilesSupportingShape(roomFloorBeamsMap(player), SelectionShape.ROOM_FRAME, enabled);
+        sendBooleanOptionMessage(player, "buildtools.message.room_floor_beams", enabled);
+    }
+
+    public static void toggleRoomCeilingJoists(ServerPlayer player) {
+        boolean enabled = !roomCeilingJoists(player);
+        putForProfilesSupportingShape(roomCeilingJoistsMap(player), SelectionShape.ROOM_FRAME, enabled);
+        sendBooleanOptionMessage(player, "buildtools.message.room_ceiling_joists", enabled);
+    }
+
+    public static void toggleBridgeRails(ServerPlayer player) {
+        boolean enabled = !bridgeRails(player);
+        putForProfilesSupportingShape(bridgeRailsMap(player), SelectionShape.BRIDGE, enabled);
+        sendBooleanOptionMessage(player, "buildtools.message.bridge_rails", enabled);
+    }
+
+    public static void cycleBridgeSupportMode(ServerPlayer player, int delta) {
+        BridgeSupportMode mode = bridgeSupportMode(player).next(delta);
+        putForProfilesSupportingShape(bridgeSupports(player), SelectionShape.BRIDGE, mode);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.bridge_supports", mode.displayName()), true);
+        sendPreview(player);
+    }
+
+    public static void changeBridgeSupportSpacing(ServerPlayer player, int delta) {
+        int spacing = clampBridgeSupportSpacing(bridgeSupportSpacing(player) + delta);
+        putForProfilesSupportingShape(bridgeSupportSpacings(player), SelectionShape.BRIDGE, spacing);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.bridge_support_spacing", spacing), true);
+        sendPreview(player);
+    }
+
+    public static void changeTowerWallThickness(ServerPlayer player, int delta) {
+        int thickness = clampTowerWallThickness(towerWallThickness(player) + delta);
+        putForProfilesSupportingShape(towerWallThicknesses(player), SelectionShape.TOWER, thickness);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.tower_wall_thickness", thickness), true);
+        sendPreview(player);
+    }
+
+    public static void cycleTowerTopStyle(ServerPlayer player, int delta) {
+        TowerTopStyle style = towerTopStyle(player).next(delta);
+        putForProfilesSupportingShape(towerTopStyles(player), SelectionShape.TOWER, style);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.tower_top_style", style.displayName()), true);
+        sendPreview(player);
+    }
+
+    public static boolean supportsDetailMode(SelectionShape shape) {
+        return shape == SelectionShape.GABLE_ROOF
+                || shape == SelectionShape.HIP_ROOF
+                || shape == SelectionShape.A_FRAME
+                || shape == SelectionShape.ROOM_FRAME
+                || shape == SelectionShape.BRIDGE
+                || shape == SelectionShape.TOWER;
+    }
+
+    public static boolean supportsRoofDirection(SelectionShape shape) {
+        return shape == SelectionShape.GABLE_ROOF || shape == SelectionShape.HIP_ROOF || shape == SelectionShape.A_FRAME;
+    }
+
     public static void toggleGradient(ServerPlayer player) {
         setPaletteMode(player, paletteMode(player) == PaletteMode.GRADIENT ? PaletteMode.SINGLE : PaletteMode.GRADIENT);
     }
@@ -1342,6 +1716,7 @@ public final class BuildToolsState {
     public static void sendPreview(ServerPlayer player) {
         if (PENDING_PASTE_ORIGINS.containsKey(player.getUUID())) {
             persist(player);
+            refreshMeasurementOverlay(player);
             if (selectionVisibleToOthers(player)) {
                 syncSharedSelectionFrom(player);
             }
@@ -1358,6 +1733,7 @@ public final class BuildToolsState {
         List<Integer> colors = gradientPreviewColors(player, selection, preview);
         persist(player);
         PacketDistributor.sendToPlayer(player, new PreviewPayload(preview, false, colors));
+        refreshMeasurementOverlay(player);
         if (selectionVisibleToOthers(player)) {
             syncSharedSelectionFrom(player);
         }
@@ -1607,11 +1983,16 @@ public final class BuildToolsState {
     }
 
     private static List<BlockPos> filteredPreview(ServerPlayer player, Selection selection) {
-        List<BlockPos> generated = ShapeGenerator.generate(selection, customShapeMode(player), stairDirectionOverride(player), shapeOptions(player));
+        ToolProfile profile = activeProfile(player);
+        List<BlockPos> generated = ShapeGenerator.generate(
+                selection,
+                customShapeMode(player),
+                stairDirectionOverride(player),
+                shapeOptions(player),
+                profile == ToolProfile.ADVANCED_SELECTION);
         if (generated.isEmpty()) {
             return generated;
         }
-        ToolProfile profile = activeProfile(player);
         if (profile == ToolProfile.BREAKER && areaBreakerPreset(player) == AreaBreakerPreset.CLEAR_SNOW_CROPS) {
             List<BlockPos> filtered = new ArrayList<>();
             for (BlockPos pos : generated) {
@@ -1852,6 +2233,20 @@ public final class BuildToolsState {
         return bestIndex;
     }
 
+    private static int closestAdvancedPoint(ServerPlayer player, List<BlockPos> points) {
+        Vec3 origin = player.getEyePosition();
+        int bestIndex = -1;
+        double bestDistance = Double.MAX_VALUE;
+        for (int i = 0; i < points.size(); i++) {
+            double distance = Vec3.atCenterOf(points.get(i)).distanceToSqr(origin);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestIndex = i;
+            }
+        }
+        return bestIndex;
+    }
+
     private static SelectionShape shape(ServerPlayer player) {
         ToolProfile profile = activeProfile(player);
         SelectionShape saved = shapes(player).get(profile);
@@ -1987,6 +2382,90 @@ public final class BuildToolsState {
         return ELLIPSOID_HOLLOW.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
     }
 
+    private static EnumMap<ToolProfile, ShapeDetailMode> shapeDetailModes(ServerPlayer player) {
+        return SHAPE_DETAIL_MODES.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, RoofDirection> roofDirections(ServerPlayer player) {
+        return ROOF_DIRECTIONS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, Integer> roofOverhangs(ServerPlayer player) {
+        return ROOF_OVERHANGS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, Boolean> gableEndCapsMap(ServerPlayer player) {
+        return GABLE_END_CAPS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, Boolean> aFrameFloorFrames(ServerPlayer player) {
+        return A_FRAME_FLOOR_FRAMES.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, Integer> roomStudSpacings(ServerPlayer player) {
+        return ROOM_STUD_SPACINGS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, Boolean> roomFloorBeamsMap(ServerPlayer player) {
+        return ROOM_FLOOR_BEAMS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, Boolean> roomCeilingJoistsMap(ServerPlayer player) {
+        return ROOM_CEILING_JOISTS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, Integer> bridgeWidths(ServerPlayer player) {
+        return BRIDGE_WIDTHS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, Boolean> bridgeRailsMap(ServerPlayer player) {
+        return BRIDGE_RAILS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, BridgeSupportMode> bridgeSupports(ServerPlayer player) {
+        return BRIDGE_SUPPORTS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, Integer> bridgeSupportSpacings(ServerPlayer player) {
+        return BRIDGE_SUPPORT_SPACINGS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, Integer> towerFloorHeights(ServerPlayer player) {
+        return TOWER_FLOOR_HEIGHTS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, Integer> towerWallThicknesses(ServerPlayer player) {
+        return TOWER_WALL_THICKNESSES.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, TowerTopStyle> towerTopStyles(ServerPlayer player) {
+        return TOWER_TOP_STYLES.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static int clampBridgeWidth(int width) {
+        return Math.max(MIN_BRIDGE_WIDTH, Math.min(MAX_BRIDGE_WIDTH, width));
+    }
+
+    private static int clampRoofOverhang(int overhang) {
+        return Math.max(MIN_ROOF_OVERHANG, Math.min(MAX_ROOF_OVERHANG, overhang));
+    }
+
+    private static int clampRoomStudSpacing(int spacing) {
+        return Math.max(MIN_ROOM_STUD_SPACING, Math.min(MAX_ROOM_STUD_SPACING, spacing));
+    }
+
+    private static int clampBridgeSupportSpacing(int spacing) {
+        return Math.max(MIN_BRIDGE_SUPPORT_SPACING, Math.min(MAX_BRIDGE_SUPPORT_SPACING, spacing));
+    }
+
+    private static int clampTowerFloorHeight(int height) {
+        return Math.max(MIN_TOWER_FLOOR_HEIGHT, Math.min(MAX_TOWER_FLOOR_HEIGHT, height));
+    }
+
+    private static int clampTowerWallThickness(int thickness) {
+        return Math.max(MIN_TOWER_WALL_THICKNESS, Math.min(MAX_TOWER_WALL_THICKNESS, thickness));
+    }
+
     private static ShapeGenerator.Options shapeOptions(ServerPlayer player) {
         return new ShapeGenerator.Options(
                 roadWidth(player),
@@ -1994,7 +2473,22 @@ public final class BuildToolsState {
                 archPeak(player),
                 archDirection(player),
                 sphereHollow(player),
-                ellipsoidHollow(player));
+                ellipsoidHollow(player),
+                shapeDetailMode(player),
+                roofDirection(player),
+                roofOverhang(player),
+                gableEndCaps(player),
+                aFrameFloorFrame(player),
+                roomStudSpacing(player),
+                roomFloorBeams(player),
+                roomCeilingJoists(player),
+                bridgeWidth(player),
+                bridgeRails(player),
+                bridgeSupportMode(player),
+                bridgeSupportSpacing(player),
+                towerFloorHeight(player),
+                towerWallThickness(player),
+                towerTopStyle(player));
     }
 
     private static Component archModeName(ArchMode mode) {
@@ -2003,6 +2497,12 @@ public final class BuildToolsState {
 
     private static Component hollowModeName(boolean hollow) {
         return Component.translatable(hollow ? "buildtools.shape_fill.hollow" : "buildtools.shape_fill.solid");
+    }
+
+    private static void sendBooleanOptionMessage(ServerPlayer player, String key, boolean enabled) {
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable(key, Component.translatable(enabled ? "buildtools.option.on" : "buildtools.option.off")), true);
+        sendPreview(player);
     }
 
     private static EnumMap<ToolProfile, Boolean> gradients(ServerPlayer player) {
@@ -2019,6 +2519,10 @@ public final class BuildToolsState {
 
     private static EnumMap<ToolProfile, GradientDirection> gradientDirections(ServerPlayer player) {
         return GRADIENT_DIRECTIONS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static EnumMap<ToolProfile, BlockRotationMode> blockRotationModes(ServerPlayer player) {
+        return BLOCK_ROTATION_MODES.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
     }
 
     private static void persist(ServerPlayer player) {
@@ -2044,9 +2548,25 @@ public final class BuildToolsState {
         tag.put("archPeaks", writeIntMap(ARCH_PEAKS.get(uuid)));
         tag.put("sphereHollow", writeBooleanMap(SPHERE_HOLLOW.get(uuid)));
         tag.put("ellipsoidHollow", writeBooleanMap(ELLIPSOID_HOLLOW.get(uuid)));
+        tag.put("shapeDetailModes", writeEnumMap(SHAPE_DETAIL_MODES.get(uuid)));
+        tag.put("roofDirections", writeEnumMap(ROOF_DIRECTIONS.get(uuid)));
+        tag.put("roofOverhangs", writeIntMap(ROOF_OVERHANGS.get(uuid)));
+        tag.put("gableEndCaps", writeBooleanMap(GABLE_END_CAPS.get(uuid)));
+        tag.put("aFrameFloorFrames", writeBooleanMap(A_FRAME_FLOOR_FRAMES.get(uuid)));
+        tag.put("roomStudSpacings", writeIntMap(ROOM_STUD_SPACINGS.get(uuid)));
+        tag.put("roomFloorBeams", writeBooleanMap(ROOM_FLOOR_BEAMS.get(uuid)));
+        tag.put("roomCeilingJoists", writeBooleanMap(ROOM_CEILING_JOISTS.get(uuid)));
+        tag.put("bridgeWidths", writeIntMap(BRIDGE_WIDTHS.get(uuid)));
+        tag.put("bridgeRails", writeBooleanMap(BRIDGE_RAILS.get(uuid)));
+        tag.put("bridgeSupports", writeEnumMap(BRIDGE_SUPPORTS.get(uuid)));
+        tag.put("bridgeSupportSpacings", writeIntMap(BRIDGE_SUPPORT_SPACINGS.get(uuid)));
+        tag.put("towerFloorHeights", writeIntMap(TOWER_FLOOR_HEIGHTS.get(uuid)));
+        tag.put("towerWallThicknesses", writeIntMap(TOWER_WALL_THICKNESSES.get(uuid)));
+        tag.put("towerTopStyles", writeEnumMap(TOWER_TOP_STYLES.get(uuid)));
         tag.put("gradients", writeBooleanMap(GRADIENTS.get(uuid)));
         tag.put("paletteModes", writeEnumMap(PALETTE_MODES.get(uuid)));
         tag.put("gradientDirections", writeEnumMap(GRADIENT_DIRECTIONS.get(uuid)));
+        tag.put("blockRotationModes", writeEnumMap(BLOCK_ROTATION_MODES.get(uuid)));
         tag.put("palettes", writePaletteMap(PALETTES.get(uuid)));
         tag.putBoolean("selectionVisibleToOthers", SHARED_SELECTION_VISIBILITY.getOrDefault(uuid, false));
         if (CUSTOM_SHAPE_MODES.containsKey(uuid)) {
@@ -2104,9 +2624,25 @@ public final class BuildToolsState {
         readIntMap(tag.getList("archPeaks", Tag.TAG_COMPOUND)).ifPresent(map -> ARCH_PEAKS.put(uuid, map));
         readBooleanMap(tag.getList("sphereHollow", Tag.TAG_COMPOUND)).ifPresent(map -> SPHERE_HOLLOW.put(uuid, map));
         readBooleanMap(tag.getList("ellipsoidHollow", Tag.TAG_COMPOUND)).ifPresent(map -> ELLIPSOID_HOLLOW.put(uuid, map));
+        readShapeDetailModes(tag.getList("shapeDetailModes", Tag.TAG_COMPOUND)).ifPresent(map -> SHAPE_DETAIL_MODES.put(uuid, map));
+        readRoofDirections(tag.getList("roofDirections", Tag.TAG_COMPOUND)).ifPresent(map -> ROOF_DIRECTIONS.put(uuid, map));
+        readIntMap(tag.getList("roofOverhangs", Tag.TAG_COMPOUND)).ifPresent(map -> ROOF_OVERHANGS.put(uuid, map));
+        readBooleanMap(tag.getList("gableEndCaps", Tag.TAG_COMPOUND)).ifPresent(map -> GABLE_END_CAPS.put(uuid, map));
+        readBooleanMap(tag.getList("aFrameFloorFrames", Tag.TAG_COMPOUND)).ifPresent(map -> A_FRAME_FLOOR_FRAMES.put(uuid, map));
+        readIntMap(tag.getList("roomStudSpacings", Tag.TAG_COMPOUND)).ifPresent(map -> ROOM_STUD_SPACINGS.put(uuid, map));
+        readBooleanMap(tag.getList("roomFloorBeams", Tag.TAG_COMPOUND)).ifPresent(map -> ROOM_FLOOR_BEAMS.put(uuid, map));
+        readBooleanMap(tag.getList("roomCeilingJoists", Tag.TAG_COMPOUND)).ifPresent(map -> ROOM_CEILING_JOISTS.put(uuid, map));
+        readIntMap(tag.getList("bridgeWidths", Tag.TAG_COMPOUND)).ifPresent(map -> BRIDGE_WIDTHS.put(uuid, map));
+        readBooleanMap(tag.getList("bridgeRails", Tag.TAG_COMPOUND)).ifPresent(map -> BRIDGE_RAILS.put(uuid, map));
+        readBridgeSupports(tag.getList("bridgeSupports", Tag.TAG_COMPOUND)).ifPresent(map -> BRIDGE_SUPPORTS.put(uuid, map));
+        readIntMap(tag.getList("bridgeSupportSpacings", Tag.TAG_COMPOUND)).ifPresent(map -> BRIDGE_SUPPORT_SPACINGS.put(uuid, map));
+        readIntMap(tag.getList("towerFloorHeights", Tag.TAG_COMPOUND)).ifPresent(map -> TOWER_FLOOR_HEIGHTS.put(uuid, map));
+        readIntMap(tag.getList("towerWallThicknesses", Tag.TAG_COMPOUND)).ifPresent(map -> TOWER_WALL_THICKNESSES.put(uuid, map));
+        readTowerTopStyles(tag.getList("towerTopStyles", Tag.TAG_COMPOUND)).ifPresent(map -> TOWER_TOP_STYLES.put(uuid, map));
         readBooleanMap(tag.getList("gradients", Tag.TAG_COMPOUND)).ifPresent(map -> GRADIENTS.put(uuid, map));
         readPaletteModes(tag.getList("paletteModes", Tag.TAG_COMPOUND)).ifPresent(map -> PALETTE_MODES.put(uuid, map));
         readGradientDirections(tag.getList("gradientDirections", Tag.TAG_COMPOUND)).ifPresent(map -> GRADIENT_DIRECTIONS.put(uuid, map));
+        readBlockRotationModes(tag.getList("blockRotationModes", Tag.TAG_COMPOUND)).ifPresent(map -> BLOCK_ROTATION_MODES.put(uuid, map));
         readPaletteMap(tag.getList("palettes", Tag.TAG_COMPOUND), registries).ifPresent(map -> PALETTES.put(uuid, map));
         if (tag.contains("selectionVisibleToOthers", Tag.TAG_BYTE)) {
             SHARED_SELECTION_VISIBILITY.put(uuid, tag.getBoolean("selectionVisibleToOthers"));
@@ -2195,10 +2731,27 @@ public final class BuildToolsState {
         ARCH_PEAKS.remove(uuid);
         SPHERE_HOLLOW.remove(uuid);
         ELLIPSOID_HOLLOW.remove(uuid);
+        SHAPE_DETAIL_MODES.remove(uuid);
+        ROOF_DIRECTIONS.remove(uuid);
+        ROOF_OVERHANGS.remove(uuid);
+        GABLE_END_CAPS.remove(uuid);
+        A_FRAME_FLOOR_FRAMES.remove(uuid);
+        ROOM_STUD_SPACINGS.remove(uuid);
+        ROOM_FLOOR_BEAMS.remove(uuid);
+        ROOM_CEILING_JOISTS.remove(uuid);
+        BRIDGE_WIDTHS.remove(uuid);
+        BRIDGE_RAILS.remove(uuid);
+        BRIDGE_SUPPORTS.remove(uuid);
+        BRIDGE_SUPPORT_SPACINGS.remove(uuid);
+        TOWER_FLOOR_HEIGHTS.remove(uuid);
+        TOWER_WALL_THICKNESSES.remove(uuid);
+        TOWER_TOP_STYLES.remove(uuid);
         GRADIENTS.remove(uuid);
         PALETTE_MODES.remove(uuid);
         GRADIENT_DIRECTIONS.remove(uuid);
+        BLOCK_ROTATION_MODES.remove(uuid);
         ADVANCED_POINTS.remove(uuid);
+        SELECTION_MEASURES.remove(uuid);
         SHARED_SELECTION_VISIBILITY.remove(uuid);
         CUSTOM_SHAPE_MODES.remove(uuid);
         STAIR_DIRECTIONS.remove(uuid);
@@ -2318,6 +2871,26 @@ public final class BuildToolsState {
 
     private static Optional<EnumMap<ToolProfile, GradientDirection>> readGradientDirections(ListTag list) {
         return readEnumMap(list, GradientDirection.class);
+    }
+
+    private static Optional<EnumMap<ToolProfile, BlockRotationMode>> readBlockRotationModes(ListTag list) {
+        return readEnumMap(list, BlockRotationMode.class);
+    }
+
+    private static Optional<EnumMap<ToolProfile, ShapeDetailMode>> readShapeDetailModes(ListTag list) {
+        return readEnumMap(list, ShapeDetailMode.class);
+    }
+
+    private static Optional<EnumMap<ToolProfile, RoofDirection>> readRoofDirections(ListTag list) {
+        return readEnumMap(list, RoofDirection.class);
+    }
+
+    private static Optional<EnumMap<ToolProfile, BridgeSupportMode>> readBridgeSupports(ListTag list) {
+        return readEnumMap(list, BridgeSupportMode.class);
+    }
+
+    private static Optional<EnumMap<ToolProfile, TowerTopStyle>> readTowerTopStyles(ListTag list) {
+        return readEnumMap(list, TowerTopStyle.class);
     }
 
     private static Optional<EnumMap<ToolProfile, ArchMode>> readArchModes(ListTag list) {

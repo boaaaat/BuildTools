@@ -9,6 +9,7 @@ import com.abhil.buildtools.shape.BuildMode;
 import com.abhil.buildtools.shape.Selection;
 import com.abhil.buildtools.shape.SelectionShape;
 import com.abhil.buildtools.shape.ShapeGenerator;
+import com.abhil.buildtools.shape.StairDirectionOverride;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -63,6 +64,9 @@ import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.VineBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.Property;
+import net.minecraft.world.level.block.state.properties.RotationSegment;
+import net.minecraft.world.level.block.state.properties.StairsShape;
 import net.neoforged.neoforge.common.Tags;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
@@ -171,7 +175,7 @@ public final class BuildOperationEngine {
             if (!canPlaceForMode(level, pos, previous, mode, replaceMatch)) {
                 continue;
             }
-            BlockState targetState = orientStairTarget(player, selection, materialTarget(selection, pos, target, palette, paletteMode, gradientDirection));
+            BlockState targetState = orientDirectionalTarget(player, selection, pos, materialTarget(selection, pos, target, palette, paletteMode, gradientDirection));
             positions.add(pos.immutable());
             targets.add(targetState);
             targetBlockEntities.add(null);
@@ -179,6 +183,8 @@ public final class BuildOperationEngine {
             undo.add(undoEntry(level, pos, previous, targetState, restore));
             addUndoRefund(refund, targetState);
         }
+        resolveStairShapes(level, positions, targets);
+        undo = retargetUndoEntries(undo, targets);
         if (positions.isEmpty()) {
             failNoPlacementTargets(player, level, generated, mode, replaceMatch);
             return false;
@@ -317,7 +323,8 @@ public final class BuildOperationEngine {
         PaletteMode paletteMode = BuildToolsState.paletteMode(player);
         GradientDirection gradientDirection = BuildToolsState.gradientDirection(player);
         BlockState replaceMatch = BuildToolsState.replaceTarget(player);
-        List<BuildPlan.Entry> entries = new ArrayList<>();
+        List<BlockPos> positions = new ArrayList<>();
+        List<BlockState> targets = new ArrayList<>();
         ServerLevel level = player.serverLevel();
         List<BlockPos> placementCandidates = mode == BuildMode.SURFACE ? SurfacePlacementSupport.candidates(level, generated) : generated;
         for (BlockPos pos : placementCandidates) {
@@ -325,14 +332,20 @@ public final class BuildOperationEngine {
             if (!canPlaceForMode(level, pos, previous, mode, replaceMatch)) {
                 continue;
             }
-            entries.add(new BuildPlan.Entry(pos.immutable(), orientStairTarget(player, selection, materialTarget(selection, pos, target, palette, paletteMode, gradientDirection))));
+            positions.add(pos.immutable());
+            targets.add(orientDirectionalTarget(player, selection, pos, materialTarget(selection, pos, target, palette, paletteMode, gradientDirection)));
         }
-        if (entries.isEmpty()) {
+        resolveStairShapes(level, positions, targets);
+        if (positions.isEmpty()) {
             failNoPlacementTargets(player, level, generated, mode, replaceMatch);
             return false;
         }
-        if (!validateOperationSize(player, entries.size())) {
+        if (!validateOperationSize(player, positions.size())) {
             return false;
+        }
+        List<BuildPlan.Entry> entries = new ArrayList<>();
+        for (int i = 0; i < positions.size(); i++) {
+            entries.add(new BuildPlan.Entry(positions.get(i), targets.get(i)));
         }
         BuildToolsState.setPlan(player, new BuildPlan(level.dimension(), List.copyOf(entries)));
         return true;
@@ -417,10 +430,6 @@ public final class BuildOperationEngine {
     private static boolean executeBrush(ServerPlayer player, BlockPos origin, Direction face) {
         BrushMode brushMode = BuildToolsState.brushMode(player);
         BlockState target = brushMaterialFallback(player);
-        if (target.isAir() && brushMode != BrushMode.ERASE) {
-            fail(player, "buildtools.error.no_material_selection");
-            return false;
-        }
         if (!target.isAir() && !isSupportedTarget(target)) {
             fail(player, "buildtools.error.unsupported_block");
             return false;
@@ -1407,7 +1416,7 @@ public final class BuildOperationEngine {
     }
 
     private static boolean matchesHistoryState(ServerLevel level, BlockPos pos, BlockState expectedState, CompoundTag expectedBlockEntity) {
-        if (!level.getBlockState(pos).equals(expectedState)) {
+        if (!matchesHistoryBlockState(level.getBlockState(pos), expectedState)) {
             return false;
         }
         if (expectedBlockEntity == null) {
@@ -1415,6 +1424,16 @@ public final class BuildOperationEngine {
         }
         CompoundTag current = captureBlockEntity(level, pos);
         return current != null && normalizedBlockEntity(current).equals(normalizedBlockEntity(expectedBlockEntity));
+    }
+
+    private static boolean matchesHistoryBlockState(BlockState current, BlockState expected) {
+        if (current.equals(expected)) {
+            return true;
+        }
+        if (!isStairState(current) || !isStairState(expected) || !current.is(expected.getBlock())) {
+            return false;
+        }
+        return current.setValue(StairBlock.SHAPE, expected.getValue(StairBlock.SHAPE)).equals(expected);
     }
 
     private static CompoundTag normalizedBlockEntity(CompoundTag tag) {
@@ -1743,12 +1762,289 @@ public final class BuildOperationEngine {
         return fallback;
     }
 
-    private static BlockState orientStairTarget(ServerPlayer player, Selection selection, BlockState state) {
-        if (selection.shape() != SelectionShape.STAIRS || !(state.getBlock() instanceof StairBlock) || !state.hasProperty(StairBlock.FACING)) {
+    private static BlockState orientDirectionalTarget(ServerPlayer player, Selection selection, BlockPos pos, BlockState state) {
+        DesiredRotation rotation = rotationTarget(player, selection, pos);
+        if (rotation == null) {
             return state;
         }
-        Direction direction = ShapeGenerator.stairDirection(selection, BuildToolsState.stairDirectionOverride(player));
-        return state.setValue(StairBlock.FACING, direction);
+        BlockState rotated = state;
+        for (Property<?> property : state.getProperties()) {
+            rotated = orientProperty(rotated, property, rotation);
+        }
+        return rotated;
+    }
+
+    private static DesiredRotation rotationTarget(ServerPlayer player, Selection selection, BlockPos pos) {
+        return switch (BuildToolsState.blockRotationMode(player)) {
+            case UNCHANGED -> null;
+            case FIXED -> fixedRotationDirection(player, selection);
+            case FACE_CENTER -> centerRotationDirection(player, selection, pos, false);
+            case FACE_AWAY_CENTER -> centerRotationDirection(player, selection, pos, true);
+            case FOLLOW_PATH -> followPathRotationDirection(player, selection, pos);
+        };
+    }
+
+    private static DesiredRotation fixedRotationDirection(ServerPlayer player, Selection selection) {
+        StairDirectionOverride override = BuildToolsState.stairDirectionOverride(player);
+        Direction direction;
+        if (override.direction() != null) {
+            direction = override.direction();
+        } else if (selection.shape() == SelectionShape.STAIRS) {
+            direction = ShapeGenerator.stairDirection(selection, override);
+        } else {
+            return null;
+        }
+        return new DesiredRotation(direction, direction.getAxis().isHorizontal() ? direction : player.getDirection());
+    }
+
+    private static DesiredRotation centerRotationDirection(ServerPlayer player, Selection selection, BlockPos pos, boolean away) {
+        if (!selection.isComplete()) {
+            return new DesiredRotation(player.getDirection(), player.getDirection());
+        }
+        double minX = Math.min(selection.first().getX(), selection.second().getX());
+        double maxX = Math.max(selection.first().getX(), selection.second().getX());
+        double minY = Math.min(selection.first().getY(), selection.second().getY());
+        double maxY = Math.max(selection.first().getY(), selection.second().getY());
+        double minZ = Math.min(selection.first().getZ(), selection.second().getZ());
+        double maxZ = Math.max(selection.first().getZ(), selection.second().getZ());
+        double dx = (minX + maxX) / 2.0D - pos.getX();
+        double dy = (minY + maxY) / 2.0D - pos.getY();
+        double dz = (minZ + maxZ) / 2.0D - pos.getZ();
+        if (selection.shape() == SelectionShape.PYRAMID) {
+            Direction pyramidDirection = pyramidInwardDirection(selection, pos, horizontalDirection(dx, dz, player.getDirection()));
+            return away
+                    ? new DesiredRotation(pyramidDirection.getOpposite(), pyramidDirection.getOpposite())
+                    : new DesiredRotation(pyramidDirection, pyramidDirection);
+        }
+        Direction direction = dominantDirection(dx, dy, dz, player.getDirection());
+        Direction horizontal = horizontalDirection(dx, dz, player.getDirection());
+        return away
+                ? new DesiredRotation(direction.getOpposite(), horizontal.getOpposite())
+                : new DesiredRotation(direction, horizontal);
+    }
+
+    private static DesiredRotation followPathRotationDirection(ServerPlayer player, Selection selection, BlockPos pos) {
+        List<BlockPos> points = selection.points();
+        if (points.size() < 2) {
+            return new DesiredRotation(player.getDirection(), player.getDirection());
+        }
+        double bestDistance = Double.MAX_VALUE;
+        Direction bestDirection = null;
+        Direction bestHorizontal = null;
+        for (int i = 1; i < points.size(); i++) {
+            BlockPos a = points.get(i - 1);
+            BlockPos b = points.get(i);
+            int segmentX = b.getX() - a.getX();
+            int segmentY = b.getY() - a.getY();
+            int segmentZ = b.getZ() - a.getZ();
+            if (segmentX == 0 && segmentY == 0 && segmentZ == 0) {
+                continue;
+            }
+            Direction segmentDirection = dominantDirection(segmentX, segmentY, segmentZ, player.getDirection());
+            Direction segmentHorizontal = horizontalDirection(segmentX, segmentZ, player.getDirection());
+            double t = projectionRatio(a, b, pos);
+            double closestX = a.getX() + (b.getX() - a.getX()) * t;
+            double closestY = a.getY() + (b.getY() - a.getY()) * t;
+            double closestZ = a.getZ() + (b.getZ() - a.getZ()) * t;
+            double dx = pos.getX() - closestX;
+            double dy = pos.getY() - closestY;
+            double dz = pos.getZ() - closestZ;
+            double distance = dx * dx + dy * dy + dz * dz;
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestDirection = segmentDirection;
+                bestHorizontal = segmentHorizontal;
+            }
+        }
+        return bestDirection == null
+                ? new DesiredRotation(player.getDirection(), player.getDirection())
+                : new DesiredRotation(bestDirection, bestHorizontal);
+    }
+
+    private static Direction dominantDirection(double dx, double dy, double dz, Direction fallback) {
+        double absX = Math.abs(dx);
+        double absY = Math.abs(dy);
+        double absZ = Math.abs(dz);
+        if (absX < 0.0001D && absY < 0.0001D && absZ < 0.0001D) {
+            return fallback;
+        }
+        if (absY > absX && absY > absZ) {
+            return dy >= 0.0D ? Direction.UP : Direction.DOWN;
+        }
+        if (absX >= absZ) {
+            return dx >= 0.0D ? Direction.EAST : Direction.WEST;
+        }
+        return dz >= 0.0D ? Direction.SOUTH : Direction.NORTH;
+    }
+
+    private static Direction horizontalDirection(double dx, double dz, Direction fallback) {
+        if (Math.abs(dx) < 0.0001D && Math.abs(dz) < 0.0001D) {
+            return fallback.getAxis().isHorizontal() ? fallback : Direction.NORTH;
+        }
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            return dx >= 0.0D ? Direction.EAST : Direction.WEST;
+        }
+        return dz >= 0.0D ? Direction.SOUTH : Direction.NORTH;
+    }
+
+    private static Direction pyramidInwardDirection(Selection selection, BlockPos pos, Direction fallback) {
+        int minX = Math.min(selection.first().getX(), selection.second().getX());
+        int minY = Math.min(selection.first().getY(), selection.second().getY());
+        int minZ = Math.min(selection.first().getZ(), selection.second().getZ());
+        int maxX = Math.max(selection.first().getX(), selection.second().getX());
+        int maxZ = Math.max(selection.first().getZ(), selection.second().getZ());
+        int inset = Math.max(0, pos.getY() - minY);
+        int layerMinX = minX + inset;
+        int layerMaxX = maxX - inset;
+        int layerMinZ = minZ + inset;
+        int layerMaxZ = maxZ - inset;
+        if (layerMinX > layerMaxX || layerMinZ > layerMaxZ) {
+            return fallback;
+        }
+
+        int west = Math.abs(pos.getX() - layerMinX);
+        int east = Math.abs(layerMaxX - pos.getX());
+        int north = Math.abs(pos.getZ() - layerMinZ);
+        int south = Math.abs(layerMaxZ - pos.getZ());
+        int nearest = Math.min(Math.min(west, east), Math.min(north, south));
+        boolean preferNorthSouth = layerMaxX - layerMinX >= layerMaxZ - layerMinZ;
+        if (preferNorthSouth) {
+            Direction direction = northSouthInward(north, south, nearest);
+            if (direction != null) {
+                return direction;
+            }
+            direction = eastWestInward(west, east, nearest);
+            return direction == null ? fallback : direction;
+        }
+        Direction direction = eastWestInward(west, east, nearest);
+        if (direction != null) {
+            return direction;
+        }
+        direction = northSouthInward(north, south, nearest);
+        return direction == null ? fallback : direction;
+    }
+
+    private static Direction northSouthInward(int north, int south, int nearest) {
+        if (north == nearest && south != nearest) {
+            return Direction.SOUTH;
+        }
+        if (south == nearest && north != nearest) {
+            return Direction.NORTH;
+        }
+        return null;
+    }
+
+    private static Direction eastWestInward(int west, int east, int nearest) {
+        if (west == nearest && east != nearest) {
+            return Direction.EAST;
+        }
+        if (east == nearest && west != nearest) {
+            return Direction.WEST;
+        }
+        return null;
+    }
+
+    private static BlockState orientProperty(BlockState state, Property<?> property, DesiredRotation rotation) {
+        if ("facing".equals(property.getName()) && hasPossibleValue(property, rotation.direction())) {
+            return setUnchecked(state, property, rotation.direction());
+        }
+        if ("facing".equals(property.getName()) && hasPossibleValue(property, rotation.horizontal())) {
+            return setUnchecked(state, property, rotation.horizontal());
+        }
+        if ("axis".equals(property.getName()) && hasPossibleValue(property, rotation.direction().getAxis())) {
+            return setUnchecked(state, property, rotation.direction().getAxis());
+        }
+        if ("axis".equals(property.getName()) && hasPossibleValue(property, rotation.horizontal().getAxis())) {
+            return setUnchecked(state, property, rotation.horizontal().getAxis());
+        }
+        if ("rotation".equals(property.getName()) && hasPossibleValue(property, Integer.valueOf(0)) && hasPossibleValue(property, Integer.valueOf(15))) {
+            return setUnchecked(state, property, RotationSegment.convertToSegment(rotation.horizontal()));
+        }
+        return state;
+    }
+
+    private static boolean hasPossibleValue(Property<?> property, Object value) {
+        return property.getPossibleValues().contains(value);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static BlockState setUnchecked(BlockState state, Property property, Comparable value) {
+        return state.setValue(property, value);
+    }
+
+    private record DesiredRotation(Direction direction, Direction horizontal) {
+    }
+
+    private static void resolveStairShapes(ServerLevel level, List<BlockPos> positions, List<BlockState> targets) {
+        Map<BlockPos, BlockState> planned = new HashMap<>();
+        for (int i = 0; i < positions.size(); i++) {
+            planned.put(positions.get(i), targets.get(i));
+        }
+        for (int i = 0; i < targets.size(); i++) {
+            BlockState state = targets.get(i);
+            if (isStairState(state)) {
+                targets.set(i, state.setValue(StairBlock.SHAPE, stairShape(state, level, positions.get(i), planned)));
+            }
+        }
+    }
+
+    private static List<UndoSnapshot.Entry> retargetUndoEntries(List<UndoSnapshot.Entry> undo, List<BlockState> targets) {
+        List<UndoSnapshot.Entry> retargeted = new ArrayList<>(undo.size());
+        for (int i = 0; i < undo.size(); i++) {
+            UndoSnapshot.Entry entry = undo.get(i);
+            retargeted.add(new UndoSnapshot.Entry(
+                    entry.pos(),
+                    entry.previousState(),
+                    entry.previousBlockEntity(),
+                    targets.get(i),
+                    entry.redoneBlockEntity(),
+                    entry.mayRestorePrevious(),
+                    entry.previousOwner()));
+        }
+        return retargeted;
+    }
+
+    private static StairsShape stairShape(BlockState state, ServerLevel level, BlockPos pos, Map<BlockPos, BlockState> planned) {
+        Direction direction = state.getValue(StairBlock.FACING);
+        BlockState front = plannedState(level, planned, pos.relative(direction));
+        if (isStairState(front) && sameStairHalf(state, front)) {
+            Direction frontDirection = front.getValue(StairBlock.FACING);
+            if (frontDirection.getAxis() != direction.getAxis() && canTakeStairShape(state, level, planned, pos, frontDirection.getOpposite())) {
+                return frontDirection == direction.getCounterClockWise() ? StairsShape.OUTER_LEFT : StairsShape.OUTER_RIGHT;
+            }
+        }
+
+        BlockState back = plannedState(level, planned, pos.relative(direction.getOpposite()));
+        if (isStairState(back) && sameStairHalf(state, back)) {
+            Direction backDirection = back.getValue(StairBlock.FACING);
+            if (backDirection.getAxis() != direction.getAxis() && canTakeStairShape(state, level, planned, pos, backDirection)) {
+                return backDirection == direction.getCounterClockWise() ? StairsShape.INNER_LEFT : StairsShape.INNER_RIGHT;
+            }
+        }
+
+        return StairsShape.STRAIGHT;
+    }
+
+    private static boolean canTakeStairShape(BlockState state, ServerLevel level, Map<BlockPos, BlockState> planned, BlockPos pos, Direction face) {
+        BlockState neighbor = plannedState(level, planned, pos.relative(face));
+        return !isStairState(neighbor)
+                || neighbor.getValue(StairBlock.FACING) != state.getValue(StairBlock.FACING)
+                || !sameStairHalf(state, neighbor);
+    }
+
+    private static boolean isStairState(BlockState state) {
+        return state.getBlock() instanceof StairBlock
+                && state.hasProperty(StairBlock.FACING)
+                && state.hasProperty(StairBlock.HALF)
+                && state.hasProperty(StairBlock.SHAPE);
+    }
+
+    private static boolean sameStairHalf(BlockState a, BlockState b) {
+        return a.getValue(StairBlock.HALF) == b.getValue(StairBlock.HALF);
+    }
+
+    private static BlockState plannedState(ServerLevel level, Map<BlockPos, BlockState> planned, BlockPos pos) {
+        return planned.getOrDefault(pos, level.getBlockState(pos));
     }
 
     public static boolean isClearSnowCropsTarget(BlockState state) {

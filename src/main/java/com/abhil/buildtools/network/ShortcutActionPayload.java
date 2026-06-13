@@ -151,6 +151,12 @@ public record ShortcutActionPayload(String action, String direction, int amount)
 
     private static void nudge(ServerPlayer player, Direction direction, int amount) {
         int steps = Math.max(1, Math.min(10, Math.abs(amount)));
+        if (player.getMainHandItem().is(ModItems.ADVANCED_SELECTION_STAFF.get())
+                && !player.isShiftKeyDown()
+                && BuildToolsState.pendingPasteOrigin(player).isEmpty()) {
+            BuildToolsState.nudgeClosestAdvancedPoint(player, direction, steps);
+            return;
+        }
         for (int i = 0; i < steps; i++) {
             if (BuildToolsState.pendingPasteOrigin(player).isPresent()) {
                 BuildOperationEngine.nudgePendingBlueprintPaste(player, direction);
@@ -179,6 +185,10 @@ public record ShortcutActionPayload(String action, String direction, int amount)
             BuildToolsState.changeRoadWidth(player, step);
         } else if (isShapeTool(held) && shape == SelectionShape.ARCH) {
             BuildToolsState.changeArchPeak(player, step);
+        } else if (isShapeTool(held) && shape == SelectionShape.BRIDGE) {
+            BuildToolsState.changeBridgeWidth(player, step);
+        } else if (isShapeTool(held) && shape == SelectionShape.TOWER) {
+            BuildToolsState.changeTowerFloorHeight(player, step);
         } else if (isShapeTool(held) && shape == SelectionShape.STAIRS) {
             BuildToolsState.cycleStairDirection(player, step);
         } else if (isBrushTool(held)) {
@@ -199,6 +209,8 @@ public record ShortcutActionPayload(String action, String direction, int amount)
             BuildToolsState.toggleArchEdgeWalls(player);
         } else if (shape == SelectionShape.SPHERE || shape == SelectionShape.ELLIPSOID) {
             BuildToolsState.toggleShapeHollow(player, shape);
+        } else if (BuildToolsState.supportsDetailMode(shape)) {
+            BuildToolsState.toggleShapeDetailMode(player, shape);
         }
     }
 

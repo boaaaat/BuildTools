@@ -4,6 +4,7 @@ import com.abhil.buildtools.client.AdvancedBuildToolsModeScreen;
 import com.abhil.buildtools.client.BlueprintLibraryScreen;
 import com.abhil.buildtools.client.BuildToolStatusOverlay;
 import com.abhil.buildtools.client.BuildToolsModeScreen;
+import com.abhil.buildtools.client.ClientSelectionData;
 import com.abhil.buildtools.client.ClientSelectionRenderer;
 import com.abhil.buildtools.client.MaterialChecklistScreen;
 import com.abhil.buildtools.client.MaterialSelectionScreen;
@@ -17,6 +18,7 @@ import com.abhil.buildtools.network.ScrollToolPayload;
 import com.abhil.buildtools.network.ShortcutActionPayload;
 import com.abhil.buildtools.registry.ModItems;
 import com.abhil.buildtools.registry.ModMenus;
+import com.abhil.buildtools.shape.SelectionShape;
 import com.mojang.blaze3d.platform.InputConstants;
 import java.util.ArrayList;
 import java.util.List;
@@ -261,7 +263,9 @@ public final class BuildToolsClient {
         if (!isScrollableBuildTool(held)) {
             return;
         }
-        if (!held.is(ModItems.BUILDER_BRUSH.get()) && !minecraft.player.isShiftKeyDown()) {
+        boolean advancedSelectionStairs = held.is(ModItems.ADVANCED_SELECTION_STAFF.get())
+                && ClientSelectionData.shape() == SelectionShape.STAIRS;
+        if (!held.is(ModItems.BUILDER_BRUSH.get()) && !minecraft.player.isShiftKeyDown() && !advancedSelectionStairs) {
             return;
         }
         int direction = event.getScrollDeltaY() >= 0.0D ? 1 : -1;
