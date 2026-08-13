@@ -39,10 +39,16 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
     private static final int BRUSH_RADIUS_SLOT = 9;
     private static final int BRUSH_DEPTH_SLOT = 10;
     private static final int BRUSH_DENSITY_SLOT = 11;
+    private static final int BUILDER_PALETTES_SLOT = 33;
+    private static final int BUILDER_STORAGE_SLOT = 34;
+    private static final int BRUSH_PALETTES_SLOT = 8;
+    private static final int BRUSH_STORAGE_SLOT = 16;
+    private static final int BRUSH_HELP_SLOT = 17;
     private final SimpleContainer menuItems = new SimpleContainer(MENU_SIZE);
     private final ToolProfile profile;
     private final ServerPlayer owner;
     private boolean advancedShapesPage;
+    private boolean pendingHistoryClear;
 
     public BuildToolsModeMenu(int containerId, Inventory inventory) {
         this(containerId, inventory, inventory.player instanceof ServerPlayer serverPlayer ? serverPlayer : null);
@@ -130,14 +136,14 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         Map<ItemStackKey, Integer> storedDrops = owner == null ? Map.of() : BuildToolsState.storedDrops(owner);
         if (history.isEmpty()) {
             menuItems.setItem(0, emptyHistoryItem(undo));
-            menuItems.setItem(25, utilityItem(Items.BARRIER, "buildtools.menu.clear_history", "buildtools.menu.clear_history.description"));
+            menuItems.setItem(25, clearHistoryItem());
             menuItems.setItem(26, collectDropsItem(storedDrops));
             return;
         }
         for (int i = 0; i < Math.min(MENU_SIZE - 1, history.size()); i++) {
             menuItems.setItem(i, historyItem(undo, i, history.get(i)));
         }
-        menuItems.setItem(25, utilityItem(Items.BARRIER, "buildtools.menu.clear_history", "buildtools.menu.clear_history.description"));
+        menuItems.setItem(25, clearHistoryItem());
         menuItems.setItem(26, collectDropsItem(storedDrops));
     }
 
@@ -152,6 +158,8 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(7, utilityItem(Items.BRICKS, "buildtools.menu.material_selection", "buildtools.menu.material_selection.description"));
         menuItems.setItem(8, utilityItem(Items.KNOWLEDGE_BOOK, "buildtools.menu.help", "buildtools.menu.help.description"));
         populateShapes(SHAPE_START_SLOT);
+        menuItems.setItem(BUILDER_PALETTES_SLOT, utilityItem(Items.PAINTING, "buildtools.menu.palettes", "buildtools.menu.palettes.description"));
+        menuItems.setItem(BUILDER_STORAGE_SLOT, utilityItem(Items.ENDER_CHEST, "buildtools.menu.storage_manager", "buildtools.menu.storage_manager.description"));
     }
 
     private void populateSelectionMenu() {
@@ -188,9 +196,12 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(5, brushModeItem(Items.SNOWBALL, BrushMode.OVERLAY, brushMode));
         menuItems.setItem(6, brushModeItem(Items.AMETHYST_SHARD, BrushMode.BLEND, brushMode));
         menuItems.setItem(7, utilityItem(Items.BRICKS, "buildtools.menu.material_selection", "buildtools.menu.material_selection.description"));
+        menuItems.setItem(BRUSH_PALETTES_SLOT, utilityItem(Items.PAINTING, "buildtools.menu.palettes", "buildtools.menu.palettes.description"));
         menuItems.setItem(BRUSH_RADIUS_SLOT, brushSettingItem(Items.PAINTING, "buildtools.menu.brush_radius", "buildtools.menu.brush_radius.description", radius));
         menuItems.setItem(BRUSH_DEPTH_SLOT, brushSettingItem(Items.DEEPSLATE, "buildtools.menu.brush_depth", "buildtools.menu.brush_depth.description", depth));
         menuItems.setItem(BRUSH_DENSITY_SLOT, brushSettingItem(Items.WHEAT_SEEDS, "buildtools.menu.brush_density", "buildtools.menu.brush_density.description", density));
+        menuItems.setItem(BRUSH_STORAGE_SLOT, utilityItem(Items.ENDER_CHEST, "buildtools.menu.storage_manager", "buildtools.menu.storage_manager.description"));
+        menuItems.setItem(BRUSH_HELP_SLOT, utilityItem(Items.KNOWLEDGE_BOOK, "buildtools.menu.help", "buildtools.menu.help.description"));
         populateShapes(18);
     }
 
@@ -258,6 +269,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
                 option(20, Items.STONE_BRICKS, AdvancedShapeOption.TOWER_WALL_THICKNESS, Component.translatable("buildtools.menu.advanced_shape.wall_thickness", BuildToolsState.towerWallThickness(owner)));
                 option(21, Items.STONE_BRICK_STAIRS, AdvancedShapeOption.TOWER_TOP_STYLE, Component.translatable("buildtools.menu.advanced_shape.top_style", BuildToolsState.towerTopStyle(owner).displayName()));
             }
+            case CURVE -> option(18, Items.LEAD, AdvancedShapeOption.CURVE_PEAK, Component.translatable("buildtools.menu.advanced_shape.curve_peak", BuildToolsState.curvePeak(owner)));
             default -> {
             }
         }
@@ -273,6 +285,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(6, utilityItem(Items.CLOCK, "buildtools.menu.rotate_blueprint", "buildtools.menu.rotate_blueprint.description"));
         menuItems.setItem(7, utilityItem(Items.IRON_BARS, "buildtools.menu.mirror_blueprint_x", "buildtools.menu.mirror_blueprint.description"));
         menuItems.setItem(8, utilityItem(Items.CHAIN, "buildtools.menu.mirror_blueprint_z", "buildtools.menu.mirror_blueprint.description"));
+        menuItems.setItem(15, utilityItem(Items.ENDER_CHEST, "buildtools.menu.storage_manager", "buildtools.menu.storage_manager.description"));
         menuItems.setItem(16, utilityItem(Items.CHEST, "buildtools.menu.material_checklist", "buildtools.menu.material_checklist.description"));
         menuItems.setItem(17, utilityItem(Items.WRITABLE_BOOK, "buildtools.menu.clear_selection", "buildtools.menu.clear_selection.description"));
         menuItems.setItem(18, NudgeMenuItems.item(owner, Direction.WEST, "buildtools.menu.nudge_paste.description"));
@@ -337,11 +350,20 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case BREAKER -> handleBreakerClick(player, slotId, rightClick);
             case TROWEL -> handleTrowelClick(player, slotId);
             case UNDO -> {
+                if (slotId != 25) {
+                    pendingHistoryClear = false;
+                }
                 if (slotId == 26 && BuildOperationEngine.collectStoredDrops(player)) {
                     yield true;
                 }
                 if (slotId == 25) {
-                    BuildToolsState.clearHistory(player);
+                    if (!pendingHistoryClear) {
+                        pendingHistoryClear = true;
+                        player.displayClientMessage(Component.translatable("buildtools.message.clear_history_armed"), true);
+                        yield true;
+                    }
+                    clearHistorySafely(player);
+                    pendingHistoryClear = false;
                     yield true;
                 }
                 if (slotId == 0 && BuildToolsState.undoCount(player) > 0) {
@@ -353,11 +375,20 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
                 yield false;
             }
             case REDO -> {
+                if (slotId != 25) {
+                    pendingHistoryClear = false;
+                }
                 if (slotId == 26 && BuildOperationEngine.collectStoredDrops(player)) {
                     yield true;
                 }
                 if (slotId == 25) {
-                    BuildToolsState.clearHistory(player);
+                    if (!pendingHistoryClear) {
+                        pendingHistoryClear = true;
+                        player.displayClientMessage(Component.translatable("buildtools.message.clear_history_armed"), true);
+                        yield true;
+                    }
+                    clearHistorySafely(player);
+                    pendingHistoryClear = false;
                     yield true;
                 }
                 if (slotId == 0 && BuildToolsState.redoCount(player) > 0) {
@@ -379,6 +410,15 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
         if (!damageHeldHistoryToken(player, InteractionHand.MAIN_HAND, item)) {
             damageHeldHistoryToken(player, InteractionHand.OFF_HAND, item);
         }
+    }
+
+    private static void clearHistorySafely(ServerPlayer player) {
+        if (BuildToolsState.storedDropStacks(player).isEmpty()) {
+            BuildToolsState.clearHistory(player);
+            player.displayClientMessage(Component.translatable("buildtools.message.history_cleared"), true);
+            return;
+        }
+        BuildOperationEngine.collectStoredDrops(player);
     }
 
     private static boolean damageHeldHistoryToken(ServerPlayer player, InteractionHand hand, Item item) {
@@ -403,6 +443,8 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case 6 -> MaterialChecklistMenu.open(player);
             case 7 -> MaterialSelectionMenu.open(player);
             case 8 -> HelpMenu.open(player);
+            case BUILDER_PALETTES_SLOT -> PaletteLibraryMenu.open(player);
+            case BUILDER_STORAGE_SLOT -> StorageManagerMenu.open(player);
             default -> {
                 return handleShapeClick(player, slotId, SHAPE_START_SLOT, rightClick);
             }
@@ -441,6 +483,9 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case 5 -> BuildToolsState.setBrushMode(player, BrushMode.OVERLAY);
             case 6 -> BuildToolsState.setBrushMode(player, BrushMode.BLEND);
             case 7 -> MaterialSelectionMenu.open(player);
+            case BRUSH_PALETTES_SLOT -> PaletteLibraryMenu.open(player);
+            case BRUSH_STORAGE_SLOT -> StorageManagerMenu.open(player);
+            case BRUSH_HELP_SLOT -> HelpMenu.open(player);
             default -> {
                 return handleShapeClick(player, slotId, 18, false);
             }
@@ -476,6 +521,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case 6 -> BuildToolsState.rotateBlueprint(player);
             case 7 -> BuildToolsState.mirrorBlueprintX(player);
             case 8 -> BuildToolsState.mirrorBlueprintZ(player);
+            case 15 -> StorageManagerMenu.open(player);
             case 16 -> MaterialChecklistMenu.open(player);
             case 17 -> BuildToolsState.clearSelection(player);
             case 18 -> BuildOperationEngine.nudgePendingBlueprintPaste(player, net.minecraft.core.Direction.WEST);
@@ -706,6 +752,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
                 case 21 -> AdvancedShapeOption.TOWER_TOP_STYLE;
                 default -> null;
             };
+            case CURVE -> slotId == 18 ? AdvancedShapeOption.CURVE_PEAK : null;
             default -> null;
         };
     }
@@ -745,6 +792,7 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             case TOWER -> Items.STONE_BRICKS;
             case CUSTOM_SMART -> Items.AMETHYST_SHARD;
             case STAIRS -> Items.STONE_STAIRS;
+            case CURVE -> Items.LEAD;
         });
     }
 
@@ -819,6 +867,10 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
             int height = owner == null ? BuildToolsState.DEFAULT_TOWER_FLOOR_HEIGHT : BuildToolsState.towerFloorHeight(owner);
             return Component.translatable("buildtools.menu.tower.description", height);
         }
+        if (shape == SelectionShape.CURVE) {
+            int peak = owner == null ? BuildToolsState.DEFAULT_CURVE_PEAK : BuildToolsState.curvePeak(owner);
+            return Component.translatable("buildtools.menu.curve.description", peak);
+        }
         return Component.translatable("buildtools.menu.structure_shape.description");
     }
 
@@ -886,47 +938,64 @@ public final class BuildToolsModeMenu extends AbstractContainerMenu {
 
     private static ItemStack emptyHistoryItem(boolean undo) {
         ItemStack stack = named(undo ? Items.GRAY_DYE : Items.LIGHT_GRAY_DYE,
-                Component.literal(undo ? "No undo history" : "No redo history").withStyle(ChatFormatting.GRAY));
-        Component description = Component.literal("Build actions will appear here after you use tools.").withStyle(ChatFormatting.DARK_GRAY);
+                Component.translatable(undo ? "buildtools.menu.history.empty.undo" : "buildtools.menu.history.empty.redo").withStyle(ChatFormatting.GRAY));
+        Component description = Component.translatable("buildtools.menu.history.empty.description").withStyle(ChatFormatting.DARK_GRAY);
         stack.set(DataComponents.LORE, new ItemLore(List.of(description), List.of(description)));
+        return stack;
+    }
+
+    private ItemStack clearHistoryItem() {
+        ItemStack stack = named(Items.BARRIER, Component.translatable("buildtools.menu.clear_history")
+                .withStyle(pendingHistoryClear ? ChatFormatting.RED : ChatFormatting.WHITE));
+        List<Component> lore = pendingHistoryClear
+                ? List.of(
+                        Component.translatable("buildtools.menu.clear_history.description").withStyle(ChatFormatting.GRAY),
+                        Component.translatable("buildtools.menu.clear_history.confirm").withStyle(ChatFormatting.RED))
+                : List.of(Component.translatable("buildtools.menu.clear_history.description").withStyle(ChatFormatting.GRAY));
+        stack.set(DataComponents.LORE, new ItemLore(lore, lore));
+        setSelected(stack, pendingHistoryClear);
         return stack;
     }
 
     private static ItemStack historyItem(boolean undo, int index, UndoSnapshot snapshot) {
         HistoryStats stats = HistoryStats.of(snapshot);
-        ItemStack stack = named(undo ? Items.CLOCK : Items.COMPASS, Component.literal(historyTitle(undo, index, stats.total()))
+        ItemStack stack = named(undo ? Items.CLOCK : Items.COMPASS, historyTitle(undo, index, stats.total()).copy()
                 .withStyle(index == 0 ? ChatFormatting.GOLD : ChatFormatting.YELLOW));
         List<Component> lore = historyLore(undo, index, snapshot, stats);
         stack.set(DataComponents.LORE, new ItemLore(lore, lore));
         return stack;
     }
 
-    private static String historyTitle(boolean undo, int index, int total) {
-        String action = undo ? "Undo" : "Redo";
-        String suffix = index == 0 ? "next" : "queued";
-        return action + " #" + (index + 1) + " (" + suffix + "): " + total + " changes";
+    private static Component historyTitle(boolean undo, int index, int total) {
+        return Component.translatable(
+                index == 0 ? "buildtools.menu.history.title.next" : "buildtools.menu.history.title.queued",
+                Component.translatable(undo ? "buildtools.menu.history.undo" : "buildtools.menu.history.redo"),
+                index + 1,
+                total);
     }
 
     private static List<Component> historyLore(boolean undo, int index, UndoSnapshot snapshot, HistoryStats stats) {
         List<Component> lore = new ArrayList<>();
-        lore.add(Component.literal(index == 0 ? "Click to " + (undo ? "undo" : "redo") + " this action." : "Older history entry; undo/redo runs in order.")
+        lore.add(Component.translatable(index == 0
+                        ? undo ? "buildtools.menu.history.click.undo" : "buildtools.menu.history.click.redo"
+                        : "buildtools.menu.history.click.older")
                 .withStyle(index == 0 ? ChatFormatting.GREEN : ChatFormatting.DARK_GRAY));
-        lore.add(Component.literal("Dimension: " + snapshot.dimension().location()).withStyle(ChatFormatting.GRAY));
-        lore.add(Component.literal("Placed: " + stats.placed() + "  Removed: " + stats.removed() + "  Replaced: " + stats.replaced())
+        lore.add(Component.translatable("buildtools.menu.history.dimension", snapshot.dimension().location()).withStyle(ChatFormatting.GRAY));
+        lore.add(Component.translatable("buildtools.menu.history.changes", stats.placed(), stats.removed(), stats.replaced())
                 .withStyle(ChatFormatting.GRAY));
         String setBlocks = blockSummary(snapshot, true);
         if (!setBlocks.isEmpty()) {
-            lore.add(Component.literal("Set: " + setBlocks).withStyle(ChatFormatting.AQUA));
+            lore.add(Component.translatable("buildtools.menu.history.set", setBlocks).withStyle(ChatFormatting.AQUA));
         }
         String clearedBlocks = blockSummary(snapshot, false);
         if (!clearedBlocks.isEmpty()) {
-            lore.add(Component.literal("Cleared: " + clearedBlocks).withStyle(ChatFormatting.DARK_AQUA));
+            lore.add(Component.translatable("buildtools.menu.history.cleared", clearedBlocks).withStyle(ChatFormatting.DARK_AQUA));
         }
         if (!snapshot.refund().isEmpty()) {
-            lore.add(Component.literal("Materials: " + materialSummary(snapshot.refund())).withStyle(ChatFormatting.AQUA));
+            lore.add(Component.translatable("buildtools.menu.history.materials", materialSummary(snapshot.refund())).withStyle(ChatFormatting.AQUA));
         }
         if (!snapshot.producedDrops().isEmpty()) {
-            lore.add(Component.literal("Stored drops: " + materialSummary(snapshot.producedDrops())).withStyle(ChatFormatting.GREEN));
+            lore.add(Component.translatable("buildtools.menu.history.stored_drops", materialSummary(snapshot.producedDrops())).withStyle(ChatFormatting.GREEN));
         }
         return lore;
     }

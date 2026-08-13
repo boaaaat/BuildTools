@@ -7,6 +7,9 @@ import com.abhil.buildtools.config.BuildToolsClientConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.TranslatableContents;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
 
@@ -28,9 +31,11 @@ public final class BuildToolStatusOverlay {
 
         GuiGraphics guiGraphics = event.getGuiGraphics();
         Font font = minecraft.font;
-        List<String> statusLines = filteredLines(ClientToolStatusData.lines());
-        List<String> lines = wrappedLines(font, statusLines, MAX_WIDTH - 20);
-        List<String> shortcutLines = wrappedLines(font, shortcutLines(minecraft), MAX_WIDTH - 20);
+        List<Component> statusLines = filteredLines(ClientToolStatusData.lines());
+        List<FormattedCharSequence> lines = wrappedLines(font, statusLines, MAX_WIDTH - 20);
+        List<FormattedCharSequence> shortcutLines = wrappedLines(font, shortcutLines(minecraft).stream()
+                .<Component>map(Component::literal)
+                .toList(), MAX_WIDTH - 20);
         int width = Math.max(110, Math.min(MAX_WIDTH, contentWidth(font, ClientToolStatusData.title(), lines, shortcutLines) + 20));
         int height = 22 + lines.size() * 10 + (shortcutLines.isEmpty() ? 8 : 20 + shortcutLines.size() * 10);
         double scale = BuildToolsClientConfig.OVERLAY_SCALE.get();
@@ -53,7 +58,7 @@ public final class BuildToolStatusOverlay {
 
         guiGraphics.drawString(font, ClientToolStatusData.title(), x + 9, y + 7, TEXT, false);
         int lineY = y + 21;
-        for (String line : lines) {
+        for (FormattedCharSequence line : lines) {
             guiGraphics.drawString(font, line, x + 9, lineY, MUTED_TEXT, false);
             lineY += 10;
         }
@@ -61,9 +66,9 @@ public final class BuildToolStatusOverlay {
             lineY += 4;
             guiGraphics.hLine(x + 8, x + width - 9, lineY, PANEL_BORDER);
             lineY += 6;
-            guiGraphics.drawString(font, "Shortcuts", x + 9, lineY, TEXT, false);
+            guiGraphics.drawString(font, net.minecraft.network.chat.Component.translatable("buildtools.overlay.shortcuts"), x + 9, lineY, TEXT, false);
             lineY += 10;
-            for (String line : shortcutLines) {
+            for (FormattedCharSequence line : shortcutLines) {
                 guiGraphics.drawString(font, line, x + 9, lineY, MUTED_TEXT, false);
                 lineY += 10;
             }
@@ -83,21 +88,36 @@ public final class BuildToolStatusOverlay {
         return BuildToolsClient.shortcutHintLines(minecraft.player.getOffhandItem());
     }
 
-    private static List<String> filteredLines(List<String> lines) {
+    private static List<Component> filteredLines(List<Component> lines) {
         boolean showMaterials = BuildToolsClientConfig.SHOW_OVERLAY_MATERIALS.get();
         boolean showLimits = BuildToolsClientConfig.SHOW_OVERLAY_LIMITS.get();
-        List<String> filtered = new ArrayList<>();
-        for (String line : lines) {
-            String lower = line.toLowerCase(java.util.Locale.ROOT);
-            if (!showMaterials && (lower.contains("need") || lower.contains("missing") || lower.contains("materials"))) {
+        List<Component> filtered = new ArrayList<>();
+        for (Component line : lines) {
+            String key = line.getContents() instanceof TranslatableContents contents ? contents.getKey() : "";
+            if (!showMaterials && isMaterialStatusKey(key)) {
                 continue;
             }
-            if (!showLimits && (lower.contains("limit") || lower.contains("warning") || lower.contains("too far") || lower.contains("unloaded"))) {
+            if (!showLimits && isLimitStatusKey(key)) {
                 continue;
             }
             filtered.add(line);
         }
         return filtered;
+    }
+
+    private static boolean isMaterialStatusKey(String key) {
+        return key.contains(".material")
+                || key.contains(".palette")
+                || key.endsWith(".select_material")
+                || key.endsWith(".mode_material")
+                || key.endsWith(".block_target")
+                || key.endsWith(".replace_target");
+    }
+
+    private static boolean isLimitStatusKey(String key) {
+        return key.contains(".warning.")
+                || key.endsWith(".over_limit")
+                || key.endsWith(".selection_other_dimension");
     }
 
     private static int overlayX(int screenWidth, int width) {
@@ -114,39 +134,22 @@ public final class BuildToolStatusOverlay {
         };
     }
 
-    private static List<String> wrappedLines(Font font, List<String> source, int maxWidth) {
-        List<String> result = new ArrayList<>();
-        for (String line : source) {
-            if (font.width(line) <= maxWidth) {
-                result.add(line);
-                continue;
-            }
-
-            StringBuilder current = new StringBuilder();
-            for (String word : line.split(" ")) {
-                String next = current.isEmpty() ? word : current + " " + word;
-                if (font.width(next) > maxWidth && !current.isEmpty()) {
-                    result.add(current.toString());
-                    current = new StringBuilder(word);
-                } else {
-                    current = new StringBuilder(next);
-                }
-            }
-            if (!current.isEmpty()) {
-                result.add(current.toString());
-            }
+    private static List<FormattedCharSequence> wrappedLines(Font font, List<Component> source, int maxWidth) {
+        List<FormattedCharSequence> result = new ArrayList<>();
+        for (Component line : source) {
+            result.addAll(font.split(line, maxWidth));
         }
         return result;
     }
 
-    private static int contentWidth(Font font, String title, List<String> lines, List<String> shortcutLines) {
+    private static int contentWidth(Font font, Component title, List<FormattedCharSequence> lines, List<FormattedCharSequence> shortcutLines) {
         int width = font.width(title);
-        for (String line : lines) {
+        for (FormattedCharSequence line : lines) {
             width = Math.max(width, font.width(line));
         }
         if (!shortcutLines.isEmpty()) {
-            width = Math.max(width, font.width("Shortcuts"));
-            for (String line : shortcutLines) {
+            width = Math.max(width, font.width(net.minecraft.network.chat.Component.translatable("buildtools.overlay.shortcuts")));
+            for (FormattedCharSequence line : shortcutLines) {
                 width = Math.max(width, font.width(line));
             }
         }

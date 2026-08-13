@@ -24,7 +24,8 @@ public enum SelectionShape {
     BRIDGE("bridge"),
     TOWER("tower"),
     CUSTOM_SMART("custom_smart"),
-    STAIRS("stairs");
+    STAIRS("stairs"),
+    CURVE("curve");
 
     private static final SelectionShape[] BASIC = {
             CUBOID,
@@ -64,6 +65,7 @@ public enum SelectionShape {
             ROOM_FRAME,
             BRIDGE,
             TOWER,
+            CURVE,
             STAIRS
     };
 
@@ -88,6 +90,7 @@ public enum SelectionShape {
             ROOM_FRAME,
             BRIDGE,
             TOWER,
+            CURVE,
             CUSTOM_SMART,
             STAIRS
     };
@@ -105,7 +108,8 @@ public enum SelectionShape {
             A_FRAME,
             ROOM_FRAME,
             BRIDGE,
-            TOWER
+            TOWER,
+            CURVE
     };
 
     private final String key;

@@ -1,15 +1,19 @@
 package com.abhil.buildtools.client;
 
+import com.abhil.buildtools.network.PresetLibraryQueryPayload;
 import com.abhil.buildtools.server.PresetLibraryMenu;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
+import net.neoforged.neoforge.network.PacketDistributor;
 
 public final class PresetLibraryScreen extends AbstractContainerScreen<PresetLibraryMenu> {
     private static final ResourceLocation BACKGROUND = ResourceLocation.withDefaultNamespace("textures/gui/container/generic_54.png");
     private static final int ROWS = 6;
+    private EditBox searchBox;
 
     public PresetLibraryScreen(PresetLibraryMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
@@ -17,8 +21,20 @@ public final class PresetLibraryScreen extends AbstractContainerScreen<PresetLib
         this.inventoryLabelY = this.imageHeight - 94;
     }
 
+    @Override protected void init() {
+        super.init();
+        searchBox = new EditBox(this.font, this.leftPos + 96, this.topPos + 5, 72, 10, Component.translatable("buildtools.menu.preset_search"));
+        searchBox.setMaxLength(64);
+        searchBox.setBordered(false);
+        searchBox.setResponder(query -> PacketDistributor.sendToServer(new PresetLibraryQueryPayload(query)));
+        addRenderableWidget(searchBox);
+    }
+
     @Override public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         super.render(guiGraphics, mouseX, mouseY, partialTick);
+        if (searchBox != null && searchBox.getValue().isBlank() && !searchBox.isFocused()) {
+            guiGraphics.drawString(this.font, Component.translatable("buildtools.menu.preset_search"), this.leftPos + 96, this.topPos + 5, 0xFF777777, false);
+        }
         this.renderTooltip(guiGraphics, mouseX, mouseY);
     }
 

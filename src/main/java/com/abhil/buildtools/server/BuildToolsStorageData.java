@@ -111,6 +111,21 @@ public final class BuildToolsStorageData extends SavedData {
         return List.copyOf(result);
     }
 
+    public List<StorageEntry> storages(UUID owner) {
+        List<StorageEntry> result = new ArrayList<>();
+        for (StorageRef storage : storages) {
+            if (storage.owner().equals(owner)) {
+                result.add(new StorageEntry(storage.dimension(), storage.pos()));
+            }
+        }
+        result.sort(java.util.Comparator
+                .comparing((StorageEntry entry) -> entry.dimension().toString())
+                .thenComparingInt(entry -> entry.pos().getX())
+                .thenComparingInt(entry -> entry.pos().getY())
+                .thenComparingInt(entry -> entry.pos().getZ()));
+        return List.copyOf(result);
+    }
+
     public List<BlockPos> storages(ResourceKey<Level> dimension) {
         List<BlockPos> result = new ArrayList<>();
         ResourceLocation id = dimension.location();
@@ -123,5 +138,8 @@ public final class BuildToolsStorageData extends SavedData {
     }
 
     private record StorageRef(UUID owner, ResourceLocation dimension, BlockPos pos) {
+    }
+
+    public record StorageEntry(ResourceLocation dimension, BlockPos pos) {
     }
 }

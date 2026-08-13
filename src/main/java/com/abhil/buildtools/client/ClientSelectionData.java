@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 
 public final class ClientSelectionData {
     private static String dimension = "";
@@ -17,6 +18,9 @@ public final class ClientSelectionData {
     private static List<BlockPos> points = List.of();
     private static List<BlockPos> preview = List.of();
     private static List<Integer> previewColors = List.of();
+    private static int previewTotalPositions;
+    private static Optional<BlockPos> previewBoundsMin = Optional.empty();
+    private static Optional<BlockPos> previewBoundsMax = Optional.empty();
     private static List<MeasurementMarker> measurementMarkers = List.of();
     private static boolean detailedPreview;
     private static final Map<UUID, SharedSelection> sharedSelections = new LinkedHashMap<>();
@@ -37,8 +41,21 @@ public final class ClientSelectionData {
     }
 
     public static void setPreview(List<BlockPos> positions, boolean detailed, List<Integer> colors) {
+        setPreview(positions, detailed, colors, positions.size(), Optional.empty(), Optional.empty());
+    }
+
+    public static void setPreview(
+            List<BlockPos> positions,
+            boolean detailed,
+            List<Integer> colors,
+            int totalPositions,
+            Optional<BlockPos> boundsMin,
+            Optional<BlockPos> boundsMax) {
         preview = List.copyOf(positions);
         previewColors = colors.size() == positions.size() ? List.copyOf(colors) : List.of();
+        previewTotalPositions = Math.max(positions.size(), totalPositions);
+        previewBoundsMin = boundsMin;
+        previewBoundsMax = boundsMax;
         detailedPreview = detailed;
     }
 
@@ -73,6 +90,10 @@ public final class ClientSelectionData {
     public static List<Integer> previewColors() {
         return previewColors;
     }
+
+    public static int previewTotalPositions() { return previewTotalPositions; }
+    public static Optional<BlockPos> previewBoundsMin() { return previewBoundsMin; }
+    public static Optional<BlockPos> previewBoundsMax() { return previewBoundsMax; }
 
     public static List<BlockPos> points() {
         return points;
@@ -109,6 +130,6 @@ public final class ClientSelectionData {
             boolean detailedPreview) {
     }
 
-    public record MeasurementMarker(String label, double x, double y, double z) {
+    public record MeasurementMarker(Component label, double x, double y, double z) {
     }
 }

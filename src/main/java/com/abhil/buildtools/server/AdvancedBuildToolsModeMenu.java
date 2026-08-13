@@ -30,6 +30,8 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
     private static final int ADVANCED_SHAPES_SLOT = 34;
     private static final int ADVANCED_SHAPE_START_SLOT = 9;
     private static final int ROTATION_SLOT = 35;
+    private static final int PALETTES_SLOT = 36;
+    private static final int STORAGE_SLOT = 37;
     private final SimpleContainer menuItems = new SimpleContainer(MENU_SIZE);
     private final ServerPlayer owner;
     private final ToolProfile profile;
@@ -159,6 +161,8 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
         menuItems.setItem(8, utilityItem(Items.BRICKS, "buildtools.menu.material_selection", "buildtools.menu.material_selection.description"));
         menuItems.setItem(ADVANCED_SHAPES_SLOT, utilityItem(Items.NETHER_STAR, "buildtools.menu.advanced_shapes", "buildtools.menu.advanced_shapes.description"));
         menuItems.setItem(ROTATION_SLOT, rotationModeItem());
+        menuItems.setItem(PALETTES_SLOT, utilityItem(Items.PAINTING, "buildtools.menu.palettes", "buildtools.menu.palettes.description"));
+        menuItems.setItem(STORAGE_SLOT, utilityItem(Items.ENDER_CHEST, "buildtools.menu.storage_manager", "buildtools.menu.storage_manager.description"));
 
         populateShapes(SHAPE_START_SLOT);
 
@@ -270,6 +274,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
                 option(20, Items.STONE_BRICKS, AdvancedShapeOption.TOWER_WALL_THICKNESS, Component.translatable("buildtools.menu.advanced_shape.wall_thickness", BuildToolsState.towerWallThickness(owner)));
                 option(21, Items.STONE_BRICK_STAIRS, AdvancedShapeOption.TOWER_TOP_STYLE, Component.translatable("buildtools.menu.advanced_shape.top_style", BuildToolsState.towerTopStyle(owner).displayName()));
             }
+            case CURVE -> option(18, Items.LEAD, AdvancedShapeOption.CURVE_PEAK, Component.translatable("buildtools.menu.advanced_shape.curve_peak", BuildToolsState.curvePeak(owner)));
             default -> {
             }
         }
@@ -360,6 +365,10 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             int height = owner == null ? BuildToolsState.DEFAULT_TOWER_FLOOR_HEIGHT : BuildToolsState.towerFloorHeight(owner);
             return Component.translatable("buildtools.menu.tower.description", height);
         }
+        if (shape == SelectionShape.CURVE) {
+            int peak = owner == null ? BuildToolsState.DEFAULT_CURVE_PEAK : BuildToolsState.curvePeak(owner);
+            return Component.translatable("buildtools.menu.curve.description", peak);
+        }
         return Component.translatable("buildtools.menu.structure_shape.description");
     }
 
@@ -434,6 +443,8 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             case 8 -> MaterialSelectionMenu.open(player);
             case ADVANCED_SHAPES_SLOT -> openAdvancedShapesPage();
             case ROTATION_SLOT -> BuildToolsState.cycleBlockRotationMode(player, 1);
+            case PALETTES_SLOT -> PaletteLibraryMenu.open(player);
+            case STORAGE_SLOT -> StorageManagerMenu.open(player);
             case 39 -> HelpMenu.open(player);
             default -> {
                 return false;
@@ -624,6 +635,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
             case TOWER -> Items.STONE_BRICKS;
             case CUSTOM_SMART -> Items.AMETHYST_SHARD;
             case STAIRS -> Items.STONE_STAIRS;
+            case CURVE -> Items.LEAD;
         });
     }
 
@@ -742,6 +754,7 @@ public final class AdvancedBuildToolsModeMenu extends AbstractContainerMenu {
                 case 21 -> AdvancedShapeOption.TOWER_TOP_STYLE;
                 default -> null;
             };
+            case CURVE -> slotId == 18 ? AdvancedShapeOption.CURVE_PEAK : null;
             default -> null;
         };
     }

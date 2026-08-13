@@ -39,8 +39,8 @@ public record ShortcutActionPayload(String action, String direction, int amount)
         switch (payload.action()) {
             case "open_menu" -> openMenu(player);
             case "open_materials" -> openMaterials(player);
-            case "cycle_shape" -> BuildToolsState.cycleShape(player);
-            case "cycle_mode" -> BuildToolsState.cycleMode(player);
+            case "cycle_shape" -> cycleShape(player, 1);
+            case "cycle_mode" -> cycleMode(player, 1);
             case "confirm_preview" -> confirm(player);
             case "cancel_preview" -> cancel(player);
             case "undo" -> BuildOperationEngine.undo(player);
@@ -58,7 +58,7 @@ public record ShortcutActionPayload(String action, String direction, int amount)
     }
 
     private static void openMenu(ServerPlayer player) {
-        ItemStack held = player.getMainHandItem();
+        ItemStack held = activeMenuTool(player);
         if (held.is(ModItems.ADVANCED_BUILDER_WAND.get()) || held.is(ModItems.ADVANCED_SELECTION_STAFF.get())) {
             AdvancedBuildToolsModeMenu.open(player);
         } else if (isMenuTool(held)) {
@@ -108,7 +108,7 @@ public record ShortcutActionPayload(String action, String direction, int amount)
     }
 
     private static void openMaterials(ServerPlayer player) {
-        if (isMaterialSelectionTool(player.getMainHandItem())) {
+        if (!activeTool(player, ToolKind.MATERIAL).isEmpty()) {
             MaterialSelectionMenu.open(player);
         }
     }
@@ -126,6 +126,9 @@ public record ShortcutActionPayload(String action, String direction, int amount)
     }
 
     private static void cancel(ServerPlayer player) {
+        if (BuildOperationEngine.cancelQueuedOperation(player)) {
+            return;
+        }
         BuildOperationEngine.clearPendingOperation(player);
         BuildToolsState.clearPendingPaste(player);
     }
@@ -139,7 +142,7 @@ public record ShortcutActionPayload(String action, String direction, int amount)
     }
 
     private static void nudgeRelative(ServerPlayer player, String relativeDirection, int amount) {
-        if (!isShortcutBuildTool(player.getMainHandItem())) {
+        if (activeTool(player, ToolKind.SHORTCUT).isEmpty()) {
             return;
         }
         Direction direction = relativeDirection(relativeDirection, player.getDirection());
@@ -151,7 +154,8 @@ public record ShortcutActionPayload(String action, String direction, int amount)
 
     private static void nudge(ServerPlayer player, Direction direction, int amount) {
         int steps = Math.max(1, Math.min(10, Math.abs(amount)));
-        if (player.getMainHandItem().is(ModItems.ADVANCED_SELECTION_STAFF.get())
+        ItemStack held = activeTool(player, ToolKind.SHORTCUT);
+        if (held.is(ModItems.ADVANCED_SELECTION_STAFF.get())
                 && !player.isShiftKeyDown()
                 && BuildToolsState.pendingPasteOrigin(player).isEmpty()) {
             BuildToolsState.nudgeClosestAdvancedPoint(player, direction, steps);
@@ -167,24 +171,26 @@ public record ShortcutActionPayload(String action, String direction, int amount)
     }
 
     private static void cycleShape(ServerPlayer player, int step) {
-        if (isShapeTool(player.getMainHandItem())) {
+        if (!activeTool(player, ToolKind.SHAPE).isEmpty()) {
             BuildToolsState.cycleShape(player, step);
         }
     }
 
     private static void cycleMode(ServerPlayer player, int step) {
-        if (isModeTool(player.getMainHandItem())) {
+        if (!activeTool(player, ToolKind.MODE).isEmpty()) {
             BuildToolsState.cycleMode(player, step);
         }
     }
 
     private static void adjustCurrentOption(ServerPlayer player, int step) {
-        ItemStack held = player.getMainHandItem();
+        ItemStack held = activeTool(player, ToolKind.SHAPE);
         SelectionShape shape = BuildToolsState.selectionShape(player);
         if (isShapeTool(held) && shape == SelectionShape.ROAD) {
             BuildToolsState.changeRoadWidth(player, step);
         } else if (isShapeTool(held) && shape == SelectionShape.ARCH) {
             BuildToolsState.changeArchPeak(player, step);
+        } else if (isShapeTool(held) && shape == SelectionShape.CURVE) {
+            BuildToolsState.changeCurvePeak(player, step);
         } else if (isShapeTool(held) && shape == SelectionShape.BRIDGE) {
             BuildToolsState.changeBridgeWidth(player, step);
         } else if (isShapeTool(held) && shape == SelectionShape.TOWER) {
@@ -201,7 +207,7 @@ public record ShortcutActionPayload(String action, String direction, int amount)
     }
 
     private static void toggleShapeOption(ServerPlayer player) {
-        if (!isShapeTool(player.getMainHandItem())) {
+        if (activeTool(player, ToolKind.SHAPE).isEmpty()) {
             return;
         }
         SelectionShape shape = BuildToolsState.selectionShape(player);
@@ -231,6 +237,42 @@ public record ShortcutActionPayload(String action, String direction, int amount)
             return value == null || value.isBlank() ? null : Direction.valueOf(value);
         } catch (IllegalArgumentException ignored) {
             return null;
+        }
+    }
+
+    private static ItemStack activeMenuTool(ServerPlayer player) {
+        ItemStack mainHand = player.getMainHandItem();
+        if (isMenuTool(mainHand) || mainHand.is(ModItems.ADVANCED_BUILDER_WAND.get()) || mainHand.is(ModItems.ADVANCED_SELECTION_STAFF.get())) {
+            return mainHand;
+        }
+        ItemStack offHand = player.getOffhandItem();
+        return isMenuTool(offHand) || offHand.is(ModItems.ADVANCED_BUILDER_WAND.get()) || offHand.is(ModItems.ADVANCED_SELECTION_STAFF.get())
+                ? offHand
+                : ItemStack.EMPTY;
+    }
+
+    private static ItemStack activeTool(ServerPlayer player, ToolKind kind) {
+        ItemStack mainHand = player.getMainHandItem();
+        if (isShortcutBuildTool(mainHand)) {
+            return kind.matches(mainHand) ? mainHand : ItemStack.EMPTY;
+        }
+        ItemStack offHand = player.getOffhandItem();
+        return kind.matches(offHand) ? offHand : ItemStack.EMPTY;
+    }
+
+    private enum ToolKind {
+        SHORTCUT,
+        SHAPE,
+        MODE,
+        MATERIAL;
+
+        private boolean matches(ItemStack stack) {
+            return switch (this) {
+                case SHORTCUT -> isShortcutBuildTool(stack);
+                case SHAPE -> isShapeTool(stack);
+                case MODE -> isModeTool(stack);
+                case MATERIAL -> isMaterialSelectionTool(stack);
+            };
         }
     }
 

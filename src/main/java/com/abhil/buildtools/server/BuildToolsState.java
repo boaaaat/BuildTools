@@ -4,6 +4,7 @@ import com.abhil.buildtools.network.BuildToolsNetworking;
 import com.abhil.buildtools.network.MeasurementOverlayPayload;
 import com.abhil.buildtools.network.PreviewPayload;
 import com.abhil.buildtools.network.SelectionSyncPayload;
+import com.abhil.buildtools.network.TextPromptPayload;
 import com.abhil.buildtools.registry.ModItems;
 import com.abhil.buildtools.shape.ArchDirection;
 import com.abhil.buildtools.shape.ArchMode;
@@ -72,6 +73,8 @@ public final class BuildToolsState {
     private static final Map<UUID, SelectionPreset> PRESETS = new HashMap<>();
     private static final Map<UUID, List<NamedSelectionPreset>> NAMED_PRESETS = new HashMap<>();
     private static final Map<UUID, List<SavedPalette>> SAVED_PALETTES = new HashMap<>();
+    private static final Map<UUID, SelectionPreset> PENDING_PRESET_CREATES = new HashMap<>();
+    private static final Map<UUID, List<PaletteEntry>> PENDING_PALETTE_CREATES = new HashMap<>();
     private static final Map<UUID, Integer> PENDING_PRESET_RENAMES = new HashMap<>();
     private static final Map<UUID, Integer> PENDING_PALETTE_RENAMES = new HashMap<>();
     private static final Map<UUID, BuildPlan> PLANS = new HashMap<>();
@@ -83,6 +86,7 @@ public final class BuildToolsState {
     private static final Map<UUID, EnumMap<ToolProfile, ArchMode>> ARCH_MODES = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, ArchDirection>> ARCH_DIRECTIONS = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, Integer>> ARCH_PEAKS = new HashMap<>();
+    private static final Map<UUID, EnumMap<ToolProfile, Integer>> CURVE_PEAKS = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, Boolean>> SPHERE_HOLLOW = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, Boolean>> ELLIPSOID_HOLLOW = new HashMap<>();
     private static final Map<UUID, EnumMap<ToolProfile, ShapeDetailMode>> SHAPE_DETAIL_MODES = new HashMap<>();
@@ -122,11 +126,15 @@ public final class BuildToolsState {
     private static final int MIN_ROAD_WIDTH = 1;
     private static final int MAX_ROAD_WIDTH = 16;
     public static final int DEFAULT_ARCH_PEAK = 50;
+    public static final int DEFAULT_CURVE_PEAK = 50;
     public static final int DEFAULT_BRIDGE_WIDTH = 3;
     public static final int DEFAULT_TOWER_FLOOR_HEIGHT = 4;
     private static final int ARCH_PEAK_STEP = 5;
+    private static final int CURVE_PEAK_STEP = 5;
     private static final int MIN_ARCH_PEAK = 0;
     private static final int MAX_ARCH_PEAK = 100;
+    private static final int MIN_CURVE_PEAK = 0;
+    private static final int MAX_CURVE_PEAK = 100;
     private static final int MIN_BRIDGE_WIDTH = 1;
     private static final int MAX_BRIDGE_WIDTH = 16;
     private static final int MIN_ROOF_OVERHANG = 0;
@@ -212,6 +220,10 @@ public final class BuildToolsState {
 
     public static int archPeak(ServerPlayer player) {
         return clampArchPeak(sharedShapeOption(archPeaks(player), SelectionShape.ARCH, DEFAULT_ARCH_PEAK));
+    }
+
+    public static int curvePeak(ServerPlayer player) {
+        return clampCurvePeak(sharedShapeOption(curvePeaks(player), SelectionShape.CURVE, DEFAULT_CURVE_PEAK));
     }
 
     public static boolean sphereHollow(ServerPlayer player) {
@@ -497,7 +509,10 @@ public final class BuildToolsState {
     }
 
     public static void setUndo(ServerPlayer player, UndoSnapshot snapshot) {
-        pushLimited(UNDO.computeIfAbsent(player.getUUID(), ignored -> new ArrayDeque<>()), snapshot);
+        UndoSnapshot evicted = pushLimited(UNDO.computeIfAbsent(player.getUUID(), ignored -> new ArrayDeque<>()), snapshot);
+        if (evicted != null) {
+            releaseExpiredHistoryDrops(player, evicted.producedDrops());
+        }
         REDO.remove(player.getUUID());
         persist(player);
     }
@@ -570,24 +585,43 @@ public final class BuildToolsState {
 
     public static Map<ItemStackKey, Integer> storedDrops(ServerPlayer player) {
         Map<ItemStackKey, Integer> drops = new LinkedHashMap<>();
-        Deque<UndoSnapshot> history = UNDO.get(player.getUUID());
-        if (history != null) {
-            for (UndoSnapshot snapshot : history) {
-                StoredItems.toCounts(snapshot.producedDrops()).forEach((key, count) -> drops.merge(key, count, Integer::sum));
-            }
-        }
+        addStoredDropCounts(drops, UNDO.get(player.getUUID()));
         return Map.copyOf(drops);
     }
 
     public static List<ItemStack> storedDropStacks(ServerPlayer player) {
         List<ItemStack> drops = new ArrayList<>();
-        Deque<UndoSnapshot> history = UNDO.get(player.getUUID());
-        if (history != null) {
-            for (UndoSnapshot snapshot : history) {
-                drops.addAll(StoredItems.copyOf(snapshot.producedDrops()));
-            }
-        }
+        addStoredDrops(drops, UNDO.get(player.getUUID()));
         return List.copyOf(drops);
+    }
+
+    private static void addStoredDropCounts(Map<ItemStackKey, Integer> drops, Deque<UndoSnapshot> history) {
+        if (history == null) {
+            return;
+        }
+        for (UndoSnapshot snapshot : history) {
+            StoredItems.toCounts(snapshot.producedDrops()).forEach((key, count) -> drops.merge(key, count, Integer::sum));
+        }
+    }
+
+    private static void addStoredDrops(List<ItemStack> drops, Deque<UndoSnapshot> history) {
+        if (history == null) {
+            return;
+        }
+        for (UndoSnapshot snapshot : history) {
+            drops.addAll(StoredItems.copyOf(snapshot.producedDrops()));
+        }
+    }
+
+    private static void releaseExpiredHistoryDrops(ServerPlayer player, List<ItemStack> drops) {
+        if (drops.isEmpty() || player.gameMode.isCreative()) {
+            return;
+        }
+        List<ItemStack> copiedDrops = StoredItems.copyOf(drops);
+        BuildingStorageManager.depositOrGive(player, copiedDrops);
+        player.displayClientMessage(Component.translatable(
+                "buildtools.message.expired_history_drops_returned",
+                StoredItems.total(copiedDrops)), true);
     }
 
     public static void setBlueprint(ServerPlayer player, Blueprint blueprint) {
@@ -621,8 +655,7 @@ public final class BuildToolsState {
             return false;
         }
         PENDING_BLUEPRINT_CREATES.put(player.getUUID(), blueprint);
-        player.closeContainer();
-        player.displayClientMessage(Component.translatable("buildtools.message.blueprint_name_prompt"), false);
+        openTextPrompt(player, "buildtools.prompt.blueprint_create.title", "buildtools.prompt.blueprint_name", "");
         return true;
     }
 
@@ -635,6 +668,7 @@ public final class BuildToolsState {
         if (name.isBlank()) {
             player.displayClientMessage(Component.translatable("buildtools.message.blueprint_create_cancelled"), false);
             persist(player);
+            BlueprintLibraryMenu.open(player);
             return true;
         }
         List<SavedBlueprint> saved = new ArrayList<>(savedBlueprints(player));
@@ -722,8 +756,7 @@ public final class BuildToolsState {
             return;
         }
         PENDING_BLUEPRINT_RENAMES.put(player.getUUID(), index);
-        player.closeContainer();
-        player.displayClientMessage(Component.translatable("buildtools.message.blueprint_rename_prompt"), false);
+        openTextPrompt(player, "buildtools.prompt.blueprint_rename.title", "buildtools.prompt.blueprint_name", savedBlueprints(player).get(index).name());
     }
 
     public static void beginBlueprintCategoryPrompt(ServerPlayer player, int index) {
@@ -731,12 +764,13 @@ public final class BuildToolsState {
             return;
         }
         PENDING_BLUEPRINT_CATEGORIES.put(player.getUUID(), index);
-        player.closeContainer();
-        player.displayClientMessage(Component.translatable("buildtools.message.blueprint_category_prompt"), false);
+        openTextPrompt(player, "buildtools.prompt.blueprint_category.title", "buildtools.prompt.blueprint_category", savedBlueprints(player).get(index).category());
     }
 
     public static boolean hasPendingTextPrompt(ServerPlayer player) {
         return hasPendingBlueprintCreate(player)
+                || PENDING_PRESET_CREATES.containsKey(player.getUUID())
+                || PENDING_PALETTE_CREATES.containsKey(player.getUUID())
                 || PENDING_BLUEPRINT_RENAMES.containsKey(player.getUUID())
                 || PENDING_BLUEPRINT_CATEGORIES.containsKey(player.getUUID())
                 || PENDING_PRESET_RENAMES.containsKey(player.getUUID())
@@ -746,6 +780,14 @@ public final class BuildToolsState {
     public static boolean completePendingTextPrompt(ServerPlayer player, String rawText) {
         if (hasPendingBlueprintCreate(player)) {
             return completeBlueprintCreatePrompt(player, rawText);
+        }
+        SelectionPreset presetCreate = PENDING_PRESET_CREATES.remove(player.getUUID());
+        if (presetCreate != null) {
+            return completePresetCreatePrompt(player, presetCreate, rawText);
+        }
+        List<PaletteEntry> paletteCreate = PENDING_PALETTE_CREATES.remove(player.getUUID());
+        if (paletteCreate != null) {
+            return completePaletteCreatePrompt(player, paletteCreate, rawText);
         }
         Integer renameIndex = PENDING_BLUEPRINT_RENAMES.remove(player.getUUID());
         if (renameIndex != null) {
@@ -766,10 +808,54 @@ public final class BuildToolsState {
         return false;
     }
 
+    public static void cancelPendingTextPrompt(ServerPlayer player) {
+        UUID uuid = player.getUUID();
+        if (PENDING_BLUEPRINT_CREATES.remove(uuid) != null) {
+            player.displayClientMessage(Component.translatable("buildtools.message.blueprint_create_cancelled"), true);
+            BlueprintLibraryMenu.open(player);
+            return;
+        }
+        if (PENDING_PRESET_CREATES.remove(uuid) != null) {
+            player.displayClientMessage(Component.translatable("buildtools.message.preset_create_cancelled"), true);
+            PresetLibraryMenu.open(player);
+            return;
+        }
+        if (PENDING_PALETTE_CREATES.remove(uuid) != null) {
+            player.displayClientMessage(Component.translatable("buildtools.message.palette_create_cancelled"), true);
+            PaletteLibraryMenu.open(player);
+            return;
+        }
+        if (PENDING_BLUEPRINT_RENAMES.remove(uuid) != null) {
+            player.displayClientMessage(Component.translatable("buildtools.message.blueprint_rename_cancelled"), true);
+            BlueprintLibraryMenu.open(player);
+            return;
+        }
+        if (PENDING_BLUEPRINT_CATEGORIES.remove(uuid) != null) {
+            player.displayClientMessage(Component.translatable("buildtools.message.blueprint_category_cancelled"), true);
+            BlueprintLibraryMenu.open(player);
+            return;
+        }
+        if (PENDING_PRESET_RENAMES.remove(uuid) != null) {
+            player.displayClientMessage(Component.translatable("buildtools.message.preset_rename_cancelled"), true);
+            PresetLibraryMenu.open(player);
+            return;
+        }
+        if (PENDING_PALETTE_RENAMES.remove(uuid) != null) {
+            player.displayClientMessage(Component.translatable("buildtools.message.palette_rename_cancelled"), true);
+            PaletteLibraryMenu.open(player);
+        }
+    }
+
+    private static void openTextPrompt(ServerPlayer player, String titleKey, String promptKey, String initialValue) {
+        player.closeContainer();
+        PacketDistributor.sendToPlayer(player, new TextPromptPayload(titleKey, promptKey, initialValue, MAX_BLUEPRINT_NAME_LENGTH));
+    }
+
     private static boolean completeBlueprintRenamePrompt(ServerPlayer player, int index, String rawName) {
         String name = normalizeBlueprintName(rawName);
         if (name.isBlank()) {
             player.displayClientMessage(Component.translatable("buildtools.message.blueprint_rename_cancelled"), false);
+            BlueprintLibraryMenu.open(player);
             return true;
         }
         List<SavedBlueprint> saved = new ArrayList<>(savedBlueprints(player));
@@ -792,6 +878,8 @@ public final class BuildToolsState {
     private static boolean completePresetRenamePrompt(ServerPlayer player, int index, String rawName) {
         String name = normalizeBlueprintName(rawName);
         if (name.isBlank()) {
+            player.displayClientMessage(Component.translatable("buildtools.message.preset_rename_cancelled"), false);
+            PresetLibraryMenu.open(player);
             return true;
         }
         List<NamedSelectionPreset> presets = new ArrayList<>(selectionPresets(player));
@@ -804,9 +892,29 @@ public final class BuildToolsState {
         return true;
     }
 
+    private static boolean completePresetCreatePrompt(ServerPlayer player, SelectionPreset preset, String rawName) {
+        String name = normalizeBlueprintName(rawName);
+        if (name.isBlank()) {
+            player.displayClientMessage(Component.translatable("buildtools.message.preset_create_cancelled"), false);
+            PresetLibraryMenu.open(player);
+            return true;
+        }
+        List<NamedSelectionPreset> presets = new ArrayList<>(selectionPresets(player));
+        String uniqueName = uniquePresetName(presets, name, -1);
+        presets.add(new NamedSelectionPreset(uniqueName, preset));
+        NAMED_PRESETS.put(player.getUUID(), List.copyOf(presets));
+        PRESETS.putIfAbsent(player.getUUID(), preset);
+        persist(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.preset_saved_named", uniqueName), true);
+        PresetLibraryMenu.open(player);
+        return true;
+    }
+
     private static boolean completePaletteRenamePrompt(ServerPlayer player, int index, String rawName) {
         String name = normalizeBlueprintName(rawName);
         if (name.isBlank()) {
+            player.displayClientMessage(Component.translatable("buildtools.message.palette_rename_cancelled"), false);
+            PaletteLibraryMenu.open(player);
             return true;
         }
         List<SavedPalette> palettes = new ArrayList<>(savedPalettes(player));
@@ -819,10 +927,28 @@ public final class BuildToolsState {
         return true;
     }
 
+    private static boolean completePaletteCreatePrompt(ServerPlayer player, List<PaletteEntry> entries, String rawName) {
+        String name = normalizeBlueprintName(rawName);
+        if (name.isBlank()) {
+            player.displayClientMessage(Component.translatable("buildtools.message.palette_create_cancelled"), false);
+            PaletteLibraryMenu.open(player);
+            return true;
+        }
+        List<SavedPalette> palettes = new ArrayList<>(savedPalettes(player));
+        String uniqueName = uniquePaletteName(palettes, name, -1);
+        palettes.add(new SavedPalette(uniqueName, entries));
+        SAVED_PALETTES.put(player.getUUID(), List.copyOf(palettes));
+        persist(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.palette_saved_named", uniqueName), true);
+        PaletteLibraryMenu.open(player);
+        return true;
+    }
+
     private static boolean completeBlueprintCategoryPrompt(ServerPlayer player, int index, String rawCategory) {
         String category = normalizeBlueprintName(rawCategory);
         if (category.isBlank()) {
             player.displayClientMessage(Component.translatable("buildtools.message.blueprint_category_cancelled"), false);
+            BlueprintLibraryMenu.open(player);
             return true;
         }
         List<SavedBlueprint> saved = new ArrayList<>(savedBlueprints(player));
@@ -879,10 +1005,7 @@ public final class BuildToolsState {
 
     public static void setPendingPastePreview(ServerPlayer player, BlockPos origin, List<BlockPos> positions) {
         PENDING_PASTE_ORIGINS.put(player.getUUID(), origin.immutable());
-        if (positions.size() > BuildToolsNetworking.MAX_PREVIEW_POSITIONS) {
-            positions = positions.subList(0, BuildToolsNetworking.MAX_PREVIEW_POSITIONS);
-        }
-        PacketDistributor.sendToPlayer(player, new PreviewPayload(positions, true));
+        PacketDistributor.sendToPlayer(player, PreviewPayload.create(positions, true, List.of()));
         persist(player);
         player.displayClientMessage(Component.translatable("buildtools.message.paste_preview", positions.size()), true);
     }
@@ -895,6 +1018,7 @@ public final class BuildToolsState {
     }
 
     public static void sync(ServerPlayer player) {
+        BuildToolActionbar.markDirty(player);
         Selection selection = selection(player);
         PacketDistributor.sendToPlayer(player, new SelectionSyncPayload(
                 player.getUUID(),
@@ -916,6 +1040,7 @@ public final class BuildToolsState {
             measure = SelectionMeasure.OFF;
         }
         SELECTION_MEASURES.put(player.getUUID(), measure);
+        BuildToolActionbar.markDirty(player);
         refreshMeasurementOverlay(player);
         player.displayClientMessage(Component.translatable("buildtools.message.measurement_mode", measure.displayName()), true);
     }
@@ -924,7 +1049,7 @@ public final class BuildToolsState {
         setSelectionMeasure(player, selectionMeasure(player).next());
     }
 
-    public static List<String> measurementStatusLines(ServerPlayer player) {
+    public static List<Component> measurementStatusLines(ServerPlayer player) {
         SelectionMeasure measure = selectionMeasure(player);
         if (measure == SelectionMeasure.OFF) {
             return List.of();
@@ -1088,22 +1213,19 @@ public final class BuildToolsState {
     }
 
     public static void savePreset(ServerPlayer player) {
+        beginPresetCreatePrompt(player);
+    }
+
+    public static boolean beginPresetCreatePrompt(ServerPlayer player) {
         Selection selection = selection(player);
         if (!selection.isComplete()) {
             player.displayClientMessage(Component.translatable("buildtools.error.incomplete_selection"), false);
-            return;
+            return false;
         }
         SelectionPreset preset = new SelectionPreset(selection.second().subtract(selection.first()), shape(player));
-        PRESETS.put(player.getUUID(), preset);
-        List<NamedSelectionPreset> presets = new ArrayList<>(selectionPresets(player));
-        if (presets.isEmpty()) {
-            presets.add(new NamedSelectionPreset("Default", preset));
-        } else {
-            presets.set(0, new NamedSelectionPreset(presets.getFirst().name(), preset));
-        }
-        NAMED_PRESETS.put(player.getUUID(), List.copyOf(presets));
-        persist(player);
-        player.displayClientMessage(Component.translatable("buildtools.message.preset_saved"), true);
+        PENDING_PRESET_CREATES.put(player.getUUID(), preset);
+        openTextPrompt(player, "buildtools.prompt.preset_create.title", "buildtools.prompt.preset_name", "");
+        return true;
     }
 
     public static void loadPreset(ServerPlayer player) {
@@ -1128,17 +1250,7 @@ public final class BuildToolsState {
     }
 
     public static void saveNewPreset(ServerPlayer player) {
-        Selection selection = selection(player);
-        if (!selection.isComplete()) {
-            player.displayClientMessage(Component.translatable("buildtools.error.incomplete_selection"), false);
-            return;
-        }
-        List<NamedSelectionPreset> presets = new ArrayList<>(selectionPresets(player));
-        String name = uniquePresetName(presets, "Preset " + (presets.size() + 1), -1);
-        presets.add(new NamedSelectionPreset(name, new SelectionPreset(selection.second().subtract(selection.first()), shape(player))));
-        NAMED_PRESETS.put(player.getUUID(), List.copyOf(presets));
-        persist(player);
-        player.displayClientMessage(Component.translatable("buildtools.message.preset_saved"), true);
+        beginPresetCreatePrompt(player);
     }
 
     public static void loadPreset(ServerPlayer player, int index) {
@@ -1159,9 +1271,10 @@ public final class BuildToolsState {
         if (index < 0 || index >= presets.size()) {
             return;
         }
-        presets.remove(index);
+        NamedSelectionPreset removed = presets.remove(index);
         NAMED_PRESETS.put(player.getUUID(), List.copyOf(presets));
         persist(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.preset_deleted", removed.name()), true);
     }
 
     public static void movePreset(ServerPlayer player, int index, int delta) {
@@ -1181,8 +1294,7 @@ public final class BuildToolsState {
             return;
         }
         PENDING_PRESET_RENAMES.put(player.getUUID(), index);
-        player.closeContainer();
-        player.displayClientMessage(Component.translatable("buildtools.message.preset_rename_prompt"), false);
+        openTextPrompt(player, "buildtools.prompt.preset_rename.title", "buildtools.prompt.preset_name", selectionPresets(player).get(index).name());
     }
 
     public static List<SavedPalette> savedPalettes(ServerPlayer player) {
@@ -1195,11 +1307,8 @@ public final class BuildToolsState {
             player.displayClientMessage(Component.translatable("buildtools.error.no_palette"), false);
             return;
         }
-        List<SavedPalette> palettes = new ArrayList<>(savedPalettes(player));
-        palettes.add(new SavedPalette(uniquePaletteName(palettes, "Palette " + (palettes.size() + 1), -1), entries));
-        SAVED_PALETTES.put(player.getUUID(), List.copyOf(palettes));
-        persist(player);
-        player.displayClientMessage(Component.translatable("buildtools.message.palette_profile_saved"), true);
+        PENDING_PALETTE_CREATES.put(player.getUUID(), List.copyOf(entries));
+        openTextPrompt(player, "buildtools.prompt.palette_create.title", "buildtools.prompt.palette_name", "");
     }
 
     public static void loadSavedPalette(ServerPlayer player, int index) {
@@ -1215,9 +1324,10 @@ public final class BuildToolsState {
         if (index < 0 || index >= palettes.size()) {
             return;
         }
-        palettes.remove(index);
+        SavedPalette removed = palettes.remove(index);
         SAVED_PALETTES.put(player.getUUID(), List.copyOf(palettes));
         persist(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.palette_deleted", removed.name()), true);
     }
 
     public static void moveSavedPalette(ServerPlayer player, int index, int delta) {
@@ -1257,8 +1367,7 @@ public final class BuildToolsState {
             return;
         }
         PENDING_PALETTE_RENAMES.put(player.getUUID(), index);
-        player.closeContainer();
-        player.displayClientMessage(Component.translatable("buildtools.message.palette_rename_prompt"), false);
+        openTextPrompt(player, "buildtools.prompt.palette_rename.title", "buildtools.prompt.palette_name", savedPalettes(player).get(index).name());
     }
 
     public static void setReplaceTarget(ServerPlayer player, BlockState state) {
@@ -1363,8 +1472,21 @@ public final class BuildToolsState {
         return entries.isEmpty() ? null : entries.getFirst().state();
     }
 
-    public static void setPrimaryMaterial(ServerPlayer player, BlockState state) {
-        setMaterialSelections(player, List.of(new PaletteEntry(state, PaletteEntry.DEFAULT_WEIGHT)));
+    public static boolean setPrimaryMaterial(ServerPlayer player, BlockState state) {
+        List<PaletteEntry> entries = new ArrayList<>(materialSelections(player));
+        PaletteEntry existing = entries.stream()
+                .filter(entry -> entry.state().is(state.getBlock()))
+                .findFirst()
+                .orElse(null);
+        if (existing == null && entries.size() >= MAX_MATERIAL_SELECTIONS) {
+            player.displayClientMessage(Component.translatable("buildtools.error.material_selection_full", MAX_MATERIAL_SELECTIONS), false);
+            return false;
+        }
+        PaletteEntry primary = existing == null ? new PaletteEntry(state, PaletteEntry.DEFAULT_WEIGHT) : existing;
+        entries.removeIf(entry -> entry.state().is(state.getBlock()));
+        entries.addFirst(primary);
+        setMaterialSelections(player, entries);
+        return true;
     }
 
     public static void toggleMaterialSelection(ServerPlayer player, BlockState state) {
@@ -1514,6 +1636,14 @@ public final class BuildToolsState {
         sendPreview(player);
     }
 
+    public static void changeCurvePeak(ServerPlayer player, int delta) {
+        int peak = clampCurvePeak(curvePeak(player) + delta * CURVE_PEAK_STEP);
+        putForProfilesSupportingShape(curvePeaks(player), SelectionShape.CURVE, peak);
+        BuildOperationEngine.clearPendingOperation(player);
+        player.displayClientMessage(Component.translatable("buildtools.message.curve_peak", peak), true);
+        sendPreview(player);
+    }
+
     public static void toggleShapeHollow(ServerPlayer player, SelectionShape shape) {
         if (shape == SelectionShape.SPHERE) {
             boolean hollow = !sphereHollow(player);
@@ -1598,6 +1728,7 @@ public final class BuildToolsState {
             case TOWER_FLOOR_HEIGHT -> changeTowerFloorHeight(player, delta);
             case TOWER_WALL_THICKNESS -> changeTowerWallThickness(player, delta);
             case TOWER_TOP_STYLE -> cycleTowerTopStyle(player, delta);
+            case CURVE_PEAK -> changeCurvePeak(player, delta);
         }
     }
 
@@ -1714,6 +1845,7 @@ public final class BuildToolsState {
     }
 
     public static void sendPreview(ServerPlayer player) {
+        BuildToolActionbar.markDirty(player);
         if (PENDING_PASTE_ORIGINS.containsKey(player.getUUID())) {
             persist(player);
             refreshMeasurementOverlay(player);
@@ -1727,12 +1859,9 @@ public final class BuildToolsState {
                 && selection.dimension().equals(player.level().dimension())
                 ? filteredPreview(player, selection)
                 : List.of();
-        if (preview.size() > BuildToolsNetworking.MAX_PREVIEW_POSITIONS) {
-            preview = preview.subList(0, BuildToolsNetworking.MAX_PREVIEW_POSITIONS);
-        }
         List<Integer> colors = gradientPreviewColors(player, selection, preview);
         persist(player);
-        PacketDistributor.sendToPlayer(player, new PreviewPayload(preview, false, colors));
+        PacketDistributor.sendToPlayer(player, PreviewPayload.create(preview, false, colors));
         refreshMeasurementOverlay(player);
         if (selectionVisibleToOthers(player)) {
             syncSharedSelectionFrom(player);
@@ -1976,10 +2105,7 @@ public final class BuildToolsState {
             return;
         }
         List<BlockPos> preview = plan.entries().stream().map(BuildPlan.Entry::pos).toList();
-        if (preview.size() > BuildToolsNetworking.MAX_PREVIEW_POSITIONS) {
-            preview = preview.subList(0, BuildToolsNetworking.MAX_PREVIEW_POSITIONS);
-        }
-        PacketDistributor.sendToPlayer(player, new PreviewPayload(preview, true));
+        PacketDistributor.sendToPlayer(player, PreviewPayload.create(preview, true, List.of()));
     }
 
     private static List<BlockPos> filteredPreview(ServerPlayer player, Selection selection) {
@@ -2175,11 +2301,13 @@ public final class BuildToolsState {
         return pos.getX() + ", " + pos.getY() + ", " + pos.getZ();
     }
 
-    private static void pushLimited(Deque<UndoSnapshot> history, UndoSnapshot snapshot) {
+    private static UndoSnapshot pushLimited(Deque<UndoSnapshot> history, UndoSnapshot snapshot) {
         history.addFirst(snapshot);
+        UndoSnapshot evicted = null;
         while (history.size() > HISTORY_LIMIT) {
-            history.removeLast();
+            evicted = history.removeLast();
         }
+        return evicted;
     }
 
     private static void setAdvancedPoints(ServerPlayer player, List<BlockPos> points) {
@@ -2374,6 +2502,14 @@ public final class BuildToolsState {
         return Math.max(MIN_ARCH_PEAK, Math.min(MAX_ARCH_PEAK, peak));
     }
 
+    private static EnumMap<ToolProfile, Integer> curvePeaks(ServerPlayer player) {
+        return CURVE_PEAKS.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
+    }
+
+    private static int clampCurvePeak(int peak) {
+        return Math.max(MIN_CURVE_PEAK, Math.min(MAX_CURVE_PEAK, peak));
+    }
+
     private static EnumMap<ToolProfile, Boolean> sphereHollows(ServerPlayer player) {
         return SPHERE_HOLLOW.computeIfAbsent(player.getUUID(), ignored -> new EnumMap<>(ToolProfile.class));
     }
@@ -2472,6 +2608,7 @@ public final class BuildToolsState {
                 archMode(player),
                 archPeak(player),
                 archDirection(player),
+                curvePeak(player),
                 sphereHollow(player),
                 ellipsoidHollow(player),
                 shapeDetailMode(player),
@@ -2546,6 +2683,7 @@ public final class BuildToolsState {
         tag.put("archModes", writeEnumMap(ARCH_MODES.get(uuid)));
         tag.put("archDirections", writeEnumMap(ARCH_DIRECTIONS.get(uuid)));
         tag.put("archPeaks", writeIntMap(ARCH_PEAKS.get(uuid)));
+        tag.put("curvePeaks", writeIntMap(CURVE_PEAKS.get(uuid)));
         tag.put("sphereHollow", writeBooleanMap(SPHERE_HOLLOW.get(uuid)));
         tag.put("ellipsoidHollow", writeBooleanMap(ELLIPSOID_HOLLOW.get(uuid)));
         tag.put("shapeDetailModes", writeEnumMap(SHAPE_DETAIL_MODES.get(uuid)));
@@ -2622,6 +2760,7 @@ public final class BuildToolsState {
         }
         readArchDirections(tag.getList("archDirections", Tag.TAG_COMPOUND)).ifPresent(map -> ARCH_DIRECTIONS.put(uuid, map));
         readIntMap(tag.getList("archPeaks", Tag.TAG_COMPOUND)).ifPresent(map -> ARCH_PEAKS.put(uuid, map));
+        readIntMap(tag.getList("curvePeaks", Tag.TAG_COMPOUND)).ifPresent(map -> CURVE_PEAKS.put(uuid, map));
         readBooleanMap(tag.getList("sphereHollow", Tag.TAG_COMPOUND)).ifPresent(map -> SPHERE_HOLLOW.put(uuid, map));
         readBooleanMap(tag.getList("ellipsoidHollow", Tag.TAG_COMPOUND)).ifPresent(map -> ELLIPSOID_HOLLOW.put(uuid, map));
         readShapeDetailModes(tag.getList("shapeDetailModes", Tag.TAG_COMPOUND)).ifPresent(map -> SHAPE_DETAIL_MODES.put(uuid, map));
@@ -2718,6 +2857,8 @@ public final class BuildToolsState {
         PRESETS.remove(uuid);
         NAMED_PRESETS.remove(uuid);
         SAVED_PALETTES.remove(uuid);
+        PENDING_PRESET_CREATES.remove(uuid);
+        PENDING_PALETTE_CREATES.remove(uuid);
         PENDING_PRESET_RENAMES.remove(uuid);
         PENDING_PALETTE_RENAMES.remove(uuid);
         PLANS.remove(uuid);
@@ -2729,6 +2870,7 @@ public final class BuildToolsState {
         ARCH_MODES.remove(uuid);
         ARCH_DIRECTIONS.remove(uuid);
         ARCH_PEAKS.remove(uuid);
+        CURVE_PEAKS.remove(uuid);
         SPHERE_HOLLOW.remove(uuid);
         ELLIPSOID_HOLLOW.remove(uuid);
         SHAPE_DETAIL_MODES.remove(uuid);

@@ -6,8 +6,11 @@ import java.util.List;
 import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -80,6 +83,42 @@ public final class BuildingStorageManager {
         addInventoryMaterialCounts(player, counts);
         addStorageMaterialCounts(player, counts);
         return counts;
+    }
+
+    public static List<LinkedStorage> linkedStorages(ServerPlayer player) {
+        List<LinkedStorage> result = new java.util.ArrayList<>();
+        BuildToolsStorageData data = BuildToolsStorageData.get(player.getServer());
+        for (BuildToolsStorageData.StorageEntry entry : data.storages(player.getUUID())) {
+            ResourceKey<net.minecraft.world.level.Level> dimension = ResourceKey.create(Registries.DIMENSION, entry.dimension());
+            ServerLevel level = player.getServer().getLevel(dimension);
+            boolean loaded = level != null && level.hasChunkAt(entry.pos());
+            IItemHandler storage = loaded ? handler(level, entry.pos()) : null;
+            int itemCount = 0;
+            int freeSlots = 0;
+            if (storage != null) {
+                for (int slot = 0; slot < storage.getSlots(); slot++) {
+                    ItemStack stack = storage.getStackInSlot(slot);
+                    itemCount += stack.getCount();
+                    if (stack.isEmpty()) {
+                        freeSlots++;
+                    }
+                }
+            }
+            ItemStack icon = storage != null
+                    ? new ItemStack(level.getBlockState(entry.pos()).getBlock().asItem())
+                    : ItemStack.EMPTY;
+            result.add(new LinkedStorage(entry.dimension(), entry.pos(), storage != null, itemCount, freeSlots, icon));
+        }
+        return List.copyOf(result);
+    }
+
+    public static boolean unlink(ServerPlayer player, ResourceLocation dimensionId, BlockPos pos) {
+        ResourceKey<net.minecraft.world.level.Level> dimension = ResourceKey.create(Registries.DIMENSION, dimensionId);
+        boolean removed = BuildToolsStorageData.get(player.getServer()).remove(player.getUUID(), dimension, pos);
+        if (removed) {
+            player.displayClientMessage(Component.translatable("buildtools.message.storage_untracked"), true);
+        }
+        return removed;
     }
 
     public static int extract(ServerPlayer player, ItemStackKey key, int amount) {
@@ -339,5 +378,14 @@ public final class BuildingStorageManager {
         public boolean consumeLink() {
             return consumeLink;
         }
+    }
+
+    public record LinkedStorage(
+            ResourceLocation dimension,
+            BlockPos pos,
+            boolean available,
+            int itemCount,
+            int freeSlots,
+            ItemStack icon) {
     }
 }

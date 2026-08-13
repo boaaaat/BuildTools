@@ -5,7 +5,6 @@ import com.abhil.buildtools.server.BuildToolsState;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.neoforge.event.ServerChatEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
@@ -81,15 +80,6 @@ public final class BuildToolServerEvents {
     }
 
     @SubscribeEvent
-    public static void chat(ServerChatEvent event) {
-        ServerPlayer player = event.getPlayer();
-        if (BuildToolsState.hasPendingTextPrompt(player)) {
-            event.setCanceled(true);
-            BuildToolsState.completePendingTextPrompt(player, event.getRawText());
-        }
-    }
-
-    @SubscribeEvent
     public static void login(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             BuildToolsState.loadPlayer(player);
@@ -99,6 +89,7 @@ public final class BuildToolServerEvents {
     @SubscribeEvent
     public static void logout(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
+            BuildToolActionbar.clear(player);
             BuildToolsState.stopSharingSelection(player);
             BuildToolsState.cancelBlueprintCreatePrompt(player);
             BuildToolsState.savePlayer(player);

@@ -31,7 +31,17 @@ public record ScrollToolPayload(int direction, boolean alternate) implements Cus
             return;
         }
         int step = payload.direction() >= 0 ? 1 : -1;
-        ItemStack held = player.getMainHandItem();
+        ItemStack held = activeTool(player);
+        if (isShapeOptionScrollTool(held) && BuildToolsState.selectionShape(player) == SelectionShape.CURVE) {
+            if (held.is(ModItems.ADVANCED_SELECTION_STAFF.get())) {
+                int orderDelta = payload.direction() >= 0 ? -1 : 1;
+                if (BuildToolsState.moveAdvancedPointAtLook(player, orderDelta)) {
+                    return;
+                }
+            }
+            BuildToolsState.changeCurvePeak(player, step);
+            return;
+        }
         if (isShapeOptionScrollTool(held) && BuildToolsState.selectionShape(player) == SelectionShape.ROAD) {
             BuildToolsState.changeRoadWidth(player, step);
             return;
@@ -55,25 +65,36 @@ public record ScrollToolPayload(int direction, boolean alternate) implements Cus
             }
             int orderDelta = payload.direction() >= 0 ? -1 : 1;
             if (!BuildToolsState.moveAdvancedPointAtLook(player, orderDelta)) {
-                BuildToolsState.cycleShape(player);
+                BuildToolsState.cycleShape(player, step);
             }
         } else if (held.is(ModItems.AREA_BREAKER.get())) {
             if (BuildToolsState.selectionShape(player) == SelectionShape.STAIRS) {
                 BuildToolsState.cycleStairDirection(player, step);
             } else {
-                BuildToolsState.cycleShape(player);
+                BuildToolsState.cycleShape(player, step);
             }
         } else if (held.is(ModItems.SELECTION_STAFF.get())) {
-            BuildToolsState.cycleShape(player);
+            BuildToolsState.cycleShape(player, step);
         } else if (held.is(ModItems.ADVANCED_BUILDER_WAND.get())) {
             if (BuildToolsState.selectionShape(player) == SelectionShape.STAIRS) {
                 BuildToolsState.cycleStairDirection(player, step);
             } else {
-                BuildToolsState.cycleMode(player);
+                BuildToolsState.cycleMode(player, step);
             }
         } else if (held.is(ModItems.BUILDER_WAND.get())) {
-            BuildToolsState.cycleMode(player);
+            BuildToolsState.cycleMode(player, step);
+        } else if (held.is(ModItems.BUILDER_BRUSH.get())) {
+            BuildToolsState.changeBrushRadius(player, step);
         }
+    }
+
+    private static ItemStack activeTool(ServerPlayer player) {
+        ItemStack mainHand = player.getMainHandItem();
+        if (com.abhil.buildtools.server.ToolProfile.isBuildTool(mainHand)) {
+            return mainHand;
+        }
+        ItemStack offHand = player.getOffhandItem();
+        return com.abhil.buildtools.server.ToolProfile.isBuildTool(offHand) ? offHand : ItemStack.EMPTY;
     }
 
     private static boolean isShapeOptionScrollTool(ItemStack held) {

@@ -21,7 +21,7 @@ public final class ShapeGenerator {
     }
 
     public static List<BlockPos> generate(Selection selection, CustomShapeMode customMode, StairDirectionOverride stairDirection, int roadWidth) {
-        return generate(selection, customMode, stairDirection, new Options(roadWidth, ArchMode.OPEN, 50, ArchDirection.X, false, false, ShapeDetailMode.PLAIN, RoofDirection.AUTO, 0, true, false, 3, false, true, roadWidth, true, BridgeSupportMode.POSTS, 4, 4, 1, TowerTopStyle.BATTLEMENTS));
+        return generate(selection, customMode, stairDirection, new Options(roadWidth, ArchMode.OPEN, 50, ArchDirection.X, 50, false, false, ShapeDetailMode.PLAIN, RoofDirection.AUTO, 0, true, false, 3, false, true, roadWidth, true, BridgeSupportMode.POSTS, 4, 4, 1, TowerTopStyle.BATTLEMENTS));
     }
 
     public static List<BlockPos> generate(Selection selection, CustomShapeMode customMode, StairDirectionOverride stairDirection, Options options) {
@@ -66,6 +66,7 @@ public final class ShapeGenerator {
             case TOWER -> tower(a, b, options.shapeDetailMode(), options.towerFloorHeight(), options.towerWallThickness(), options.towerTopStyle());
             case CUSTOM_SMART -> customSmart(selection.points(), customMode);
             case STAIRS -> stairs(selection, stairDirection);
+            case CURVE -> curve(selection.points().isEmpty() ? List.of(a, b) : selection.points(), options.curvePeak());
         };
     }
 
@@ -93,7 +94,8 @@ public final class ShapeGenerator {
     private static boolean usesAdvancedSmartMode(Selection selection, CustomShapeMode customMode) {
         return customMode != CustomShapeMode.AUTO
                 && selection.points().size() >= 3
-                && selection.shape() != SelectionShape.WALLS;
+                && selection.shape() != SelectionShape.WALLS
+                && selection.shape() != SelectionShape.CURVE;
     }
 
     public static List<BlockPos> walls(Selection selection, BlockPos a, BlockPos b, boolean advancedSelectionMode) {
@@ -157,6 +159,71 @@ public final class ShapeGenerator {
             positions.addAll(line(points.get(i - 1), points.get(i)));
         }
         return List.copyOf(positions);
+    }
+
+    public static List<BlockPos> curve(List<BlockPos> points, int peakPercent) {
+        if (points.isEmpty()) {
+            return List.of();
+        }
+        if (points.size() == 1) {
+            return List.of(points.getFirst().immutable());
+        }
+        if (points.size() == 2) {
+            return line(points.getFirst(), points.getLast());
+        }
+
+        double bias = (Mth.clamp(peakPercent, 0, 100) - 50.0D) / 50.0D;
+        Set<BlockPos> positions = new LinkedHashSet<>();
+        BlockPos previousSample = points.getFirst().immutable();
+        positions.add(previousSample);
+
+        for (int i = 0; i < points.size() - 1; i++) {
+            BlockPos p0 = points.get(Math.max(0, i - 1));
+            BlockPos p1 = points.get(i);
+            BlockPos p2 = points.get(i + 1);
+            BlockPos p3 = points.get(Math.min(points.size() - 1, i + 2));
+            double tangent1X = curveTangent(p0.getX(), p1.getX(), p2.getX(), bias);
+            double tangent1Y = curveTangent(p0.getY(), p1.getY(), p2.getY(), bias);
+            double tangent1Z = curveTangent(p0.getZ(), p1.getZ(), p2.getZ(), bias);
+            double tangent2X = curveTangent(p1.getX(), p2.getX(), p3.getX(), bias);
+            double tangent2Y = curveTangent(p1.getY(), p2.getY(), p3.getY(), bias);
+            double tangent2Z = curveTangent(p1.getZ(), p2.getZ(), p3.getZ(), bias);
+            int samples = curveSampleCount(p0, p1, p2, p3);
+
+            for (int sample = 1; sample <= samples; sample++) {
+                double t = (double) sample / (double) samples;
+                double t2 = t * t;
+                double t3 = t2 * t;
+                double h00 = 2.0D * t3 - 3.0D * t2 + 1.0D;
+                double h10 = t3 - 2.0D * t2 + t;
+                double h01 = -2.0D * t3 + 3.0D * t2;
+                double h11 = t3 - t2;
+                BlockPos currentSample = new BlockPos(
+                        Mth.floor(h00 * p1.getX() + h10 * tangent1X + h01 * p2.getX() + h11 * tangent2X + 0.5D),
+                        Mth.floor(h00 * p1.getY() + h10 * tangent1Y + h01 * p2.getY() + h11 * tangent2Y + 0.5D),
+                        Mth.floor(h00 * p1.getZ() + h10 * tangent1Z + h01 * p2.getZ() + h11 * tangent2Z + 0.5D));
+                positions.addAll(line(previousSample, currentSample));
+                previousSample = currentSample;
+            }
+        }
+        return List.copyOf(positions);
+    }
+
+    private static double curveTangent(double previous, double current, double next, double bias) {
+        return 0.5D * ((1.0D + bias) * (current - previous) + (1.0D - bias) * (next - current));
+    }
+
+    private static int curveSampleCount(BlockPos p0, BlockPos p1, BlockPos p2, BlockPos p3) {
+        int span = Math.max(
+                Math.max(chebyshevDistance(p0, p1), chebyshevDistance(p1, p2)),
+                chebyshevDistance(p2, p3));
+        return Math.max(8, span * 4);
+    }
+
+    private static int chebyshevDistance(BlockPos a, BlockPos b) {
+        return Math.max(
+                Math.max(Math.abs(a.getX() - b.getX()), Math.abs(a.getY() - b.getY())),
+                Math.abs(a.getZ() - b.getZ()));
     }
 
     public static List<BlockPos> road(List<BlockPos> points, int width) {
@@ -1225,6 +1292,7 @@ public final class ShapeGenerator {
             ArchMode archMode,
             int archPeak,
             ArchDirection archDirection,
+            int curvePeak,
             boolean sphereHollow,
             boolean ellipsoidHollow,
             ShapeDetailMode shapeDetailMode,
@@ -1242,13 +1310,14 @@ public final class ShapeGenerator {
             int towerFloorHeight,
             int towerWallThickness,
             TowerTopStyle towerTopStyle) {
-        public static final Options DEFAULT = new Options(3, ArchMode.OPEN, 50, ArchDirection.X, false, false, ShapeDetailMode.PLAIN, RoofDirection.AUTO, 0, true, false, 3, false, true, 3, true, BridgeSupportMode.POSTS, 4, 4, 1, TowerTopStyle.BATTLEMENTS);
+        public static final Options DEFAULT = new Options(3, ArchMode.OPEN, 50, ArchDirection.X, 50, false, false, ShapeDetailMode.PLAIN, RoofDirection.AUTO, 0, true, false, 3, false, true, 3, true, BridgeSupportMode.POSTS, 4, 4, 1, TowerTopStyle.BATTLEMENTS);
 
         public Options {
             roadWidth = Math.max(1, roadWidth);
             archMode = archMode == null ? ArchMode.OPEN : archMode;
             archPeak = Mth.clamp(archPeak, 0, 100);
             archDirection = archDirection == null ? ArchDirection.X : archDirection;
+            curvePeak = Mth.clamp(curvePeak, 0, 100);
             shapeDetailMode = shapeDetailMode == null ? ShapeDetailMode.PLAIN : shapeDetailMode;
             roofDirection = roofDirection == null ? RoofDirection.AUTO : roofDirection;
             roofOverhang = Mth.clamp(roofOverhang, 0, 3);

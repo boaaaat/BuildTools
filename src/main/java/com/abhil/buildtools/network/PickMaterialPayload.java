@@ -33,7 +33,7 @@ public record PickMaterialPayload(BlockPos pos) implements CustomPacketPayload {
     }
 
     public static void handle(PickMaterialPayload payload, IPayloadContext context) {
-        if (!(context.player() instanceof ServerPlayer player) || !isMaterialTool(player.getMainHandItem())) {
+        if (!(context.player() instanceof ServerPlayer player) || !isMaterialTool(activeBuildTool(player))) {
             return;
         }
         if (!player.level().hasChunkAt(payload.pos())) {
@@ -50,7 +50,9 @@ public record PickMaterialPayload(BlockPos pos) implements CustomPacketPayload {
             player.displayClientMessage(Component.translatable("buildtools.error.material_unavailable"), false);
             return;
         }
-        BuildToolsState.setPrimaryMaterial(player, state);
+        if (!BuildToolsState.setPrimaryMaterial(player, state)) {
+            return;
+        }
         player.displayClientMessage(Component.translatable(
                 "buildtools.message.material_selected",
                 state.getBlock().getName().copy().withStyle(ChatFormatting.GREEN)), true);
@@ -60,6 +62,15 @@ public record PickMaterialPayload(BlockPos pos) implements CustomPacketPayload {
         return stack.is(ModItems.BUILDER_WAND.get())
                 || stack.is(ModItems.ADVANCED_BUILDER_WAND.get())
                 || stack.is(ModItems.BUILDER_BRUSH.get());
+    }
+
+    private static ItemStack activeBuildTool(ServerPlayer player) {
+        ItemStack mainHand = player.getMainHandItem();
+        if (com.abhil.buildtools.server.ToolProfile.isBuildTool(mainHand)) {
+            return mainHand;
+        }
+        ItemStack offHand = player.getOffhandItem();
+        return com.abhil.buildtools.server.ToolProfile.isBuildTool(offHand) ? offHand : ItemStack.EMPTY;
     }
 
     @Override

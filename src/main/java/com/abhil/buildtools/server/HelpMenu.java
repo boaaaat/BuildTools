@@ -76,6 +76,7 @@ public final class HelpMenu extends AbstractContainerMenu {
         menuItems.setItem(3, helpItem(Items.IRON_PICKAXE, "buildtools.help.breaker", "buildtools.help.breaker.lines"));
         menuItems.setItem(4, helpItem(Items.MAP, "buildtools.help.blueprints", "buildtools.help.blueprints.lines"));
         menuItems.setItem(5, helpItem(Items.CLOCK, "buildtools.help.history", "buildtools.help.history.lines"));
+        menuItems.setItem(6, helpItem(Items.COMPASS, "buildtools.help.shortcuts", "buildtools.help.shortcuts.lines"));
         menuItems.setItem(BACK_SLOT, utilityItem(Items.ARROW, "buildtools.menu.back", "buildtools.menu.back.description"));
     }
 

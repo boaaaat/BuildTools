@@ -9,6 +9,7 @@ import com.abhil.buildtools.server.MaterialChecklistMenu;
 import com.abhil.buildtools.server.MaterialSelectionMenu;
 import com.abhil.buildtools.server.PaletteLibraryMenu;
 import com.abhil.buildtools.server.PresetLibraryMenu;
+import com.abhil.buildtools.server.StorageManagerMenu;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.flag.FeatureFlags;
 import net.minecraft.world.inventory.MenuType;
@@ -49,6 +50,10 @@ public final class ModMenus {
     public static final DeferredHolder<MenuType<?>, MenuType<HelpMenu>> HELP_MENU = MENUS.register(
             "help_menu",
             () -> new MenuType<>(HelpMenu::new, FeatureFlags.DEFAULT_FLAGS));
+
+    public static final DeferredHolder<MenuType<?>, MenuType<StorageManagerMenu>> STORAGE_MANAGER_MENU = MENUS.register(
+            "storage_manager_menu",
+            () -> new MenuType<>(StorageManagerMenu::new, FeatureFlags.DEFAULT_FLAGS));
 
     private ModMenus() {
     }

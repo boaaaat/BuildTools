@@ -14,6 +14,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -101,6 +102,26 @@ public final class BuildOperationEngine {
                 : enqueue(player, player.serverLevel(), operation.positions(), operation.targets(), operation.targetBlockEntities(), operation.undo(), operation.refund(), operation.producedDrops(), operation.removedEntities(), operation.addedEntities(), operation.trackHistory(), operation.canBreak());
     }
 
+    public static boolean cancelQueuedOperation(ServerPlayer player) {
+        Iterator<BuildOperation> iterator = QUEUE.iterator();
+        while (iterator.hasNext()) {
+            BuildOperation operation = iterator.next();
+            if (!operation.player().getUUID().equals(player.getUUID())) {
+                continue;
+            }
+            int applied = operation.undoEntries().size() - operation.positions().size();
+            rollbackAbortedOperation(operation);
+            iterator.remove();
+            refreshOperationStatus(player);
+            player.displayClientMessage(Component.translatable(
+                    "buildtools.message.operation_cancelled",
+                    applied,
+                    operation.undoEntries().size()), true);
+            return true;
+        }
+        return false;
+    }
+
     static void captureToolDrop(EntityJoinLevelEvent event) {
         DropCapture capture = ACTIVE_DROP_CAPTURE.get();
         if (capture == null || event.getLevel() != capture.level()) {
@@ -156,6 +177,7 @@ public final class BuildOperationEngine {
         }
 
         BuildMode mode = BuildToolsState.mode(player);
+        RotationPath rotationPath = rotationPath(selection, generated);
         PaletteMode paletteMode = advanced ? BuildToolsState.paletteMode(player) : PaletteMode.SINGLE;
         GradientDirection gradientDirection = advanced ? BuildToolsState.gradientDirection(player) : GradientDirection.Y;
         List<BlockPos> positions = new ArrayList<>();
@@ -175,7 +197,7 @@ public final class BuildOperationEngine {
             if (!canPlaceForMode(level, pos, previous, mode, replaceMatch)) {
                 continue;
             }
-            BlockState targetState = orientDirectionalTarget(player, selection, pos, materialTarget(selection, pos, target, palette, paletteMode, gradientDirection));
+            BlockState targetState = orientDirectionalTarget(player, selection, rotationPath, pos, materialTarget(selection, pos, target, palette, paletteMode, gradientDirection));
             positions.add(pos.immutable());
             targets.add(targetState);
             targetBlockEntities.add(null);
@@ -320,6 +342,7 @@ public final class BuildOperationEngine {
         }
 
         BuildMode mode = BuildToolsState.mode(player);
+        RotationPath rotationPath = rotationPath(selection, generated);
         PaletteMode paletteMode = BuildToolsState.paletteMode(player);
         GradientDirection gradientDirection = BuildToolsState.gradientDirection(player);
         BlockState replaceMatch = BuildToolsState.replaceTarget(player);
@@ -333,7 +356,7 @@ public final class BuildOperationEngine {
                 continue;
             }
             positions.add(pos.immutable());
-            targets.add(orientDirectionalTarget(player, selection, pos, materialTarget(selection, pos, target, palette, paletteMode, gradientDirection)));
+            targets.add(orientDirectionalTarget(player, selection, rotationPath, pos, materialTarget(selection, pos, target, palette, paletteMode, gradientDirection)));
         }
         resolveStairShapes(level, positions, targets);
         if (positions.isEmpty()) {
@@ -554,7 +577,7 @@ public final class BuildOperationEngine {
         boolean trackHistory = hasHistoryItems(player);
         List<CapturedEntity> removedEntities = captureDecorEntities(level, BlockPos.ZERO, positions);
         List<ItemStack> producedDrops = withEntityDrops(dropsForChanges(player, level, undo), removedEntities);
-        String label = brushMode.displayName().getString();
+        String label = "brush." + brushMode.name().toLowerCase(java.util.Locale.ROOT);
         boolean free = targets.stream().allMatch(BlockState::isAir);
         return previewOrConfirm(player, level, new PendingOperation(
                 level.dimension(),
@@ -1046,6 +1069,7 @@ public final class BuildOperationEngine {
             if (applied < 0) {
                 rollbackAbortedOperation(operation);
                 QUEUE.remove();
+                refreshOperationStatus(operation.player());
                 continue;
             }
             batch -= applied;
@@ -1060,6 +1084,7 @@ public final class BuildOperationEngine {
                     if (drops > 0 && !operation.player().gameMode.isCreative()) {
                         BuildingStorageManager.depositOrGive(operation.player(), operation.producedDrops());
                     }
+                    returnPreviousStoredDrops(operation.player());
                     BuildToolsState.clearHistory(operation.player());
                 }
                 Component message = Component.translatable("buildtools.message.applied", operation.undoEntries().size());
@@ -1069,10 +1094,64 @@ public final class BuildOperationEngine {
                             : Component.translatable("buildtools.message.applied_deposited", operation.undoEntries().size(), drops);
                 }
                 operation.player().displayClientMessage(message, true);
+                refreshOperationStatus(operation.player());
             } else if (applied == 0) {
                 QUEUE.remove();
+            } else if (operation.player().tickCount % 10 == 0) {
+                sendOperationProgress(operation);
             }
         }
+    }
+
+    private static void sendOperationProgress(BuildOperation operation) {
+        int total = operation.undoEntries().size();
+        int completed = total - operation.positions().size();
+        int percent = total <= 0 ? 100 : Math.round(completed * 100.0F / total);
+        int queuePosition = 1;
+        for (BuildOperation queued : QUEUE) {
+            if (queued == operation) {
+                break;
+            }
+            queuePosition++;
+        }
+        PacketDistributor.sendToPlayer(operation.player(), new ToolStatusPayload(
+                true,
+                Component.translatable("buildtools.status.operation_progress.title"),
+                List.of(
+                        Component.translatable("buildtools.status.operation_progress.blocks", completed, total, percent),
+                        Component.translatable("buildtools.status.operation_progress.queue", queuePosition, QUEUE.size()),
+                        Component.translatable("buildtools.status.operation_progress.cancel")),
+                0x55C8FF));
+    }
+
+    private static void refreshOperationStatus(ServerPlayer player) {
+        BuildToolsState.sendPreview(player);
+        if (sendFirstOperationProgress(player)) {
+            return;
+        }
+        BuildToolActionbar.markDirty(player);
+        PacketDistributor.sendToPlayer(player, ToolStatusPayload.hidden());
+    }
+
+    private static boolean sendFirstOperationProgress(ServerPlayer player) {
+        for (BuildOperation queued : QUEUE) {
+            if (queued.player().getUUID().equals(player.getUUID())) {
+                sendOperationProgress(queued);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void returnPreviousStoredDrops(ServerPlayer player) {
+        List<ItemStack> previousDrops = BuildToolsState.storedDropStacks(player);
+        if (previousDrops.isEmpty()) {
+            return;
+        }
+        BuildingStorageManager.depositOrGive(player, previousDrops);
+        player.displayClientMessage(Component.translatable(
+                "buildtools.message.previous_history_drops_returned",
+                StoredItems.total(previousDrops)), true);
     }
 
     private static boolean previewOrConfirm(ServerPlayer player, ServerLevel level, PendingOperation operation) {
@@ -1085,22 +1164,26 @@ public final class BuildOperationEngine {
         }
 
         PENDING_OPERATIONS.put(player.getUUID(), operation);
-        List<BlockPos> preview = operation.positions();
-        if (preview.size() > BuildToolsNetworking.MAX_PREVIEW_POSITIONS) {
-            preview = preview.subList(0, BuildToolsNetworking.MAX_PREVIEW_POSITIONS);
+        PacketDistributor.sendToPlayer(player, PreviewPayload.create(operation.positions(), true, List.of()));
+        List<Component> statusLines = new ArrayList<>();
+        statusLines.add(Component.translatable("buildtools.status.preview.operation", operationLabel(operation.label()), operation.positions().size()));
+        statusLines.add(operationStatsLine(operation));
+        if (operation.positions().size() > BuildToolsNetworking.MAX_PREVIEW_POSITIONS) {
+            statusLines.add(Component.translatable(
+                    "buildtools.status.preview.sampled",
+                    BuildToolsNetworking.MAX_PREVIEW_POSITIONS,
+                    operation.positions().size()));
         }
-        PacketDistributor.sendToPlayer(player, new PreviewPayload(preview, true));
-        PacketDistributor.sendToPlayer(player, new ToolStatusPayload(true, "Preview Ready", List.of(
-                operation.label() + ": " + operation.positions().size() + " changes",
-                operationStatsLine(operation),
-                materialPreviewLine(player, operation),
-                durabilityPreviewLine(player, operation),
-                dropPreviewLine(operation),
-                "Use the same tool again to confirm"), 0xF4C542));
+        addStatusLine(statusLines, materialPreviewLine(player, operation));
+        addStatusLine(statusLines, durabilityPreviewLine(player, operation));
+        addStatusLine(statusLines, dropPreviewLine(operation));
+        statusLines.add(Component.translatable("buildtools.status.preview.confirm"));
+        PacketDistributor.sendToPlayer(player, new ToolStatusPayload(true,
+                Component.translatable("buildtools.status.preview.title"), statusLines, 0xF4C542));
         return false;
     }
 
-    private static String operationStatsLine(PendingOperation operation) {
+    private static Component operationStatsLine(PendingOperation operation) {
         int placed = 0;
         int removed = 0;
         int replaced = 0;
@@ -1113,42 +1196,62 @@ public final class BuildOperationEngine {
                 replaced++;
             }
         }
-        return "Placed: " + placed + " | Removed: " + removed + " | Replaced: " + replaced;
+        return Component.translatable("buildtools.status.preview.changes", placed, removed, replaced);
     }
 
-    private static String materialPreviewLine(ServerPlayer player, PendingOperation operation) {
+    private static Component materialPreviewLine(ServerPlayer player, PendingOperation operation) {
         if (operation.free()) {
-            return "";
+            return null;
         }
         BlockCostPlan costPlan = BlockCostPlan.create(player, operation.targets());
         int required = costPlan.required().values().stream().mapToInt(Integer::intValue).sum();
         if (costPlan.canAfford()) {
-            return "Materials ready: " + required;
+            return Component.translatable("buildtools.status.preview.materials_ready", required);
         }
         int missing = costPlan.missing().values().stream().mapToInt(Integer::intValue).sum();
-        return "Need " + required + " | missing " + missing;
+        return Component.translatable("buildtools.status.preview.materials_missing", required, missing);
     }
 
-    private static String durabilityPreviewLine(ServerPlayer player, PendingOperation operation) {
+    private static Component durabilityPreviewLine(ServerPlayer player, PendingOperation operation) {
         ItemStack tool = activeDurabilityTool(player, operation.undo(), operation.canBreak());
         if (tool.isEmpty() || !tool.isDamageableItem() || player.gameMode.isCreative()) {
-            return "";
+            return null;
         }
         DurabilityBreakdown breakdown = durabilityBreakdown(player, player.serverLevel(), operation.undo(), operation.positions().size(), operation.canBreak());
         int cost = breakdown.totalCost();
         int remaining = remainingDurabilityForOperation(player, operation.undo(), operation.canBreak(), tool);
         if (breakdown.miningBlocks() > 0 || breakdown.builtBlocks() > 0) {
-            return "Break cost: " + breakdown.builtBlocks() + " built, " + breakdown.softBlocks() + " soft, " + breakdown.hardBlocks() + " hard, " + breakdown.resourceBlocks() + " ore/log | total: " + cost + " | remaining: " + remaining;
+            return Component.translatable("buildtools.status.preview.break_cost", breakdown.builtBlocks(), breakdown.softBlocks(), breakdown.hardBlocks(), breakdown.resourceBlocks(), cost, remaining);
         }
-        return "Durability cost: " + cost + " | remaining: " + remaining;
+        return Component.translatable("buildtools.status.preview.durability", cost, remaining);
     }
 
-    private static String dropPreviewLine(PendingOperation operation) {
+    private static Component dropPreviewLine(PendingOperation operation) {
         int drops = StoredItems.total(operation.producedDrops());
         if (!operation.trackHistory()) {
-            return drops <= 0 ? "No undo or redo token | no history" : "Sends " + drops + " drops to linked storage";
+            return drops <= 0
+                    ? Component.translatable("buildtools.status.preview.no_history")
+                    : Component.translatable("buildtools.status.preview.storage_drops", drops);
         }
-        return drops <= 0 ? "" : "Stores " + drops + " drops in history";
+        return drops <= 0 ? null : Component.translatable("buildtools.status.preview.history_drops", drops);
+    }
+
+    private static void addStatusLine(List<Component> lines, Component line) {
+        if (line != null) {
+            lines.add(line);
+        }
+    }
+
+    private static Component operationLabel(String label) {
+        return switch (label) {
+            case "builder" -> Component.translatable("buildtools.status.operation.builder");
+            case "advanced builder" -> Component.translatable("buildtools.status.operation.advanced_builder");
+            case "area break" -> Component.translatable("buildtools.status.operation.area_break");
+            case "build plan" -> Component.translatable("buildtools.status.operation.build_plan");
+            default -> label.startsWith("brush.")
+                    ? Component.translatable("buildtools.brush." + label.substring("brush.".length()))
+                    : Component.literal(label);
+        };
     }
 
     private static String signature(String label, ServerLevel level, List<BlockPos> positions, List<BlockState> targets) {
@@ -1191,8 +1294,10 @@ public final class BuildOperationEngine {
             removeCapturedEntities(level, removedEntities);
         }
         List<ItemStack> storedDrops = StoredItems.copyOf(producedDrops);
-        QUEUE.add(new BuildOperation(player, level, level.dimension(), new ArrayList<>(positions), new ArrayList<>(targets), new ArrayList<>(copyBlockEntities(targetBlockEntities)), List.copyOf(undo), StoredItems.copyOf(refund), new ArrayList<>(storedDrops), new ArrayList<>(storedDrops), canBreak ? List.copyOf(removedEntities) : List.of(), List.copyOf(addedEntities), trackHistory, canBreak));
+        BuildOperation queued = new BuildOperation(player, level, level.dimension(), new ArrayList<>(positions), new ArrayList<>(targets), new ArrayList<>(copyBlockEntities(targetBlockEntities)), List.copyOf(undo), StoredItems.copyOf(refund), new ArrayList<>(storedDrops), new ArrayList<>(storedDrops), canBreak ? List.copyOf(removedEntities) : List.of(), List.copyOf(addedEntities), trackHistory, canBreak);
+        QUEUE.add(queued);
         player.displayClientMessage(Component.translatable("buildtools.message.queued", positions.size()), true);
+        sendFirstOperationProgress(player);
         return true;
     }
 
@@ -1226,8 +1331,10 @@ public final class BuildOperationEngine {
             removeCapturedEntities(level, removedEntities);
         }
         List<ItemStack> storedDrops = StoredItems.copyOf(producedDrops);
-        QUEUE.add(new BuildOperation(player, level, level.dimension(), new ArrayList<>(positions), new ArrayList<>(targets), new ArrayList<>(copyBlockEntities(targetBlockEntities)), List.copyOf(undo), StoredItems.copyOf(refund), new ArrayList<>(storedDrops), new ArrayList<>(storedDrops), canBreak ? List.copyOf(removedEntities) : List.of(), List.copyOf(addedEntities), trackHistory, canBreak));
+        BuildOperation queued = new BuildOperation(player, level, level.dimension(), new ArrayList<>(positions), new ArrayList<>(targets), new ArrayList<>(copyBlockEntities(targetBlockEntities)), List.copyOf(undo), StoredItems.copyOf(refund), new ArrayList<>(storedDrops), new ArrayList<>(storedDrops), canBreak ? List.copyOf(removedEntities) : List.of(), List.copyOf(addedEntities), trackHistory, canBreak);
+        QUEUE.add(queued);
         player.displayClientMessage(Component.translatable("buildtools.message.queued", positions.size()), true);
+        sendFirstOperationProgress(player);
         return true;
     }
 
@@ -1281,6 +1388,7 @@ public final class BuildOperationEngine {
         if (!operation.player().gameMode.isCreative()) {
             BuildingStorageManager.depositOrGive(operation.player(), operation.refund());
         }
+        spawnCapturedEntities(operation.level(), operation.removedEntities());
     }
 
     private static boolean hasBlockingBlocks(ServerLevel level, List<BlockPos> positions, List<BlockState> targets) {
@@ -1687,22 +1795,22 @@ public final class BuildOperationEngine {
         if (outOfWorld == 0 && unloaded == 0 && tooFar == 0) {
             return true;
         }
-        List<BlockPos> preview = valid.size() > BuildToolsNetworking.MAX_PREVIEW_POSITIONS
-                ? valid.subList(0, BuildToolsNetworking.MAX_PREVIEW_POSITIONS)
-                : valid;
-        PacketDistributor.sendToPlayer(player, new PreviewPayload(preview, true));
-        List<String> lines = new ArrayList<>();
-        lines.add("Valid blocks previewed: " + valid.size());
+        PacketDistributor.sendToPlayer(player, PreviewPayload.create(valid, true, List.of()));
+        List<Component> lines = new ArrayList<>();
+        lines.add(Component.translatable("buildtools.status.warning.valid", valid.size()));
+        if (valid.size() > BuildToolsNetworking.MAX_PREVIEW_POSITIONS) {
+            lines.add(Component.translatable("buildtools.status.preview.sampled", BuildToolsNetworking.MAX_PREVIEW_POSITIONS, valid.size()));
+        }
         if (outOfWorld > 0) {
-            lines.add("Out of world: " + outOfWorld + " first " + firstOutOfWorld.toShortString());
+            lines.add(Component.translatable("buildtools.status.warning.out_of_world", outOfWorld, firstOutOfWorld.toShortString()));
         }
         if (unloaded > 0) {
-            lines.add("Unloaded chunks: " + unloaded + " first " + firstUnloaded.x + "," + firstUnloaded.z);
+            lines.add(Component.translatable("buildtools.status.warning.unloaded", unloaded, firstUnloaded.x + "," + firstUnloaded.z));
         }
         if (tooFar > 0) {
-            lines.add("Too far: " + tooFar + " first " + firstTooFar.toShortString());
+            lines.add(Component.translatable("buildtools.status.warning.too_far", tooFar, firstTooFar.toShortString()));
         }
-        PacketDistributor.sendToPlayer(player, new ToolStatusPayload(true, "BuildTools Warning", lines, 0xF05A4F));
+        PacketDistributor.sendToPlayer(player, new ToolStatusPayload(true, Component.translatable("buildtools.status.warning.title"), lines, 0xF05A4F));
         fail(player, Component.translatable("buildtools.error.invalid_positions", outOfWorld + unloaded + tooFar));
         return false;
     }
@@ -1762,8 +1870,8 @@ public final class BuildOperationEngine {
         return fallback;
     }
 
-    private static BlockState orientDirectionalTarget(ServerPlayer player, Selection selection, BlockPos pos, BlockState state) {
-        DesiredRotation rotation = rotationTarget(player, selection, pos);
+    private static BlockState orientDirectionalTarget(ServerPlayer player, Selection selection, RotationPath rotationPath, BlockPos pos, BlockState state) {
+        DesiredRotation rotation = rotationTarget(player, selection, rotationPath, pos);
         if (rotation == null) {
             return state;
         }
@@ -1774,14 +1882,26 @@ public final class BuildOperationEngine {
         return rotated;
     }
 
-    private static DesiredRotation rotationTarget(ServerPlayer player, Selection selection, BlockPos pos) {
+    private static DesiredRotation rotationTarget(ServerPlayer player, Selection selection, RotationPath rotationPath, BlockPos pos) {
         return switch (BuildToolsState.blockRotationMode(player)) {
             case UNCHANGED -> null;
             case FIXED -> fixedRotationDirection(player, selection);
             case FACE_CENTER -> centerRotationDirection(player, selection, pos, false);
             case FACE_AWAY_CENTER -> centerRotationDirection(player, selection, pos, true);
-            case FOLLOW_PATH -> followPathRotationDirection(player, selection, pos);
+            case FOLLOW_PATH -> followPathRotationDirection(player, rotationPath, pos);
         };
+    }
+
+    private static RotationPath rotationPath(Selection selection, List<BlockPos> generated) {
+        List<BlockPos> points = selection.shape() == SelectionShape.CURVE ? generated : selection.points();
+        if (selection.shape() != SelectionShape.CURVE) {
+            return new RotationPath(points, Map.of());
+        }
+        Map<BlockPos, Integer> indices = new HashMap<>();
+        for (int i = 0; i < points.size(); i++) {
+            indices.putIfAbsent(points.get(i), i);
+        }
+        return new RotationPath(points, Map.copyOf(indices));
     }
 
     private static DesiredRotation fixedRotationDirection(ServerPlayer player, Selection selection) {
@@ -1823,10 +1943,21 @@ public final class BuildOperationEngine {
                 : new DesiredRotation(direction, horizontal);
     }
 
-    private static DesiredRotation followPathRotationDirection(ServerPlayer player, Selection selection, BlockPos pos) {
-        List<BlockPos> points = selection.points();
+    private static DesiredRotation followPathRotationDirection(ServerPlayer player, RotationPath path, BlockPos pos) {
+        List<BlockPos> points = path.points();
         if (points.size() < 2) {
             return new DesiredRotation(player.getDirection(), player.getDirection());
+        }
+        Integer index = path.indices().get(pos);
+        if (index != null) {
+            BlockPos previous = points.get(Math.max(0, index - 1));
+            BlockPos next = points.get(Math.min(points.size() - 1, index + 1));
+            double dx = next.getX() - previous.getX();
+            double dy = next.getY() - previous.getY();
+            double dz = next.getZ() - previous.getZ();
+            return new DesiredRotation(
+                    dominantDirection(dx, dy, dz, player.getDirection()),
+                    horizontalDirection(dx, dz, player.getDirection()));
         }
         double bestDistance = Double.MAX_VALUE;
         Direction bestDirection = null;
@@ -1859,6 +1990,9 @@ public final class BuildOperationEngine {
         return bestDirection == null
                 ? new DesiredRotation(player.getDirection(), player.getDirection())
                 : new DesiredRotation(bestDirection, bestHorizontal);
+    }
+
+    private record RotationPath(List<BlockPos> points, Map<BlockPos, Integer> indices) {
     }
 
     private static Direction dominantDirection(double dx, double dy, double dz, Direction fallback) {

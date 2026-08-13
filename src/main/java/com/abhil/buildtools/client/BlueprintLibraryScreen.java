@@ -24,7 +24,7 @@ public final class BlueprintLibraryScreen extends AbstractContainerScreen<Bluepr
     @Override
     protected void init() {
         super.init();
-        searchBox = new EditBox(this.font, this.leftPos + 8, this.topPos + 5, 88, 10, Component.translatable("buildtools.menu.blueprint_search"));
+        searchBox = new EditBox(this.font, this.leftPos + 96, this.topPos + 5, 72, 10, Component.translatable("buildtools.menu.blueprint_search"));
         searchBox.setMaxLength(64);
         searchBox.setBordered(false);
         searchBox.setResponder(query -> PacketDistributor.sendToServer(new BlueprintLibraryQueryPayload(query)));
@@ -35,7 +35,7 @@ public final class BlueprintLibraryScreen extends AbstractContainerScreen<Bluepr
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         super.render(guiGraphics, mouseX, mouseY, partialTick);
         if (searchBox != null && searchBox.getValue().isBlank() && !searchBox.isFocused()) {
-            guiGraphics.drawString(this.font, Component.translatable("buildtools.menu.blueprint_search"), this.leftPos + 8, this.topPos + 5, 0xFF777777, false);
+            guiGraphics.drawString(this.font, Component.translatable("buildtools.menu.blueprint_search"), this.leftPos + 96, this.topPos + 5, 0xFF777777, false);
         }
         this.renderTooltip(guiGraphics, mouseX, mouseY);
     }

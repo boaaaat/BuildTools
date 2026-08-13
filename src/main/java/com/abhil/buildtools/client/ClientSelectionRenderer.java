@@ -51,15 +51,25 @@ public final class ClientSelectionRenderer {
         List<BlockPos> preview = ClientSelectionData.preview();
         if (!preview.isEmpty()) {
             AABB bounds = null;
+            boolean renderedFullBounds = false;
             for (BlockPos pos : preview) {
                 bounds = bounds == null ? new AABB(pos) : bounds.minmax(new AABB(pos));
+            }
+            if (ClientSelectionData.previewTotalPositions() > preview.size()
+                    && ClientSelectionData.previewBoundsMin().isPresent()
+                    && ClientSelectionData.previewBoundsMax().isPresent()) {
+                BlockPos min = ClientSelectionData.previewBoundsMin().get();
+                BlockPos max = ClientSelectionData.previewBoundsMax().get();
+                bounds = new AABB(min.getX(), min.getY(), min.getZ(), max.getX() + 1.0D, max.getY() + 1.0D, max.getZ() + 1.0D);
+                renderBox(poseStack, lines, bounds.inflate(0.04D), self.red(), self.green(), self.blue(), 1.0F);
+                renderedFullBounds = true;
             }
 
             if (!ClientSelectionData.previewColors().isEmpty()) {
                 renderColoredPreview(poseStack, lines, preview, ClientSelectionData.previewColors(), 0.85F);
             } else if (rendersAffectedBlocks(ClientSelectionData.shape(), ClientSelectionData.detailedPreview())) {
                 renderAffectedEdges(poseStack, lines, preview, self.red(), self.green(), self.blue(), 0.9F);
-            } else if (bounds != null) {
+            } else if (bounds != null && !renderedFullBounds) {
                 renderBox(poseStack, lines, bounds.inflate(0.03D), self.red(), self.green(), self.blue(), 1.0F);
             }
         }
@@ -206,7 +216,7 @@ public final class ClientSelectionRenderer {
 
     private static void renderMeasurementMarkerLabels(RenderLevelStageEvent event, PoseStack poseStack, MultiBufferSource buffers) {
         for (ClientSelectionData.MeasurementMarker marker : ClientSelectionData.measurementMarkers()) {
-            renderLabel(event, poseStack, buffers, marker.x() + 0.5D, marker.y() + 1.1D, marker.z() + 0.5D, Component.literal(marker.label()));
+            renderLabel(event, poseStack, buffers, marker.x() + 0.5D, marker.y() + 1.1D, marker.z() + 0.5D, marker.label());
         }
     }
 

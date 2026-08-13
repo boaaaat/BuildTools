@@ -5,6 +5,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -18,10 +20,14 @@ public final class SelectionMeasurements {
         }
         Selection selection = BuildToolsState.selection(player);
         if (selection.dimension() == null || !selection.isComplete()) {
-            return Result.lines(List.of("Measurement: " + measure.displayName().getString(), "Set selection points first."));
+            return Result.lines(List.of(
+                    Component.translatable("buildtools.measurement.mode", measure.displayName()),
+                    Component.translatable("buildtools.measurement.set_points")));
         }
         if (!selection.dimension().equals(player.level().dimension())) {
-            return Result.lines(List.of("Measurement: " + measure.displayName().getString(), "Selection is in another dimension."));
+            return Result.lines(List.of(
+                    Component.translatable("buildtools.measurement.mode", measure.displayName()),
+                    Component.translatable("buildtools.status.selection_other_dimension")));
         }
         if (measure == SelectionMeasure.POINT_DISTANCE) {
             return pointDistance(selection.points());
@@ -32,7 +38,9 @@ public final class SelectionMeasurements {
 
         List<BlockPos> generated = BuildToolsState.generatedSelection(player);
         if (generated.isEmpty()) {
-            return Result.lines(List.of("Measurement: " + measure.displayName().getString(), "Selected shape is empty."));
+            return Result.lines(List.of(
+                    Component.translatable("buildtools.measurement.mode", measure.displayName()),
+                    Component.translatable("buildtools.status.selection_empty")));
         }
 
         Bounds bounds = Bounds.of(generated);
@@ -54,24 +62,29 @@ public final class SelectionMeasurements {
         List<Marker> markers = new ArrayList<>(centerBlocks.size());
         for (int i = 0; i < centerBlocks.size(); i++) {
             BlockPos pos = centerBlocks.get(i);
-            markers.add(new Marker(centerBlocks.size() == 1 ? "Midpoint" : "Midpoint " + (i + 1), pos.getX(), pos.getY(), pos.getZ()));
+            Component label = centerBlocks.size() == 1
+                    ? Component.translatable("buildtools.measurement.marker.midpoint")
+                    : Component.translatable("buildtools.measurement.marker.midpoint_index", i + 1);
+            markers.add(new Marker(
+                    label,
+                    pos.getX(), pos.getY(), pos.getZ()));
         }
         return new Result(
                 List.of(
-                        "Measurement: Midpoint",
-                        "Midpoint: " + center.format(),
-                        "Center blocks: " + centerBlocks.size(),
-                        "Blocks: " + compactBlocks(centerBlocks)),
+                        Component.translatable("buildtools.measurement.mode", SelectionMeasure.MIDPOINT.displayName()),
+                        Component.translatable("buildtools.measurement.midpoint", center.format()),
+                        Component.translatable("buildtools.measurement.center_blocks", centerBlocks.size()),
+                        Component.translatable("buildtools.measurement.blocks", compactBlocks(centerBlocks))),
                 markers,
                 centerBlocks);
     }
 
     private static Result dimensions(Bounds bounds, int selectedCount) {
         return Result.lines(List.of(
-                "Measurement: Dimensions",
-                "Size: " + bounds.width() + "x" + bounds.height() + "x" + bounds.depth(),
-                "Box volume: " + bounds.volume(),
-                "Selected blocks: " + selectedCount));
+                Component.translatable("buildtools.measurement.mode", SelectionMeasure.DIMENSIONS.displayName()),
+                Component.translatable("buildtools.measurement.size", bounds.width(), bounds.height(), bounds.depth()),
+                Component.translatable("buildtools.measurement.box_volume", bounds.volume()),
+                Component.translatable("buildtools.measurement.selected_blocks", selectedCount)));
     }
 
     private static Result selectionCount(ServerPlayer player, List<BlockPos> generated) {
@@ -83,15 +96,17 @@ public final class SelectionMeasurements {
             }
         }
         return Result.lines(List.of(
-                "Measurement: Selection Count",
-                "Selected blocks: " + generated.size(),
-                "Air: " + air,
-                "Solid: " + (generated.size() - air)));
+                Component.translatable("buildtools.measurement.mode", SelectionMeasure.SELECTION_COUNT.displayName()),
+                Component.translatable("buildtools.measurement.selected_blocks", generated.size()),
+                Component.translatable("buildtools.measurement.air", air),
+                Component.translatable("buildtools.measurement.solid", generated.size() - air)));
     }
 
     private static Result pointDistance(List<BlockPos> points) {
         if (points.size() < 2) {
-            return Result.lines(List.of("Measurement: Point Distance", "Add at least two advanced points."));
+            return Result.lines(List.of(
+                    Component.translatable("buildtools.measurement.mode", SelectionMeasure.POINT_DISTANCE.displayName()),
+                    Component.translatable("buildtools.measurement.need_two_points")));
         }
         BlockPos first = points.get(0);
         BlockPos second = points.get(1);
@@ -100,43 +115,46 @@ public final class SelectionMeasurements {
         int dz = second.getZ() - first.getZ();
         double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
         return Result.lines(List.of(
-                "Measurement: Point Distance",
-                "Points: #1 to #2",
-                "Delta: " + dx + ", " + dy + ", " + dz,
-                "Distance: " + decimal(distance) + " blocks"));
+                Component.translatable("buildtools.measurement.mode", SelectionMeasure.POINT_DISTANCE.displayName()),
+                Component.translatable("buildtools.measurement.first_two_points"),
+                Component.translatable("buildtools.measurement.delta", dx, dy, dz),
+                Component.translatable("buildtools.measurement.distance", decimal(distance))));
     }
 
     private static Result pathLength(List<BlockPos> points) {
         if (points.size() < 2) {
-            return Result.lines(List.of("Measurement: Path Length", "Add at least two advanced points."));
+            return Result.lines(List.of(
+                    Component.translatable("buildtools.measurement.mode", SelectionMeasure.PATH_LENGTH.displayName()),
+                    Component.translatable("buildtools.measurement.need_two_points")));
         }
         double length = 0.0D;
         for (int i = 1; i < points.size(); i++) {
             length += Math.sqrt(points.get(i - 1).distSqr(points.get(i)));
         }
         return Result.lines(List.of(
-                "Measurement: Path Length",
-                "Points: " + points.size(),
-                "Path: " + decimal(length) + " blocks"));
+                Component.translatable("buildtools.measurement.mode", SelectionMeasure.PATH_LENGTH.displayName()),
+                Component.translatable("buildtools.measurement.point_count", points.size()),
+                Component.translatable("buildtools.measurement.path", decimal(length))));
     }
 
     private static Result bounds(Bounds bounds) {
         return Result.lines(List.of(
-                "Measurement: Bounds",
-                "Min: " + bounds.minX() + ", " + bounds.minY() + ", " + bounds.minZ(),
-                "Max: " + bounds.maxX() + ", " + bounds.maxY() + ", " + bounds.maxZ()));
+                Component.translatable("buildtools.measurement.mode", SelectionMeasure.BOUNDS.displayName()),
+                Component.translatable("buildtools.measurement.min", bounds.minX(), bounds.minY(), bounds.minZ()),
+                Component.translatable("buildtools.measurement.max", bounds.maxX(), bounds.maxY(), bounds.maxZ())));
     }
 
     private static Result centerLines(Bounds bounds) {
         Center center = bounds.center();
         return new Result(
                 List.of(
-                        "Measurement: Center Lines",
-                        "Center: " + center.format(),
-                        "Half X/Y/Z: " + decimal(bounds.width() / 2.0D) + ", "
-                                + decimal(bounds.height() / 2.0D) + ", "
-                                + decimal(bounds.depth() / 2.0D)),
-                List.of(new Marker("Center", center.x(), center.y(), center.z())),
+                        Component.translatable("buildtools.measurement.mode", SelectionMeasure.CENTER_LINES.displayName()),
+                        Component.translatable("buildtools.measurement.center", center.format()),
+                        Component.translatable("buildtools.measurement.half_xyz",
+                                decimal(bounds.width() / 2.0D),
+                                decimal(bounds.height() / 2.0D),
+                                decimal(bounds.depth() / 2.0D))),
+                List.of(new Marker(Component.translatable("buildtools.measurement.marker.center"), center.x(), center.y(), center.z())),
                 List.of());
     }
 
@@ -144,26 +162,27 @@ public final class SelectionMeasurements {
         return pos.getX() + ", " + pos.getY() + ", " + pos.getZ();
     }
 
-    private static String compactBlocks(List<BlockPos> positions) {
+    private static Component compactBlocks(List<BlockPos> positions) {
         if (positions.isEmpty()) {
-            return "none";
+            return Component.translatable("buildtools.option.none");
         }
         int shown = Math.min(positions.size(), 4);
         List<String> parts = new ArrayList<>(shown + 1);
         for (int i = 0; i < shown; i++) {
             parts.add(format(positions.get(i)));
         }
+        MutableComponent result = Component.literal(String.join("; ", parts));
         if (positions.size() > shown) {
-            parts.add("+" + (positions.size() - shown) + " more");
+            result.append(Component.translatable("buildtools.measurement.more_blocks", positions.size() - shown));
         }
-        return String.join("; ", parts);
+        return result;
     }
 
     private static String decimal(double value) {
         return String.format(Locale.ROOT, "%.1f", value);
     }
 
-    public record Result(List<String> lines, List<Marker> markers, List<BlockPos> insertPoints) {
+    public record Result(List<Component> lines, List<Marker> markers, List<BlockPos> insertPoints) {
         public Result {
             lines = List.copyOf(lines);
             markers = List.copyOf(markers);
@@ -174,12 +193,12 @@ public final class SelectionMeasurements {
             return new Result(List.of(), List.of(), List.of());
         }
 
-        public static Result lines(List<String> lines) {
+        public static Result lines(List<Component> lines) {
             return new Result(lines, List.of(), List.of());
         }
     }
 
-    public record Marker(String label, double x, double y, double z) {
+    public record Marker(Component label, double x, double y, double z) {
     }
 
     private record Bounds(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {

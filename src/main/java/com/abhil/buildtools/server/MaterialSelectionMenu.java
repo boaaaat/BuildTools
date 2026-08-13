@@ -3,10 +3,13 @@ package com.abhil.buildtools.server;
 import com.abhil.buildtools.registry.ModMenus;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
@@ -20,6 +23,7 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.ItemLore;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -34,6 +38,7 @@ public final class MaterialSelectionMenu extends AbstractContainerMenu {
     private final SimpleContainer menuItems = new SimpleContainer(MENU_SIZE);
     private final ServerPlayer owner;
     private int page;
+    private String searchQuery = "";
 
     public MaterialSelectionMenu(int containerId, Inventory inventory) {
         this(containerId, inventory, inventory.player instanceof ServerPlayer serverPlayer ? serverPlayer : null, 0);
@@ -106,15 +111,18 @@ public final class MaterialSelectionMenu extends AbstractContainerMenu {
         int start = page * PAGE_SIZE;
         List<PaletteEntry> selected = owner == null ? List.of() : BuildToolsState.materialSelections(owner);
         int totalWeight = selected.stream().mapToInt(PaletteEntry::weight).sum();
+        if (options.isEmpty()) {
+            menuItems.setItem(0, controlItem(Items.GRAY_DYE, Component.translatable("buildtools.menu.material_no_results"), false));
+        }
         for (int i = 0; i < PAGE_SIZE && start + i < options.size(); i++) {
             MaterialOption option = options.get(start + i);
             menuItems.setItem(i, materialItem(option, selectionIndex(selected, option.state()), selectionWeight(selected, option.state()), totalWeight));
         }
-        menuItems.setItem(PREVIOUS_SLOT, controlItem(Items.ARROW, Component.literal("Previous Page"), page > 0));
+        menuItems.setItem(PREVIOUS_SLOT, controlItem(Items.ARROW, Component.translatable("buildtools.menu.previous_page"), page > 0));
         menuItems.setItem(BACK_SLOT, controlItem(Items.ARROW, Component.translatable("buildtools.menu.back"), true));
         menuItems.setItem(RESET_WEIGHTS_SLOT, controlItem(Items.ANVIL, Component.translatable("buildtools.menu.reset_material_weights"), !selected.isEmpty()));
         menuItems.setItem(CLEAR_SLOT, controlItem(Items.BARRIER, Component.translatable("buildtools.menu.clear_material_selection"), !selected.isEmpty()));
-        menuItems.setItem(NEXT_SLOT, controlItem(Items.ARROW, Component.literal("Next Page"), page < maxPage));
+        menuItems.setItem(NEXT_SLOT, controlItem(Items.ARROW, Component.translatable("buildtools.menu.next_page"), page < maxPage));
     }
 
     private boolean handleClick(ServerPlayer player, int slotId, boolean rightClick) {
@@ -171,6 +179,12 @@ public final class MaterialSelectionMenu extends AbstractContainerMenu {
         populateMenuItems();
     }
 
+    public void setSearchQuery(String query) {
+        this.searchQuery = query == null ? "" : query.strip();
+        this.page = 0;
+        populateMenuItems();
+    }
+
     public boolean isSelectedMaterialSlot(Slot slot) {
         int slotId = this.slots.indexOf(slot);
         if (slotId < 0 || slotId >= PAGE_SIZE || owner == null) {
@@ -187,15 +201,42 @@ public final class MaterialSelectionMenu extends AbstractContainerMenu {
         if (owner == null) {
             return List.of();
         }
+        Map<Block, MaterialOption> available = new LinkedHashMap<>();
+        if (owner.gameMode.isCreative()) {
+            for (Block block : BuiltInRegistries.BLOCK) {
+                BlockState state = block.defaultBlockState();
+                ItemStack stack = BuildMaterialSource.stackForState(state);
+                if (!state.is(Blocks.AIR) && !stack.isEmpty() && !stack.is(Items.AIR)) {
+                    available.put(block, new MaterialOption(state, -1));
+                }
+            }
+        } else {
+            for (Map.Entry<ItemStackKey, Integer> entry : BuildingStorageManager.accessibleMaterialCounts(owner).entrySet()) {
+                BlockState state = BuildMaterialSource.stateFromStack(new ItemStack(entry.getKey().item()));
+                if (state != null && !state.is(Blocks.AIR)) {
+                    available.put(state.getBlock(), new MaterialOption(state, entry.getValue()));
+                }
+            }
+        }
+        List<PaletteEntry> selected = BuildToolsState.materialSelections(owner);
+        for (PaletteEntry entry : selected) {
+            available.putIfAbsent(entry.state().getBlock(), new MaterialOption(entry.state(), 0));
+        }
+
         List<MaterialOption> options = new ArrayList<>();
-        for (Map.Entry<ItemStackKey, Integer> entry : BuildingStorageManager.accessibleMaterialCounts(owner).entrySet()) {
-            BlockState state = BuildMaterialSource.stateFromStack(new ItemStack(entry.getKey().item()));
-            if (state == null || state.is(Blocks.AIR)) {
+        String query = this.searchQuery.toLowerCase(Locale.ROOT);
+        for (MaterialOption option : available.values()) {
+            BlockState state = option.state();
+            String name = state.getBlock().getName().getString().toLowerCase(Locale.ROOT);
+            String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().toLowerCase(Locale.ROOT);
+            if (!query.isBlank() && !name.contains(query) && !id.contains(query)) {
                 continue;
             }
-            options.add(new MaterialOption(state, entry.getValue()));
+            options.add(option);
         }
-        options.sort(Comparator.comparing(option -> option.state().getBlock().getName().getString()));
+        options.sort(Comparator
+                .comparing((MaterialOption option) -> selectionIndex(selected, option.state()) == 0)
+                .thenComparing(option -> option.state().getBlock().getName().getString()));
         return options;
     }
 
@@ -231,15 +272,20 @@ public final class MaterialSelectionMenu extends AbstractContainerMenu {
         }
         stack.set(DataComponents.CUSTOM_NAME, name);
         int percentage = totalWeight <= 0 ? 100 : Math.round((selectionWeight * 100.0F) / totalWeight);
+        Component availability = option.count() < 0
+                ? Component.translatable("buildtools.menu.material_available_creative").withStyle(ChatFormatting.GRAY)
+                : Component.translatable("buildtools.menu.material_available", option.count()).withStyle(option.count() == 0 ? ChatFormatting.RED : ChatFormatting.GRAY);
         List<Component> lore = selectionIndex > 0
                 ? List.of(
-                        Component.literal("Available: " + option.count()).withStyle(ChatFormatting.GRAY),
-                        Component.literal("Weight: " + selectionWeight + " (" + percentage + "%)").withStyle(ChatFormatting.GRAY),
-                        Component.literal("Scroll to change weight. Shift-scroll changes by 10.").withStyle(ChatFormatting.DARK_GRAY),
-                        Component.literal("Click to remove from selection.").withStyle(ChatFormatting.DARK_GRAY))
+                        availability,
+                        Component.translatable("buildtools.menu.material_weight", selectionWeight, percentage).withStyle(ChatFormatting.GRAY),
+                        Component.translatable("buildtools.menu.material_weight_help").withStyle(ChatFormatting.DARK_GRAY),
+                        Component.translatable("buildtools.menu.material_remove_help").withStyle(ChatFormatting.DARK_GRAY),
+                        Component.translatable(selectionIndex == 1 ? "buildtools.menu.material_primary" : "buildtools.menu.material_make_primary").withStyle(selectionIndex == 1 ? ChatFormatting.GREEN : ChatFormatting.DARK_GRAY))
                 : List.of(
-                        Component.literal("Available: " + option.count()).withStyle(ChatFormatting.GRAY),
-                        Component.literal("Click to add to selection.").withStyle(ChatFormatting.DARK_GRAY));
+                        availability,
+                        Component.translatable("buildtools.menu.material_add_help").withStyle(ChatFormatting.DARK_GRAY),
+                        Component.translatable("buildtools.menu.material_make_primary").withStyle(ChatFormatting.DARK_GRAY));
         stack.set(DataComponents.LORE, new ItemLore(lore, lore));
         return stack;
     }

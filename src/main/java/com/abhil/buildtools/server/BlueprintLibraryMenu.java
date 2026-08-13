@@ -41,6 +41,7 @@ public final class BlueprintLibraryMenu extends AbstractContainerMenu {
     private boolean moveUpMode;
     private boolean moveDownMode;
     private boolean categoryAssignMode;
+    private int pendingDeleteIndex = -1;
     private String searchQuery = "";
     private String categoryFilter = "";
     private SortMode sortMode = SortMode.RECENT;
@@ -113,10 +114,15 @@ public final class BlueprintLibraryMenu extends AbstractContainerMenu {
         List<SavedBlueprint> blueprints = owner == null ? List.of() : BuildToolsState.savedBlueprints(owner);
         String activeName = owner == null ? null : BuildToolsState.activeBlueprintName(owner).orElse(null);
         visibleIndices = visibleIndices(blueprints);
+        if (visibleIndices.isEmpty()) {
+            menuItems.setItem(0, named(Items.GRAY_DYE, Component.translatable(searchQuery.isBlank()
+                    ? "buildtools.menu.blueprint_library_empty"
+                    : "buildtools.menu.blueprint_no_results").withStyle(ChatFormatting.GRAY)));
+        }
         for (int i = 0; i < Math.min(BLUEPRINT_SLOTS, visibleIndices.size()); i++) {
             int originalIndex = visibleIndices.get(i);
             SavedBlueprint saved = blueprints.get(originalIndex);
-            ItemStack stack = blueprintItem(saved, originalIndex, saved.name().equals(activeName));
+            ItemStack stack = blueprintItem(saved, originalIndex, saved.name().equals(activeName), originalIndex == pendingDeleteIndex);
             menuItems.setItem(i, stack);
         }
         menuItems.setItem(CREATE_SLOT, utilityItem(Items.LIME_DYE, "buildtools.menu.blueprint_create", "buildtools.menu.blueprint_create.description", false));
@@ -141,7 +147,14 @@ public final class BlueprintLibraryMenu extends AbstractContainerMenu {
             }
             int originalIndex = visibleIndices.get(slotId);
             if (deleteMode) {
+                if (pendingDeleteIndex != originalIndex) {
+                    pendingDeleteIndex = originalIndex;
+                    player.displayClientMessage(Component.translatable("buildtools.message.delete_armed"), true);
+                    return true;
+                }
                 BuildToolsState.deleteSavedBlueprint(player, originalIndex);
+                deleteMode = false;
+                pendingDeleteIndex = -1;
             } else if (renameMode) {
                 BuildToolsState.beginBlueprintRenamePrompt(player, originalIndex);
             } else if (moveUpMode) {
@@ -161,10 +174,12 @@ public final class BlueprintLibraryMenu extends AbstractContainerMenu {
             }
             case SORT_SLOT -> {
                 sortMode = sortMode.next();
+                pendingDeleteIndex = -1;
                 return true;
             }
             case CATEGORY_SLOT -> {
                 cycleCategoryFilter(player);
+                pendingDeleteIndex = -1;
                 return true;
             }
             case RENAME_SLOT -> {
@@ -173,6 +188,7 @@ public final class BlueprintLibraryMenu extends AbstractContainerMenu {
                 moveUpMode = false;
                 moveDownMode = false;
                 categoryAssignMode = false;
+                pendingDeleteIndex = -1;
                 return true;
             }
             case DELETE_SLOT -> {
@@ -181,6 +197,7 @@ public final class BlueprintLibraryMenu extends AbstractContainerMenu {
                 moveUpMode = false;
                 moveDownMode = false;
                 categoryAssignMode = false;
+                pendingDeleteIndex = -1;
                 return true;
             }
             case MOVE_UP_SLOT -> {
@@ -189,6 +206,7 @@ public final class BlueprintLibraryMenu extends AbstractContainerMenu {
                 renameMode = false;
                 moveDownMode = false;
                 categoryAssignMode = false;
+                pendingDeleteIndex = -1;
                 return true;
             }
             case MOVE_DOWN_SLOT -> {
@@ -197,6 +215,7 @@ public final class BlueprintLibraryMenu extends AbstractContainerMenu {
                 renameMode = false;
                 moveUpMode = false;
                 categoryAssignMode = false;
+                pendingDeleteIndex = -1;
                 return true;
             }
             case SET_CATEGORY_SLOT -> {
@@ -205,6 +224,7 @@ public final class BlueprintLibraryMenu extends AbstractContainerMenu {
                 renameMode = false;
                 moveUpMode = false;
                 moveDownMode = false;
+                pendingDeleteIndex = -1;
                 return true;
             }
             case BACK_SLOT -> {
@@ -219,6 +239,7 @@ public final class BlueprintLibraryMenu extends AbstractContainerMenu {
 
     public void setSearchQuery(String query) {
         searchQuery = query == null ? "" : query.strip();
+        pendingDeleteIndex = -1;
         populateMenuItems();
     }
 
@@ -260,18 +281,21 @@ public final class BlueprintLibraryMenu extends AbstractContainerMenu {
         categoryFilter = index < 0 || index + 1 >= options.size() ? "" : options.get(index + 1);
     }
 
-    private static ItemStack blueprintItem(SavedBlueprint saved, int index, boolean selected) {
+    private static ItemStack blueprintItem(SavedBlueprint saved, int index, boolean selected, boolean pendingDelete) {
         ItemStack stack = new ItemStack(selected ? Items.FILLED_MAP : Items.MAP);
-        stack.set(DataComponents.CUSTOM_NAME, Component.literal(saved.name()).withStyle(selected ? ChatFormatting.GOLD : ChatFormatting.AQUA));
+        stack.set(DataComponents.CUSTOM_NAME, Component.literal(saved.name()).withStyle(pendingDelete ? ChatFormatting.RED : selected ? ChatFormatting.GOLD : ChatFormatting.AQUA));
         List<Component> lore = new ArrayList<>();
         lore.add(Component.translatable("buildtools.menu.blueprint_entry.description", index + 1).withStyle(ChatFormatting.GRAY));
-        lore.add(Component.literal("Category: " + saved.category()).withStyle(ChatFormatting.GRAY));
-        lore.add(Component.literal(saved.blueprint().entries().size() + " blocks, " + saved.blueprint().entities().size() + " entities").withStyle(ChatFormatting.DARK_GRAY));
+        lore.add(Component.translatable("buildtools.menu.blueprint_entry.category", saved.category()).withStyle(ChatFormatting.GRAY));
+        lore.add(Component.translatable("buildtools.menu.blueprint_entry.contents", saved.blueprint().entries().size(), saved.blueprint().entities().size()).withStyle(ChatFormatting.DARK_GRAY));
         if (saved.lastUsedTick() > 0) {
-            lore.add(Component.literal("Recently used").withStyle(ChatFormatting.DARK_GRAY));
+            lore.add(Component.translatable("buildtools.menu.blueprint_recently_used").withStyle(ChatFormatting.DARK_GRAY));
+        }
+        if (pendingDelete) {
+            lore.add(Component.translatable("buildtools.menu.delete_confirm").withStyle(ChatFormatting.RED));
         }
         stack.set(DataComponents.LORE, new ItemLore(lore, lore));
-        setSelected(stack, selected);
+        setSelected(stack, selected || pendingDelete);
         return stack;
     }
 

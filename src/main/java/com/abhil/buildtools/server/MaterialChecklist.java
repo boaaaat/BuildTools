@@ -15,7 +15,9 @@ public final class MaterialChecklist {
     }
 
     public static List<BlockState> targetsFor(ServerPlayer player) {
-        ItemStack held = player.getMainHandItem();
+        ItemStack held = ToolProfile.isBuildTool(player.getMainHandItem())
+                ? player.getMainHandItem()
+                : ToolProfile.isBuildTool(player.getOffhandItem()) ? player.getOffhandItem() : ItemStack.EMPTY;
         if (held.is(ModItems.BLUEPRINT_TROWEL.get())) {
             return BuildToolsState.blueprint(player)
                     .map(blueprint -> blueprint.entries().stream().map(Blueprint.Entry::state).toList())

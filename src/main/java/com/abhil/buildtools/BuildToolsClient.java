@@ -11,6 +11,7 @@ import com.abhil.buildtools.client.MaterialSelectionScreen;
 import com.abhil.buildtools.client.HelpScreen;
 import com.abhil.buildtools.client.PaletteLibraryScreen;
 import com.abhil.buildtools.client.PresetLibraryScreen;
+import com.abhil.buildtools.client.StorageManagerScreen;
 import com.abhil.buildtools.network.AdvancedSelectionActionPayload;
 import com.abhil.buildtools.network.OpenToolMenuPayload;
 import com.abhil.buildtools.network.PickMaterialPayload;
@@ -47,6 +48,7 @@ import org.lwjgl.glfw.GLFW;
 @EventBusSubscriber(modid = BuildTools.MOD_ID, value = Dist.CLIENT)
 public final class BuildToolsClient {
     private static boolean advancedSelectionAttackDown;
+    private static boolean shortcutSetupHintShown;
     private static final String KEY_CATEGORY = "key.categories.buildtools";
     private static final KeyMapping OPEN_TOOL_MENU = key("open_tool_menu");
     private static final KeyMapping CYCLE_SHAPE = key("cycle_shape");
@@ -117,6 +119,7 @@ public final class BuildToolsClient {
         event.register(ModMenus.PRESET_LIBRARY_MENU.get(), PresetLibraryScreen::new);
         event.register(ModMenus.PALETTE_LIBRARY_MENU.get(), PaletteLibraryScreen::new);
         event.register(ModMenus.HELP_MENU.get(), HelpScreen::new);
+        event.register(ModMenus.STORAGE_MANAGER_MENU.get(), StorageManagerScreen::new);
     }
 
     @SubscribeEvent
@@ -138,6 +141,12 @@ public final class BuildToolsClient {
         if (minecraft.player == null || minecraft.screen != null) {
             return;
         }
+        if (!shortcutSetupHintShown
+                && hasShortcutBuildTool(minecraft.player.getMainHandItem(), minecraft.player.getOffhandItem())
+                && hasImportantUnboundShortcut()) {
+            shortcutSetupHintShown = true;
+            minecraft.player.displayClientMessage(net.minecraft.network.chat.Component.translatable("buildtools.message.shortcut_setup_hint"), false);
+        }
         handleShortcut(OPEN_TOOL_MENU, "open_menu");
         handleShortcut(OPEN_MATERIAL_SELECTION, "open_materials");
         handleShortcut(CYCLE_SHAPE, "cycle_shape");
@@ -146,7 +155,7 @@ public final class BuildToolsClient {
         handleShortcut(CANCEL_PREVIEW, "cancel_preview");
         handleShortcut(UNDO, "undo");
         handleShortcut(REDO, "redo");
-        if (!isShortcutBuildTool(minecraft.player.getMainHandItem())) {
+        if (!hasShortcutBuildTool(minecraft.player.getMainHandItem(), minecraft.player.getOffhandItem())) {
             return;
         }
         handleRelativeNudge(RELATIVE_NUDGE_LEFT, "LEFT");
@@ -191,34 +200,34 @@ public final class BuildToolsClient {
             return List.of();
         }
         List<String> lines = new ArrayList<>();
-        addHint(lines, "Nudge", RELATIVE_NUDGE_LEFT, RELATIVE_NUDGE_RIGHT, RELATIVE_NUDGE_FORWARD, RELATIVE_NUDGE_BACK);
-        addHint(lines, "Nudge Y", RELATIVE_NUDGE_UP, RELATIVE_NUDGE_DOWN);
+        addHint(lines, "buildtools.shortcut.nudge", RELATIVE_NUDGE_LEFT, RELATIVE_NUDGE_RIGHT, RELATIVE_NUDGE_FORWARD, RELATIVE_NUDGE_BACK);
+        addHint(lines, "buildtools.shortcut.nudge_y", RELATIVE_NUDGE_UP, RELATIVE_NUDGE_DOWN);
         if (isShapeControlTool(stack)) {
-            addHint(lines, "Shape", PREVIOUS_SHAPE, NEXT_SHAPE);
+            addHint(lines, "buildtools.shortcut.shape", PREVIOUS_SHAPE, NEXT_SHAPE);
             if (stack.is(ModItems.BUILDER_BRUSH.get())) {
-                addHint(lines, "Brush Size", ADJUST_OPTION_DOWN, ADJUST_OPTION_UP);
+                addHint(lines, "buildtools.shortcut.brush_size", ADJUST_OPTION_DOWN, ADJUST_OPTION_UP);
             } else {
-                addHint(lines, "Option", ADJUST_OPTION_DOWN, ADJUST_OPTION_UP);
+                addHint(lines, "buildtools.shortcut.option", ADJUST_OPTION_DOWN, ADJUST_OPTION_UP);
             }
-            addHint(lines, "Toggle", TOGGLE_SHAPE_OPTION);
+            addHint(lines, "buildtools.shortcut.toggle", TOGGLE_SHAPE_OPTION);
         }
         if (isModeControlTool(stack)) {
-            addHint(lines, "Mode", PREVIOUS_MODE, NEXT_MODE);
+            addHint(lines, "buildtools.shortcut.mode", PREVIOUS_MODE, NEXT_MODE);
         }
         if (isMaterialSelectionTool(stack)) {
-            addHint(lines, "Materials", OPEN_MATERIAL_SELECTION);
+            addHint(lines, "buildtools.shortcut.materials", OPEN_MATERIAL_SELECTION);
         }
-        addHint(lines, "Confirm", CONFIRM_PREVIEW);
-        addHint(lines, "Cancel", CANCEL_PREVIEW);
-        addHint(lines, "Undo", UNDO);
-        addHint(lines, "Redo", REDO);
+        addHint(lines, "buildtools.shortcut.confirm", CONFIRM_PREVIEW);
+        addHint(lines, "buildtools.shortcut.cancel", CANCEL_PREVIEW);
+        addHint(lines, "buildtools.shortcut.undo", UNDO);
+        addHint(lines, "buildtools.shortcut.redo", REDO);
         return lines;
     }
 
-    private static void addHint(List<String> lines, String label, KeyMapping... keys) {
+    private static void addHint(List<String> lines, String labelKey, KeyMapping... keys) {
         String joined = joinedKeys(keys);
         if (!joined.isBlank()) {
-            lines.add(joined + "  " + label);
+            lines.add(joined + "  " + net.minecraft.network.chat.Component.translatable(labelKey).getString());
         }
     }
 
@@ -229,7 +238,17 @@ public final class BuildToolsClient {
                 names.add(shortKeyName(key.getTranslatedKeyMessage().getString()));
             }
         }
-        return String.join("/", names);
+        return names.isEmpty()
+                ? net.minecraft.network.chat.Component.translatable("buildtools.shortcut.unbound").getString()
+                : String.join("/", names);
+    }
+
+    private static boolean hasImportantUnboundShortcut() {
+        return OPEN_TOOL_MENU.isUnbound()
+                || CONFIRM_PREVIEW.isUnbound()
+                || CANCEL_PREVIEW.isUnbound()
+                || UNDO.isUnbound()
+                || REDO.isUnbound();
     }
 
     private static String shortKeyName(String name) {
@@ -259,7 +278,7 @@ public final class BuildToolsClient {
         if (minecraft.player == null || minecraft.screen != null) {
             return;
         }
-        ItemStack held = minecraft.player.getMainHandItem();
+        ItemStack held = activeScrollableTool(minecraft.player.getMainHandItem(), minecraft.player.getOffhandItem());
         if (!isScrollableBuildTool(held)) {
             return;
         }
@@ -281,7 +300,7 @@ public final class BuildToolsClient {
                 && minecraft.screen == null
                 && minecraft.hitResult != null
                 && minecraft.hitResult.getType() == HitResult.Type.BLOCK
-                && isMaterialSelectionTool(minecraft.player.getMainHandItem())) {
+                && hasMaterialSelectionTool(minecraft.player.getMainHandItem(), minecraft.player.getOffhandItem())) {
             PacketDistributor.sendToServer(new PickMaterialPayload(((net.minecraft.world.phys.BlockHitResult) minecraft.hitResult).getBlockPos()));
             event.setSwingHand(false);
             event.setCanceled(true);
@@ -322,7 +341,26 @@ public final class BuildToolsClient {
                 || stack.is(ModItems.ADVANCED_SELECTION_STAFF.get())
                 || stack.is(ModItems.BUILDER_WAND.get())
                 || stack.is(ModItems.ADVANCED_BUILDER_WAND.get())
+                || stack.is(ModItems.BUILDER_BRUSH.get())
                 || stack.is(ModItems.AREA_BREAKER.get());
+    }
+
+    private static ItemStack activeScrollableTool(ItemStack mainHand, ItemStack offHand) {
+        if (isShortcutBuildTool(mainHand)) {
+            return isScrollableBuildTool(mainHand) ? mainHand : ItemStack.EMPTY;
+        }
+        return isScrollableBuildTool(offHand) ? offHand : ItemStack.EMPTY;
+    }
+
+    private static boolean hasShortcutBuildTool(ItemStack mainHand, ItemStack offHand) {
+        return isShortcutBuildTool(mainHand) || isShortcutBuildTool(offHand);
+    }
+
+    private static boolean hasMaterialSelectionTool(ItemStack mainHand, ItemStack offHand) {
+        if (isShortcutBuildTool(mainHand)) {
+            return isMaterialSelectionTool(mainHand);
+        }
+        return isMaterialSelectionTool(offHand);
     }
 
     private static boolean isShortcutBuildTool(ItemStack stack) {

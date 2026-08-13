@@ -8,19 +8,23 @@ import com.abhil.buildtools.shape.CustomShapeMode;
 import com.abhil.buildtools.shape.Selection;
 import com.abhil.buildtools.shape.SelectionShape;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import net.minecraft.ChatFormatting;
+import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 public final class BuildToolActionbar {
     private static final int UPDATE_INTERVAL_TICKS = 10;
+    private static final int MAX_CACHE_AGE_TICKS = 40;
+    private static final Map<UUID, CachedStatus> STATUS_CACHE = new HashMap<>();
 
     private BuildToolActionbar() {
     }
@@ -35,9 +39,19 @@ public final class BuildToolActionbar {
 
     private static void show(ServerPlayer player) {
         ItemStack held = heldBuildTool(player);
+        CachedStatus cached = STATUS_CACHE.get(player.getUUID());
         if (held.isEmpty()) {
-            PacketDistributor.sendToPlayer(player, ToolStatusPayload.hidden());
-            BuildToolsState.clearMeasurementOverlay(player);
+            if (cached != null) {
+                STATUS_CACHE.remove(player.getUUID());
+                PacketDistributor.sendToPlayer(player, ToolStatusPayload.hidden());
+                BuildToolsState.clearMeasurementOverlay(player);
+            }
+            return;
+        }
+        if (cached != null
+                && cached.item() == held.getItem()
+                && !cached.dirty()
+                && player.tickCount - cached.computedAtTick() < MAX_CACHE_AGE_TICKS) {
             return;
         }
         if (held.is(ModItems.ADVANCED_SELECTION_STAFF.get())) {
@@ -46,22 +60,28 @@ public final class BuildToolActionbar {
             BuildToolsState.clearMeasurementOverlay(player);
         }
 
-        Component message = messageFor(player, held);
-        if (message != null) {
-            sendStatus(player, held, message);
+        ToolStatus status = statusFor(player, held);
+        if (status != null && (cached == null
+                || cached.item() != held.getItem()
+                || !status.equals(cached.status()))) {
+            sendStatus(player, held, status);
+        }
+        STATUS_CACHE.put(player.getUUID(), new CachedStatus(held.getItem(), player.tickCount, false, status));
+    }
+
+    public static void markDirty(ServerPlayer player) {
+        CachedStatus cached = STATUS_CACHE.get(player.getUUID());
+        if (cached != null && !cached.dirty()) {
+            STATUS_CACHE.put(player.getUUID(), new CachedStatus(cached.item(), cached.computedAtTick(), true, cached.status()));
         }
     }
 
-    private static void sendStatus(ServerPlayer player, ItemStack held, Component message) {
-        String[] parts = message.getString().split("\\s*\\|\\s*");
-        String title = parts.length == 0 ? held.getHoverName().getString() : parts[0];
-        List<String> lines = new ArrayList<>();
-        for (int i = 1; i < parts.length; i++) {
-            if (!parts[i].isBlank()) {
-                lines.add(parts[i]);
-            }
-        }
-        PacketDistributor.sendToPlayer(player, new ToolStatusPayload(true, title, lines, accentColor(held)));
+    public static void clear(ServerPlayer player) {
+        STATUS_CACHE.remove(player.getUUID());
+    }
+
+    private static void sendStatus(ServerPlayer player, ItemStack held, ToolStatus status) {
+        PacketDistributor.sendToPlayer(player, new ToolStatusPayload(true, status.title(), status.lines(), accentColor(held)));
     }
 
     private static int accentColor(ItemStack held) {
@@ -104,197 +124,211 @@ public final class BuildToolActionbar {
                 || stack.is(ModItems.REDO_TOKEN.get());
     }
 
-    private static Component messageFor(ServerPlayer player, ItemStack held) {
+    private static ToolStatus statusFor(ServerPlayer player, ItemStack held) {
         if (held.is(ModItems.SELECTION_STAFF.get())) {
-            return selectionMessage(player);
+            return new ToolStatus(held.getHoverName(), selectionLines(player));
         }
         if (held.is(ModItems.ADVANCED_SELECTION_STAFF.get())) {
-            return advancedSelectionMessage(player);
+            return new ToolStatus(held.getHoverName(), advancedSelectionLines(player));
         }
         if (held.is(ModItems.BUILDER_WAND.get())) {
-            return builderMessage(player);
+            return new ToolStatus(held.getHoverName(), builderLines(player));
         }
         if (held.is(ModItems.ADVANCED_BUILDER_WAND.get())) {
-            return advancedBuilderMessage(player);
+            return new ToolStatus(held.getHoverName(), advancedBuilderLines(player));
         }
         if (held.is(ModItems.BUILDER_BRUSH.get())) {
-            return brushMessage(player);
+            return new ToolStatus(held.getHoverName(), brushLines(player));
         }
         if (held.is(ModItems.AREA_BREAKER.get())) {
-            return breakerMessage(player);
+            return new ToolStatus(held.getHoverName(), breakerLines(player));
         }
         if (held.is(ModItems.BLUEPRINT_TROWEL.get())) {
-            return trowelMessage(player);
+            return new ToolStatus(held.getHoverName(), trowelLines(player));
         }
         if (held.is(ModItems.UNDO_TOKEN.get())) {
-            return historyMessage("Undo", BuildToolsState.peekUndo(player).orElse(null), player);
+            return new ToolStatus(held.getHoverName(), historyLines(true, BuildToolsState.peekUndo(player).orElse(null), player));
         }
         if (held.is(ModItems.REDO_TOKEN.get())) {
-            return historyMessage("Redo", BuildToolsState.peekRedo(player).orElse(null), player);
+            return new ToolStatus(held.getHoverName(), historyLines(false, BuildToolsState.peekRedo(player).orElse(null), player));
         }
         return null;
     }
 
-    private static Component advancedSelectionMessage(ServerPlayer player) {
-        String details = "";
+    private static List<Component> advancedSelectionLines(ServerPlayer player) {
+        List<Component> lines = new ArrayList<>();
+        lines.add(Component.translatable("buildtools.status.points", BuildToolsState.advancedPointCount(player)));
         SelectionShape shape = BuildToolsState.selectionShape(player);
         CustomShapeMode smartMode = BuildToolsState.customShapeMode(player);
         if (shape == SelectionShape.CUSTOM_SMART || smartMode != CustomShapeMode.AUTO) {
-            details = " | Smart: " + smartMode.displayName().getString();
+            lines.add(Component.translatable("buildtools.status.smart_mode", smartMode.displayName()));
         }
-        List<String> measurementLines = BuildToolsState.measurementStatusLines(player);
+        List<Component> measurementLines = BuildToolsState.measurementStatusLines(player);
         if (!measurementLines.isEmpty()) {
-            return Component.literal("Advanced Selection Staff | Points: " + BuildToolsState.advancedPointCount(player)
-                    + details
-                    + " | "
-                    + String.join(" | ", measurementLines));
+            lines.addAll(measurementLines);
+            return lines;
         }
-        return Component.literal("Advanced Selection Staff | Points: " + BuildToolsState.advancedPointCount(player) + details + " | " + selectionMessage(player).getString());
+        lines.addAll(selectionLines(player));
+        return lines;
     }
 
-    private static Component selectionMessage(ServerPlayer player) {
+    private static List<Component> selectionLines(ServerPlayer player) {
         SelectionStats stats = selectionStats(player);
         if (!stats.valid()) {
-            return Component.literal("Selection Staff | " + stats.status()).withStyle(ChatFormatting.AQUA);
+            return List.of(stats.status());
         }
         BuildMode mode = BuildToolsState.mode(player);
-        return Component.literal("Selection Staff | " + stats.shapeName()
-                + " | Size: " + stats.dimensions()
-                + " | Area: " + stats.total()
-                + " | Air: " + stats.air()
-                + " | Blocks: " + stats.solid()
-                + " | " + modeName(mode) + ": " + stats.targetsFor(mode)
-                + limitSuffix(stats.targetsFor(mode)));
+        List<Component> lines = new ArrayList<>();
+        lines.add(Component.translatable("buildtools.status.shape", stats.shapeName()));
+        lines.add(Component.translatable("buildtools.status.size_area", stats.dimensions(), stats.total()));
+        lines.add(Component.translatable("buildtools.status.air_blocks", stats.air(), stats.solid()));
+        lines.add(Component.translatable("buildtools.status.mode_targets", mode.displayName(), stats.targetsFor(mode)));
+        addLimitLine(lines, stats.targetsFor(mode));
+        return lines;
     }
 
-    private static Component builderMessage(ServerPlayer player) {
+    private static List<Component> builderLines(ServerPlayer player) {
         SelectionStats stats = selectionStats(player);
         if (!stats.valid()) {
-            return Component.literal("Builder Wand | " + stats.status()).withStyle(ChatFormatting.YELLOW);
+            return List.of(stats.status());
         }
-
+        List<Component> lines = new ArrayList<>();
         BlockState selected = BuildToolsState.primaryMaterial(player);
         if (selected == null) {
-            return Component.literal("Builder Wand | " + stats.shapeName()
-                    + " | Size: " + stats.dimensions()
-                    + " | Area: " + stats.total()
-                    + " | Select material: middle-click block or press M").withStyle(ChatFormatting.YELLOW);
+            lines.add(Component.translatable("buildtools.status.shape", stats.shapeName()));
+            lines.add(Component.translatable("buildtools.status.size_area", stats.dimensions(), stats.total()));
+            lines.add(Component.translatable("buildtools.status.select_material"));
+            return lines;
         }
-
         BuildMode mode = BuildToolsState.mode(player);
         List<BlockState> targetStates = MaterialChecklist.targetsFor(player);
         int targets = targetStates.size();
         BlockCostPlan costPlan = BlockCostPlan.create(player, targetStates);
-        return Component.literal("Builder Wand | " + modeName(mode)
-                + " " + materialName(player)
-                + " | Size: " + stats.dimensions()
-                + " | Will place: " + targets
-                + " | Air: " + stats.air()
-                + " | Blocks: " + stats.solid()
-                + " | Replace target: " + BuildToolsState.replaceTarget(player).getBlock().getName().getString()
-                + costSuffix(player, costPlan)
-                + limitSuffix(targets));
+        lines.add(Component.translatable("buildtools.status.mode_material", mode.displayName(), materialName(player)));
+        lines.add(Component.translatable("buildtools.status.size", stats.dimensions()));
+        lines.add(Component.translatable("buildtools.status.will_place", targets, stats.air(), stats.solid()));
+        lines.add(Component.translatable("buildtools.status.replace_target", BuildToolsState.replaceTarget(player).getBlock().getName()));
+        addCostLines(lines, player, costPlan);
+        addLimitLine(lines, targets);
+        return lines;
     }
 
-    private static Component advancedBuilderMessage(ServerPlayer player) {
-        Component base = builderMessage(player);
+    private static List<Component> advancedBuilderLines(ServerPlayer player) {
+        List<Component> lines = new ArrayList<>(builderLines(player));
+        if (BuildToolsState.primaryMaterial(player) == null) {
+            return lines;
+        }
         int paletteSize = BuildToolsState.materialSelections(player).size();
         PaletteMode paletteMode = BuildToolsState.paletteMode(player);
-        String materialMode = paletteMode.displayName().getString();
-        String gradientDirection = paletteMode == PaletteMode.GRADIENT
-                ? " | Gradient: " + DirectionDisplay.gradientDirection(player, BuildToolsState.gradientDirection(player)).getString()
-                : "";
-        return Component.literal("Advanced " + base.getString()
-                + " | Materials: " + paletteSize
-                + " | Material mode: " + materialMode
-                + gradientDirection
-                + " | Rotation: " + BuildToolsState.blockRotationMode(player).displayName().getString()
-                + " | Ghost/plan ready in menu");
+        lines.add(Component.translatable("buildtools.status.palette", paletteSize, paletteMode.displayName()));
+        if (paletteMode == PaletteMode.GRADIENT) {
+            lines.add(Component.translatable("buildtools.status.gradient", DirectionDisplay.gradientDirection(player, BuildToolsState.gradientDirection(player))));
+        }
+        lines.add(Component.translatable("buildtools.status.rotation", BuildToolsState.blockRotationMode(player).displayName()));
+        lines.add(Component.translatable("buildtools.status.plan_hint"));
+        return lines;
     }
 
-    private static Component brushMessage(ServerPlayer player) {
+    private static List<Component> brushLines(ServerPlayer player) {
         BlockState selected = BuildToolsState.primaryMaterial(player);
-        String material = selected == null ? "None" : selected.getBlock().getName().getString();
-        return Component.literal("Builder Brush | " + BuildToolsState.brushMode(player).displayName().getString()
-                + " | Shape: " + BuildToolsState.selectionShape(player).displayName().getString()
-                + " | Radius: " + BuildToolsState.brushRadius(player)
-                + " | Depth: " + BuildToolsState.brushDepth(player)
-                + " | Density: " + BuildToolsState.brushDensity(player) + "%"
-                + " | Block: " + material
-                + " | Target: " + BuildToolsState.brushReplaceTarget(player).getBlock().getName().getString()
-                + " | Right-click: preview/apply | Sneak right-click: pick target | Middle-click: material | M: materials | Left-click: menu");
+        Component material = selected == null ? Component.translatable("buildtools.option.none") : selected.getBlock().getName();
+        return List.of(
+                Component.translatable("buildtools.status.brush_mode_shape", BuildToolsState.brushMode(player).displayName(), BuildToolsState.selectionShape(player).displayName()),
+                Component.translatable("buildtools.status.brush_size", BuildToolsState.brushRadius(player), BuildToolsState.brushDepth(player), BuildToolsState.brushDensity(player)),
+                Component.translatable("buildtools.status.block_target", material, BuildToolsState.brushReplaceTarget(player).getBlock().getName()),
+                Component.translatable("buildtools.status.brush_controls"));
     }
 
-    private static Component breakerMessage(ServerPlayer player) {
+    private static List<Component> breakerLines(ServerPlayer player) {
         SelectionStats stats = selectionStats(player);
         if (!stats.valid()) {
-            return Component.literal("Area Breaker | " + stats.status()).withStyle(ChatFormatting.RED);
+            return List.of(stats.status());
         }
         AreaBreakerPreset preset = BuildToolsState.areaBreakerPreset(player);
         int willBreak = preset == AreaBreakerPreset.CLEAR_SNOW_CROPS
-                ? (int) BuildToolsState.generatedSelection(player).stream()
+                ? (int) stats.positions().stream()
                         .filter(pos -> BuildOperationEngine.isClearSnowCropsTarget(player.level().getBlockState(pos)))
                         .count()
                 : stats.solid();
-        return Component.literal("Area Breaker | " + stats.shapeName()
-                + " | Preset: " + preset.displayName().getString()
-                + " | Size: " + stats.dimensions()
-                + " | Area: " + stats.total()
-                + " | Air: " + stats.air()
-                + " | Will break: " + willBreak
-                + " | Drops stored if history is active"
-                + limitSuffix(willBreak));
+        List<Component> lines = new ArrayList<>();
+        lines.add(Component.translatable("buildtools.status.shape_preset", stats.shapeName(), preset.displayName()));
+        lines.add(Component.translatable("buildtools.status.size_area", stats.dimensions(), stats.total()));
+        lines.add(Component.translatable("buildtools.status.will_break", willBreak, stats.air()));
+        lines.add(Component.translatable("buildtools.status.breaker_history_hint"));
+        addLimitLine(lines, willBreak);
+        return lines;
     }
 
-    private static Component trowelMessage(ServerPlayer player) {
+    private static List<Component> trowelLines(ServerPlayer player) {
         SelectionStats stats = selectionStats(player);
         Blueprint blueprint = BuildToolsState.blueprint(player).orElse(null);
-        String activeName = BuildToolsState.activeBlueprintName(player).orElse("Clipboard");
-        String saved = blueprint == null ? "No blueprint" : activeName + ": " + blueprint.entries().size();
+        String activeName = BuildToolsState.activeBlueprintName(player).orElse(null);
+        Component saved = blueprint == null
+                ? Component.translatable("buildtools.status.no_blueprint")
+                : Component.translatable("buildtools.status.blueprint_summary",
+                        activeName == null ? Component.translatable("buildtools.status.clipboard") : Component.literal(activeName),
+                        blueprint.entries().size());
 
         if (player.isShiftKeyDown()) {
             if (!stats.valid()) {
-                return Component.literal("Blueprint Trowel | Copy | " + stats.status() + " | " + saved).withStyle(ChatFormatting.YELLOW);
+                return List.of(Component.translatable("buildtools.status.mode.copy"), stats.status(), saved);
             }
-            return Component.literal("Blueprint Trowel | Copy | Area: " + stats.total()
-                    + " | Size: " + stats.dimensions()
-                    + " | Air skipped: " + stats.air()
-                    + " | Copy blocks: " + stats.solid()
-                    + " | " + saved);
+            return List.of(
+                    Component.translatable("buildtools.status.mode.copy"),
+                    Component.translatable("buildtools.status.size_area", stats.dimensions(), stats.total()),
+                    Component.translatable("buildtools.status.copy_counts", stats.solid(), stats.air()),
+                    saved);
         }
 
         if (blueprint == null || blueprint.entries().isEmpty() && blueprint.entities().isEmpty()) {
-            return Component.literal("Blueprint Trowel | Paste: no blueprint copied").withStyle(ChatFormatting.YELLOW);
+            return List.of(Component.translatable("buildtools.status.mode.paste"), Component.translatable("buildtools.status.no_blueprint"));
         }
         BlockCostPlan costPlan = BlockCostPlan.create(player, blueprint.entries().stream().map(Blueprint.Entry::state).toList());
-        String confirm = BuildToolsState.pendingPasteOrigin(player).isPresent() ? " | Click same spot to confirm" : " | Click block face to preview";
-        return Component.literal("Blueprint Trowel | Paste | " + saved + costSuffix(player, costPlan) + confirm + " | Sneak: copy");
+        List<Component> lines = new ArrayList<>();
+        lines.add(Component.translatable("buildtools.status.mode.paste"));
+        lines.add(saved);
+        addCostLines(lines, player, costPlan);
+        lines.add(Component.translatable(BuildToolsState.pendingPasteOrigin(player).isPresent()
+                ? "buildtools.status.confirm_same_spot"
+                : "buildtools.status.preview_block_face"));
+        lines.add(Component.translatable("buildtools.status.sneak_copy"));
+        return lines;
     }
 
-    private static Component historyMessage(String label, UndoSnapshot snapshot, ServerPlayer player) {
+    private static List<Component> historyLines(boolean undo, UndoSnapshot snapshot, ServerPlayer player) {
         if (snapshot == null) {
-            return Component.literal(label + " Token | No operation ready").withStyle(ChatFormatting.GRAY);
+            return List.of(Component.translatable("buildtools.status.history.none"));
         }
-        String modeNote = player.gameMode.isCreative() ? " | Creative: no token cost or block refund" : "";
-        int count = label.equals("Undo") ? BuildToolsState.undoCount(player) : BuildToolsState.redoCount(player);
-        return Component.literal(label + " Token | Ready: " + snapshot.entries().size() + " changes | History: " + count + modeNote);
+        int count = undo ? BuildToolsState.undoCount(player) : BuildToolsState.redoCount(player);
+        List<Component> lines = new ArrayList<>();
+        lines.add(Component.translatable("buildtools.status.history.ready", snapshot.entries().size()));
+        lines.add(Component.translatable("buildtools.status.history.count", count));
+        if (player.gameMode.isCreative()) {
+            lines.add(Component.translatable("buildtools.status.history.creative"));
+        }
+        return lines;
     }
 
     private static SelectionStats selectionStats(ServerPlayer player) {
         Selection selection = BuildToolsState.selection(player);
         if (selection.dimension() == null) {
-            String first = selection.firstOptional().isPresent() ? "Pos 1 set" : "Pos 1 missing";
-            String second = selection.shape() == SelectionShape.CUSTOM_SMART ? "Custom points: " + BuildToolsState.advancedPointCount(player)
-                    : selection.secondOptional().isPresent() ? "Pos 2 set" : "Pos 2 missing";
-            return SelectionStats.invalid(first + ", " + second);
+            Component first = Component.translatable(selection.firstOptional().isPresent()
+                    ? "buildtools.status.position_one_set"
+                    : "buildtools.status.position_one_missing");
+            Component second = selection.shape() == SelectionShape.CUSTOM_SMART
+                    ? Component.translatable("buildtools.status.custom_points", BuildToolsState.advancedPointCount(player))
+                    : Component.translatable(selection.secondOptional().isPresent()
+                            ? "buildtools.status.position_two_set"
+                            : "buildtools.status.position_two_missing");
+            return SelectionStats.invalid(Component.translatable("buildtools.status.selection_incomplete", first, second));
         }
         if (!selection.dimension().equals(player.level().dimension())) {
-            return SelectionStats.invalid("Selection is in another dimension");
+            return SelectionStats.invalid(Component.translatable("buildtools.status.selection_other_dimension"));
         }
 
         List<BlockPos> positions = BuildToolsState.generatedSelection(player);
         if (positions.isEmpty()) {
-            return SelectionStats.invalid("Selected shape is empty");
+            return SelectionStats.invalid(Component.translatable("buildtools.status.selection_empty"));
         }
 
         int air = 0;
@@ -318,7 +352,7 @@ public final class BuildToolActionbar {
 
         return new SelectionStats(
                 true,
-                "",
+                Component.empty(),
                 shapeName(player, selection.shape()),
                 dimensions(positions),
                 positions.size(),
@@ -326,7 +360,8 @@ public final class BuildToolActionbar {
                 positions.size() - air,
                 fillTargets,
                 replaceTargets,
-                surfaceTargets);
+                surfaceTargets,
+                positions);
     }
 
     private static boolean touchesMatchingBlock(ServerPlayer player, BlockPos pos, BlockState match) {
@@ -354,67 +389,69 @@ public final class BuildToolActionbar {
         return width + "x" + height + "x" + depth;
     }
 
-    private static String modeName(BuildMode mode) {
-        return mode.displayName().getString();
-    }
-
-    private static String shapeName(ServerPlayer player, SelectionShape shape) {
+    private static Component shapeName(ServerPlayer player, SelectionShape shape) {
         if (shape == SelectionShape.STAIRS) {
-            return shape.displayName().getString() + ": "
-                    + DirectionDisplay.stairDirection(player, BuildToolsState.stairDirectionOverride(player)).getString();
+            return Component.translatable("buildtools.status.stairs_shape", shape.displayName(),
+                    DirectionDisplay.stairDirection(player, BuildToolsState.stairDirectionOverride(player)));
         }
-        return shape.displayName().getString();
+        return shape.displayName();
     }
 
-    private static String costSuffix(ServerPlayer player, BlockCostPlan costPlan) {
+    private static void addCostLines(List<Component> lines, ServerPlayer player, BlockCostPlan costPlan) {
         int required = costPlan.required().values().stream().mapToInt(Integer::intValue).sum();
         if (player.gameMode.isCreative()) {
-            return " | Need: " + required + " (creative)";
+            lines.add(Component.translatable("buildtools.status.materials_creative", required));
+            return;
         }
         int missing = costPlan.missing().values().stream().mapToInt(Integer::intValue).sum();
         if (missing > 0) {
-            return " | Need: " + required + " | Missing: " + missing + " " + compactMissing(costPlan.missing());
+            lines.add(Component.translatable("buildtools.status.materials_missing", required, missing, compactMissing(costPlan.missing())));
+            return;
         }
-        return " | Need: " + required + " | Materials ready";
+        lines.add(Component.translatable("buildtools.status.materials_ready", required));
     }
 
-    private static String materialName(ServerPlayer player) {
+    private static Component materialName(ServerPlayer player) {
         List<PaletteEntry> materials = BuildToolsState.materialSelections(player);
         if (materials.isEmpty()) {
-            return "None";
+            return Component.translatable("buildtools.option.none");
         }
-        String name = materials.getFirst().state().getBlock().getName().getString();
+        Component name = materials.getFirst().state().getBlock().getName();
         int extra = materials.size() - 1;
-        return extra <= 0 ? name : name + " +" + extra;
+        return extra <= 0 ? name : Component.translatable("buildtools.status.material_plus", name, extra);
     }
 
-    private static String limitSuffix(int changes) {
-        return changes > BuildToolsConfig.MAX_OPERATION_VOLUME.get() ? " | Over limit: " + BuildToolsConfig.MAX_OPERATION_VOLUME.get() : "";
+    private static void addLimitLine(List<Component> lines, int changes) {
+        if (changes > BuildToolsConfig.MAX_OPERATION_VOLUME.get()) {
+            lines.add(Component.translatable("buildtools.status.over_limit", changes, BuildToolsConfig.MAX_OPERATION_VOLUME.get()));
+        }
     }
 
-    private static String compactMissing(Map<ItemStackKey, Integer> missing) {
+    private static Component compactMissing(Map<ItemStackKey, Integer> missing) {
         if (missing.isEmpty()) {
-            return "";
+            return Component.empty();
         }
         Map.Entry<ItemStackKey, Integer> first = missing.entrySet().iterator().next();
         int extraTypes = missing.size() - 1;
-        return "(" + first.getValue() + "x " + first.getKey().stack(1).getHoverName().getString()
-                + (extraTypes > 0 ? " +" + extraTypes + " more" : "") + ")";
+        return extraTypes > 0
+                ? Component.translatable("buildtools.status.missing_summary_more", first.getValue(), first.getKey().stack(1).getHoverName(), extraTypes)
+                : Component.translatable("buildtools.status.missing_summary", first.getValue(), first.getKey().stack(1).getHoverName());
     }
 
     private record SelectionStats(
             boolean valid,
-            String status,
-            String shapeName,
+            Component status,
+            Component shapeName,
             String dimensions,
             int total,
             int air,
             int solid,
             int fillTargets,
             int replaceTargets,
-            int surfaceTargets) {
-        private static SelectionStats invalid(String status) {
-            return new SelectionStats(false, status, "", "", 0, 0, 0, 0, 0, 0);
+            int surfaceTargets,
+            List<BlockPos> positions) {
+        private static SelectionStats invalid(Component status) {
+            return new SelectionStats(false, status, Component.empty(), "", 0, 0, 0, 0, 0, 0, List.of());
         }
 
         private int targetsFor(BuildMode mode) {
@@ -424,5 +461,11 @@ public final class BuildToolActionbar {
                 case SURFACE -> surfaceTargets;
             };
         }
+    }
+
+    private record ToolStatus(Component title, List<Component> lines) {
+    }
+
+    private record CachedStatus(Item item, int computedAtTick, boolean dirty, ToolStatus status) {
     }
 }
