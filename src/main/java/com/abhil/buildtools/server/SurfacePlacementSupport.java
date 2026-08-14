@@ -23,6 +23,9 @@ final class SurfacePlacementSupport {
 
         LinkedHashSet<BlockPos> candidates = new LinkedHashSet<>();
         for (BlockPos pos : generated) {
+            if (!level.hasChunkAt(pos)) {
+                continue;
+            }
             BlockState state = level.getBlockState(pos);
             if (state.canBeReplaced() && touchesSolidBlock(level, pos)) {
                 candidates.add(pos.immutable());
@@ -36,6 +39,9 @@ final class SurfacePlacementSupport {
             int maxScanY = Mth.clamp(bounds.maxY(), level.getMinBuildHeight(), level.getMaxBuildHeight() - 1);
             for (int y = maxScanY; y >= minScanY; y--) {
                 BlockPos surface = new BlockPos(column.x(), y, column.z());
+                if (!level.hasChunkAt(surface)) {
+                    break;
+                }
                 if (!isSolidSurface(level.getBlockState(surface))) {
                     continue;
                 }
@@ -51,7 +57,8 @@ final class SurfacePlacementSupport {
 
     static boolean touchesSolidBlock(Level level, BlockPos pos) {
         for (Direction direction : Direction.values()) {
-            if (isSolidSurface(level.getBlockState(pos.relative(direction)))) {
+            BlockPos adjacent = pos.relative(direction);
+            if (level.hasChunkAt(adjacent) && isSolidSurface(level.getBlockState(adjacent))) {
                 return true;
             }
         }

@@ -34,6 +34,11 @@ public final class MaterialChecklist {
             return List.of();
         }
         List<net.minecraft.core.BlockPos> generated = BuildToolsState.generatedSelection(player);
+        for (net.minecraft.core.BlockPos pos : generated) {
+            if (!player.level().hasChunkAt(pos)) {
+                return List.of();
+            }
+        }
         List<PaletteEntry> materials = BuildToolsState.materialSelections(player);
         if (materials.isEmpty()) {
             return List.of();
@@ -72,7 +77,9 @@ public final class MaterialChecklist {
             return false;
         }
         for (Direction direction : Direction.values()) {
-            if (player.level().getBlockState(pos.relative(direction)).is(match.getBlock())) {
+            net.minecraft.core.BlockPos adjacent = pos.relative(direction);
+            if (player.level().hasChunkAt(adjacent)
+                    && player.level().getBlockState(adjacent).is(match.getBlock())) {
                 return true;
             }
         }

@@ -24,6 +24,8 @@ import net.neoforged.neoforge.network.PacketDistributor;
 public final class BuildToolActionbar {
     private static final int UPDATE_INTERVAL_TICKS = 10;
     private static final int MAX_CACHE_AGE_TICKS = 40;
+    /** Status text is informational and must never monopolize a server tick. */
+    private static final int MAX_STATUS_SCAN_POSITIONS = 8192;
     private static final Map<UUID, CachedStatus> STATUS_CACHE = new HashMap<>();
 
     private BuildToolActionbar() {
@@ -330,6 +332,20 @@ public final class BuildToolActionbar {
         if (positions.isEmpty()) {
             return SelectionStats.invalid(Component.translatable("buildtools.status.selection_empty"));
         }
+        if (positions.size() > MAX_STATUS_SCAN_POSITIONS) {
+            return SelectionStats.invalid(Component.translatable(
+                    "buildtools.status.selection_scan_limited", positions.size(), MAX_STATUS_SCAN_POSITIONS));
+        }
+
+        // getBlockState synchronously requests a chunk when it is not loaded. This method runs
+        // from the server tick, so doing that for status text can deadlock the tick until the
+        // watchdog terminates the server. Operations perform their own loaded-chunk validation;
+        // the action bar should simply defer its live counts until every selected chunk is loaded.
+        for (BlockPos pos : positions) {
+            if (!player.level().hasChunkAt(pos)) {
+                return SelectionStats.invalid(Component.translatable("buildtools.error.unloaded"));
+            }
+        }
 
         int air = 0;
         int fillTargets = 0;
@@ -369,7 +385,9 @@ public final class BuildToolActionbar {
             return false;
         }
         for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.values()) {
-            if (player.level().getBlockState(pos.relative(direction)).is(match.getBlock())) {
+            BlockPos adjacent = pos.relative(direction);
+            if (player.level().hasChunkAt(adjacent)
+                    && player.level().getBlockState(adjacent).is(match.getBlock())) {
                 return true;
             }
         }

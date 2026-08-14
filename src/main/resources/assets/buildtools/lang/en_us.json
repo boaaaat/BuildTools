@@ -660,6 +660,7 @@
   "buildtools.status.selection_incomplete": "%s, %s",
   "buildtools.status.selection_other_dimension": "Selection is in another dimension",
   "buildtools.status.selection_empty": "Selected shape is empty",
+  "buildtools.status.selection_scan_limited": "Selection has %s blocks; live status is limited to %s",
   "buildtools.status.stairs_shape": "%s: %s",
   "buildtools.status.materials_creative": "Need: %s (creative)",
   "buildtools.status.materials_missing": "Need: %s | Missing: %s %s",

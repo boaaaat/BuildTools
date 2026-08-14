@@ -2122,7 +2122,8 @@ public final class BuildToolsState {
         if (profile == ToolProfile.BREAKER && areaBreakerPreset(player) == AreaBreakerPreset.CLEAR_SNOW_CROPS) {
             List<BlockPos> filtered = new ArrayList<>();
             for (BlockPos pos : generated) {
-                if (BuildOperationEngine.isClearSnowCropsTarget(player.level().getBlockState(pos))) {
+                if (player.level().hasChunkAt(pos)
+                        && BuildOperationEngine.isClearSnowCropsTarget(player.level().getBlockState(pos))) {
                     filtered.add(pos);
                 }
             }
@@ -2142,6 +2143,9 @@ public final class BuildToolsState {
         List<BlockPos> filtered = new ArrayList<>();
         BlockState replaceMatch = replaceTarget(player);
         for (BlockPos pos : previewCandidates) {
+            if (!player.level().hasChunkAt(pos)) {
+                continue;
+            }
             BlockState state = player.level().getBlockState(pos);
             if (canPreviewPlace(player, pos, state, mode, replaceMatch)) {
                 filtered.add(pos);
@@ -2290,7 +2294,9 @@ public final class BuildToolsState {
             return false;
         }
         for (Direction direction : Direction.values()) {
-            if (player.level().getBlockState(pos.relative(direction)).is(match.getBlock())) {
+            BlockPos adjacent = pos.relative(direction);
+            if (player.level().hasChunkAt(adjacent)
+                    && player.level().getBlockState(adjacent).is(match.getBlock())) {
                 return true;
             }
         }
